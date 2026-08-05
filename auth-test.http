@@ -1,0 +1,18 @@
+### 1. Registrar un nuevo usuario (HOGAR / RECOLECTOR / CENTRO_ACOPIO / EMPRESA_B2B / ALMACEN / ADMIN)
+POST http://localhost:3000/auth/register
+Content-Type: application/json
+
+{
+  "email": "usuario.test@arbitrust.com",
+  "password": "Password123!",
+  "role": "RECOLECTOR"
+}
+
+### 2. Iniciar sesión y obtener JWT Token de Supabase
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "email": "usuario.test@arbitrust.com",
+  "password": "Password123!"
+}

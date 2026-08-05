@@ -1,0 +1,66 @@
+### ==============================================================================
+### ArbiTrust Backend - BatchesModule HTTP Test Suite & Verification Scenarios
+### ==============================================================================
+
+@baseUrl = http://localhost:3000
+@collectorToken = YOUR_RECOLECTOR_SUPABASE_TOKEN
+@centerToken = YOUR_CENTRO_ACOPIO_SUPABASE_TOKEN
+
+### ------------------------------------------------------------------------------
+### Escenario 1: Obtener o crear lote abierto (Rol: RECOLECTOR)
+### ------------------------------------------------------------------------------
+# Busca o crea un lote en estado OPEN para el recolector autenticado y enlaza
+# automáticamente las solicitudes de recolección en estado ACCEPTED que no tengan lote.
+GET {{baseUrl}}/batches/open
+Authorization: Bearer {{collectorToken}}
+Content-Type: application/json
+
+### ------------------------------------------------------------------------------
+### Escenario 2: Asignar centro de acopio destino y cambiar estado a IN_TRANSIT (Rol: RECOLECTOR)
+### ------------------------------------------------------------------------------
+# Reemplazar {{batchId}} con el ID obtenido en el Escenario 1
+# Reemplazar {{destinationCenterId}} con el UUID del Centro de Acopio destino
+PATCH {{baseUrl}}/batches/{{batchId}}
+Authorization: Bearer {{collectorToken}}
+Content-Type: application/json
+
+{
+  "destinationCenterId": "{{destinationCenterId}}"
+}
+
+### ------------------------------------------------------------------------------
+### Escenario 3: Pesaje Industrial y Recepción Asíncrona (Rol: CENTRO_ACOPIO) -> HTTP 202 Accepted
+### ------------------------------------------------------------------------------
+# Endpoint crítico de pesaje industrial. Cambia estado a PROCESSING, encola el job en
+# BullMQ 'blockchain-queue' (Opción 3A) y responde de inmediato con HTTP 202 Accepted.
+POST {{baseUrl}}/batches/{{batchId}}/receive
+Authorization: Bearer {{centerToken}}
+Content-Type: application/json
+
+{
+  "materialsActual": {
+    "PET": 15.5,
+    "HDPE": 8.2,
+    "Carton": 12.0,
+    "Vidrio": 5.0
+  }
+}
+
+### ------------------------------------------------------------------------------
+### Escenario 4: Prueba de Idempotencia - Reintento de Recepción -> HTTP 409 Conflict
+### ------------------------------------------------------------------------------
+# Al reintentar enviar la recepción para un lote que ya está en estado PROCESSING, RECEIVED
+# o CONSOLIDATED, la API debe rechazar la solicitud inmediatamente con HTTP 409 Conflict
+# para evitar pagos o transacciones duplicadas en la blockchain.
+POST {{baseUrl}}/batches/{{batchId}}/receive
+Authorization: Bearer {{centerToken}}
+Content-Type: application/json
+
+{
+  "materialsActual": {
+    "PET": 15.5,
+    "HDPE": 8.2,
+    "Carton": 12.0,
+    "Vidrio": 5.0
+  }
+}

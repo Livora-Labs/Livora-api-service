@@ -1,0 +1,1 @@
+C:\Users\Acer\Desktop\Estudio\Proyectos\ArbiTrust\contracts\ecotoken_registry\target\x86_64-pc-windows-msvc\debug\libecotoken_registry.rlib: C:\Users\Acer\Desktop\Estudio\Proyectos\ArbiTrust\contracts\ecotoken_registry\src\lib.rs

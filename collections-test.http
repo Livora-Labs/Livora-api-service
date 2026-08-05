@@ -1,0 +1,56 @@
+### Variables de prueba
+@baseUrl = http://localhost:3000
+@hogarToken = TU_JWT_TOKEN_HOGAR
+@recolectorToken = TU_JWT_TOKEN_RECOLECTOR
+@requestId = ID_DE_SOLICITUD_GENERADO
+
+### 1. Registrar / Iniciar Sesión como HOGAR (Para obtener JWT)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "hogar@test.com",
+  "password": "Password123!"
+}
+
+### 2. Crear una Solicitud de Recolección (Rol HOGAR)
+POST {{baseUrl}}/collection-requests
+Authorization: Bearer {{hogarToken}}
+Content-Type: application/json
+
+{
+  "itemsEstimated": {
+    "PET": 2.5,
+    "Carton": 4.0,
+    "Vidrio": 1.2
+  },
+  "description": "Bolsa blanca con botellas PET y cartón comprimido cerca a la puerta principal.",
+  "latitude": 4.60971,
+  "longitude": -74.08175
+}
+
+### 3. Listar solicitudes del usuario autenticado (Rol HOGAR -> Historial propio)
+GET {{baseUrl}}/collection-requests
+Authorization: Bearer {{hogarToken}}
+
+### 4. Listar solicitudes pendientes cercanas mediante PostGIS (Rol RECOLECTOR)
+GET {{baseUrl}}/collection-requests?lat=4.60970&lng=-74.08170&radius=5
+Authorization: Bearer {{recolectorToken}}
+
+### 5. Aceptar una solicitud de recolección (Rol RECOLECTOR -> Estado ACCEPTED)
+PATCH {{baseUrl}}/collection-requests/{{requestId}}
+Authorization: Bearer {{recolectorToken}}
+Content-Type: application/json
+
+{
+  "status": "ACCEPTED"
+}
+
+### 6. Cancelar una solicitud de recolección (Rol HOGAR -> Estado CANCELLED)
+PATCH {{baseUrl}}/collection-requests/{{requestId}}
+Authorization: Bearer {{hogarToken}}
+Content-Type: application/json
+
+{
+  "status": "CANCELLED"
+}

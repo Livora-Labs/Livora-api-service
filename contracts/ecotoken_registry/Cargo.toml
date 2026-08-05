@@ -1,0 +1,36 @@
+[package]
+name = "ecotoken_registry"
+version = "0.1.0"
+edition = "2021"
+authors = ["ArbiTrust Team"]
+description = "Arbitrum Stylus Smart Contract for EcoToken (ERC-20) and BatchRegistry traceability"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+stylus-sdk = "0.7.0"
+alloy-primitives = { version = "=0.8.14", features = ["tiny-keccak", "std"] }
+alloy-sol-types = "=0.8.14"
+mini-alloc = "0.4.2"
+ruint = "=1.12.3"
+
+[build-dependencies]
+alloy-primitives = { version = "=0.8.14", features = ["tiny-keccak", "std"] }
+
+[features]
+default = []
+export-abi = ["stylus-sdk/export-abi"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "ecotoken_registry_abi"
+path = "src/main.rs"
+
+[profile.release]
+codegen-units = 1
+strip = true
+lto = true
+opt-level = "z"
+panic = "abort"
+overflow-checks = false

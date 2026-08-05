@@ -1,0 +1,1 @@
+C:\Users\Acer\Desktop\Estudio\Proyectos\ArbiTrust\contracts\ecotoken_registry\target\wasm32-unknown-unknown\release\ecotoken_registry.wasm: C:\Users\Acer\Desktop\Estudio\Proyectos\ArbiTrust\contracts\ecotoken_registry\src\lib.rs
