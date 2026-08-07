@@ -29,9 +29,9 @@ async function bootstrap() {
 
   // --- Configuración de Swagger ---
   const config = new DocumentBuilder()
-    .setTitle('ArbiTrust API')
+    .setTitle('Livora API')
     .setDescription(
-      'API Gateway y Backend de la plataforma de reciclaje trazable ArbiTrust en Arbitrum Sepolia',
+      'API Gateway y Backend de la plataforma de reciclaje trazable Livora en Arbitrum Sepolia',
     )
     .setVersion('1.0')
     .addBearerAuth()
@@ -43,7 +43,7 @@ async function bootstrap() {
   const port = configService.get<number>('PORT') || 3000;
 
   await app.listen(port);
-  console.log(`🚀 ArbiTrust API Gateway corriendo en el puerto: ${port}`);
+  console.log(`🚀 Livora API Gateway corriendo en el puerto: ${port}`);
   console.log(`📚 Swagger UI disponible en: http://localhost:${port}/api/docs`);
 }
 bootstrap();

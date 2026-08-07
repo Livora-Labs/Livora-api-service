@@ -2,7 +2,7 @@
 name = "ecotoken_registry"
 version = "0.1.0"
 edition = "2021"
-authors = ["ArbiTrust Team"]
+authors = ["Livora Team"]
 description = "Arbitrum Stylus Smart Contract for EcoToken (ERC-20) and BatchRegistry traceability"
 license = "MIT OR Apache-2.0"
 

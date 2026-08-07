@@ -1,6 +1,6 @@
 # Especificación Técnica y Arquitectura: Módulo de WebSockets (`WebsocketsModule`)
 
-**Proyecto:** ArbiTrust Backend (NestJS Monorepo)  
+**Proyecto:** Livora Backend (NestJS Monorepo)  
 **Versión:** 1.0.0  
 **Ubicación del Documento:** `docs/specs/04-websockets-module.md`  
 **Estado:** Aprobado & En Producción  
@@ -9,7 +9,7 @@
 
 ## 1. Resumen y Propósito del Módulo
 
-El **Módulo de WebSockets (`WebsocketsModule`)** es el componente de comunicación bidireccional en tiempo real de ArbiTrust. Este módulo habilita capacidades interactivas distribuidas para la plataforma, respondiendo a dos necesidades operativas clave:
+El **Módulo de WebSockets (`WebsocketsModule`)** es el componente de comunicación bidireccional en tiempo real de Livora. Este módulo habilita capacidades interactivas distribuidas para la plataforma, respondiendo a dos necesidades operativas clave:
 
 1. **Mapa Dinámico y Difusión para Recolectores (`collectors:active`)**: Notifica instantáneamente a los recolectores activos en campo cuando un hogar crea una nueva solicitud de recolección (`collection:created`), alimentando el mapa en tiempo real y la asignación de rutas.
 2. **Notificaciones Asíncronas para Centros de Acopio (`center:${userId}`)**: Envía alertas privadas en tiempo real a la interfaz del centro de acopio cuando un lote de residuos ha sido procesado o completado por el worker de blockchain (`batch:completed`), eliminando la necesidad de sondeo (polling) HTTP.

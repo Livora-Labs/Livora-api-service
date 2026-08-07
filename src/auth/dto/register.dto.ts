@@ -3,7 +3,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 
 export class RegisterDto {
-  @ApiProperty({ example: 'hogar1@arbitrust.com', description: 'Correo electrónico del usuario' })
+  @ApiProperty({ example: 'hogar1@livora.com', description: 'Correo electrónico del usuario' })
   @IsEmail({}, { message: 'El correo electrónico no es válido' })
   email: string;
 

@@ -1,6 +1,6 @@
 # Especificación Técnica y Arquitectura: Módulo de Smart Contracts y Stylus (`EcoBatchRegistry`)
 
-**Proyecto:** ArbiTrust Web3 Core (Arbitrum Stylus / Rust)  
+**Proyecto:** Livora Web3 Core (Arbitrum Stylus / Rust)  
 **Versión:** 1.0.0  
 **Ubicación del Documento:** `docs/specs/05-smart-contract-module.md`  
 **Estado:** Aprobado & En Producción  
@@ -9,7 +9,7 @@
 
 ## 1. Resumen y Propósito del Módulo
 
-El módulo de Smart Contracts de **ArbiTrust** constituye el núcleo de confianza descentralizado y liquidación de incentivos de la plataforma. Implementado en la tecnología de última generación **Arbitrum Stylus** utilizando **Rust**, el contrato inteligente `EcoBatchRegistry` fusiona dos responsabilidades esenciales dentro de una misma arquitectura de alto rendimiento:
+El módulo de Smart Contracts de **Livora** constituye el núcleo de confianza descentralizado y liquidación de incentivos de la plataforma. Implementado en la tecnología de última generación **Arbitrum Stylus** utilizando **Rust**, el contrato inteligente `EcoBatchRegistry` fusiona dos responsabilidades esenciales dentro de una misma arquitectura de alto rendimiento:
 
 1. **EcoToken (ERC-20 Fungible Token)**: Representa el token de recompensa `ECO` acuñado on-chain bajo demandad para incentivar a los hogares clasificadores y a los recolectores por su aporte ecológico.
 2. **BatchRegistry (Trazabilidad Inmutable de Lotes)**: Registra de forma definitiva e inalterable cada lote consolidado y pesado en los centros de acopio, enlazando la transacción on-chain con el detalle granular off-chain hospedado en la red IPFS (Pinata).
@@ -43,7 +43,7 @@ El módulo de Smart Contracts de **ArbiTrust** constituye el núcleo de confianz
 
 ## 2. Arquitectura de Costos y Off-Chain (IPFS / Pinata)
 
-Para prevenir el problema de **State Bloat** (encarecimiento del almacenamiento en la cadena de bloques por guardar estructuras pesadas), ArbiTrust implementa una arquitectura híbrida **On-Chain / Off-Chain**.
+Para prevenir el problema de **State Bloat** (encarecimiento del almacenamiento en la cadena de bloques por guardar estructuras pesadas), Livora implementa una arquitectura híbrida **On-Chain / Off-Chain**.
 
 ```
   ┌─────────────────────────────────────────┐

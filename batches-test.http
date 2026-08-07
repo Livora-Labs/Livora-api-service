@@ -1,5 +1,5 @@
 ### ==============================================================================
-### ArbiTrust Backend - BatchesModule HTTP Test Suite & Verification Scenarios
+### Livora Backend - BatchesModule HTTP Test Suite & Verification Scenarios
 ### ==============================================================================
 
 @baseUrl = http://localhost:3000

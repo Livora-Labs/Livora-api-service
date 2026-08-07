@@ -1,6 +1,6 @@
 # Especificación Técnica y Arquitectura: Módulo de Lotes y Redis (`BatchesModule`)
 
-**Proyecto:** ArbiTrust Backend (NestJS Monorepo)  
+**Proyecto:** Livora Backend (NestJS Monorepo)  
 **Versión:** 1.0.0  
 **Ubicación del Documento:** `docs/specs/03-batches-redis-module.md`  
 **Estado:** Aprobado & En Producción  
@@ -9,7 +9,7 @@
 
 ## 1. Resumen Arquitectónico
 
-El **Módulo de Lotes (`BatchesModule`)** es el componente central en la arquitectura de ArbiTrust encargado de supervisar la consolidación, transporte, pesaje industrial y despacho asíncrono de los materiales reciclables. Este módulo gestiona el flujo del material desde el momento en que un recolector finaliza la recolección en los hogares hasta su entrega formal en la planta de un centro de acopio.
+El **Módulo de Lotes (`BatchesModule`)** es el componente central en la arquitectura de Livora encargado de supervisar la consolidación, transporte, pesaje industrial y despacho asíncrono de los materiales reciclables. Este módulo gestiona el flujo del material desde el momento en que un recolector finaliza la recolección en los hogares hasta su entrega formal en la planta de un centro de acopio.
 
 ```
        [ HOGARES ] 
@@ -96,7 +96,7 @@ La arquitectura asíncrona utiliza **Redis 7** y **BullMQ** configurados globalm
 services:
   redis:
     image: redis:7-alpine
-    container_name: arbitrust_redis
+    container_name: livora_redis
     restart: always
     ports:
       - "${REDIS_PORT:-6379}:6379"

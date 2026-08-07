@@ -1,6 +1,6 @@
 # Especificación Técnica Oficial: Módulos Transversales Finales (`WalletsModule`, `NotificationsModule`, `Consolidations`)
 
-- **Proyecto:** ArbiTrust Backend (NestJS API Gateway & Microservicios)
+- **Proyecto:** Livora Backend (NestJS API Gateway & Microservicios)
 - **Módulos:** `WalletsModule`, `NotificationsModule`, `ConsolidatedBatchesController`
 - **Versión:** 1.0.0
 - **Estado:** Implementado, Auditado y Verificado
@@ -10,7 +10,7 @@
 
 ## 1. Resumen y Propósito
 
-Esta especificación documenta los tres módulos transversales finales que cierran el flujo funcional y financiero de la plataforma de reciclaje trazable ArbiTrust:
+Esta especificación documenta los tres módulos transversales finales que cierran el flujo funcional y financiero de la plataforma de reciclaje trazable Livora:
 
 1. **Módulo de Billeteras y Saldos (`WalletsModule`):** 
    - Proporciona a los usuarios autenticados la lectura en tiempo real de sus saldos de EcoTokens (ERC-20) alojados en la red Arbitrum Sepolia.
@@ -124,7 +124,7 @@ model Batch {
 En una arquitectura descentralizada tradicional, si un usuario (Hogar o Recolector) desea transferir sus EcoTokens (ERC-20), necesitaría poseer Ether (`ETH`) en la red Arbitrum Sepolia para pagar la comisión de red (Gas Fee). Esto genera una barrera de entrada inaceptable para usuarios no técnicos.
 
 ### 3.2 Solución: Patrón Relayer
-El backend de ArbiTrust actúa como un **Relayer Paga-Gas (Subsidized Transaction Relayer)**:
+El backend de Livora actúa como un **Relayer Paga-Gas (Subsidized Transaction Relayer)**:
 
 ```mermaid
 sequenceDiagram
@@ -184,7 +184,7 @@ sequenceDiagram
     "status": "PROCESSING",
     "transactionId": "0xrelayer8a4f91b...",
     "message": "Transacción subsidiada por el Relayer y enviada a la red Arbitrum Sepolia",
-    "fromUser": "ciudadano@arbitrust.io",
+    "fromUser": "ciudadano@livora.io",
     "toAddress": "0x1234567890abcdef1234567890abcdef12345678",
     "amount": 50
   }
@@ -274,7 +274,7 @@ sequenceDiagram
     ],
     "center": {
       "id": "c0a80101-0000-0000-0000-000000000001",
-      "email": "centro.acopio@arbitrust.io"
+      "email": "centro.acopio@livora.io"
     }
   }
   ```
@@ -283,7 +283,7 @@ sequenceDiagram
 
 ## 5. Matriz de Errores y Códigos de Respuesta
 
-Todas las excepciones emitidas por estos controladores son capturadas y estandarizadas por el `GlobalExceptionFilter` de ArbiTrust:
+Todas las excepciones emitidas por estos controladores son capturadas y estandarizadas por el `GlobalExceptionFilter` de Livora:
 
 | Código HTTP | Error Code | Causa Frecuente |
 | :--- | :--- | :--- |

@@ -1,6 +1,6 @@
 # Especificación Técnica y Arquitectura: Módulo Worker de Blockchain (`BlockchainModule`)
 
-**Proyecto:** ArbiTrust Backend (NestJS Monorepo)  
+**Proyecto:** Livora Backend (NestJS Monorepo)  
 **Versión:** 1.0.0  
 **Ubicación del Documento:** `docs/specs/06-blockchain-worker-module.md`  
 **Estado:** Aprobado & En Producción  
@@ -9,7 +9,7 @@
 
 ## 1. Resumen Arquitectónico
 
-El **Módulo Worker de Blockchain (`BlockchainModule`)** es el componente asíncrono y descentralizado de extremo a extremo dentro de la arquitectura de ArbiTrust. Su responsabilidad principal es consumir los trabajos encolados en la cola Redis/BullMQ (`'blockchain-queue'`) tras el pesaje industrial de un lote, publicar el manifiesto inmutable en **IPFS (Pinata)**, calcular y distribuir equitativamente las recompensas en **EcoTokens**, ejecutar la transacción on-chain mediante **Ethers.js v6** hacia el contrato inteligente en **Arbitrum Stylus**, actualizar el estado persistente en **PostgreSQL (Prisma)** y notificar en tiempo real al Centro de Acopio vía **WebSockets (Socket.IO)**.
+El **Módulo Worker de Blockchain (`BlockchainModule`)** es el componente asíncrono y descentralizado de extremo a extremo dentro de la arquitectura de Livora. Su responsabilidad principal es consumir los trabajos encolados en la cola Redis/BullMQ (`'blockchain-queue'`) tras el pesaje industrial de un lote, publicar el manifiesto inmutable en **IPFS (Pinata)**, calcular y distribuir equitativamente las recompensas en **EcoTokens**, ejecutar la transacción on-chain mediante **Ethers.js v6** hacia el contrato inteligente en **Arbitrum Stylus**, actualizar el estado persistente en **PostgreSQL (Prisma)** y notificar en tiempo real al Centro de Acopio vía **WebSockets (Socket.IO)**.
 
 ```
                   ┌─────────────────────────────────────────────────────────┐

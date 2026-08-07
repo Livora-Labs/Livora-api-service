@@ -1,6 +1,6 @@
 # 🧪 Manual Oficial de Pruebas End-to-End (E2E) con Swagger UI (100% Cobertura de APIs)
 
-- **Proyecto:** ArbiTrust Backend (NestJS Monorepo)
+- **Proyecto:** Livora Backend (NestJS Monorepo)
 - **Documento:** Guía de Pruebas E2E Exhaustiva del 100% de los Endpoints
 - **Ubicación:** `docs/08-e2e-testing-manual.md`
 - **Versión:** 2.0.0 (Completa - 42 Endpoints)
@@ -11,7 +11,7 @@
 
 ## 📋 1. Preparación del Entorno (Setup)
 
-Antes de iniciar las pruebas interactivas en Swagger UI, asegúrate de levantar los servicios base del ecosistema ArbiTrust.
+Antes de iniciar las pruebas interactivas en Swagger UI, asegúrate de levantar los servicios base del ecosistema Livora.
 
 ### Paso 1.1: Iniciar la Infraestructura (Docker)
 En la raíz del proyecto, ejecuta Docker Compose para iniciar **PostgreSQL (PostGIS)** y **Redis**:
@@ -51,22 +51,22 @@ Ejecuta `POST /auth/register` con los siguientes JSONs:
 
 ```json
 // 1. Rol HOGAR
-{ "email": "hogar.e2e@arbitrust.io", "password": "Password123!", "role": "HOGAR" }
+{ "email": "hogar.e2e@livora.io", "password": "Password123!", "role": "HOGAR" }
 
 // 2. Rol RECOLECTOR
-{ "email": "recolector.e2e@arbitrust.io", "password": "Password123!", "role": "RECOLECTOR" }
+{ "email": "recolector.e2e@livora.io", "password": "Password123!", "role": "RECOLECTOR" }
 
 // 3. Rol CENTRO_ACOPIO
-{ "email": "centro.e2e@arbitrust.io", "password": "Password123!", "role": "CENTRO_ACOPIO" }
+{ "email": "centro.e2e@livora.io", "password": "Password123!", "role": "CENTRO_ACOPIO" }
 
 // 4. Rol EMPRESA_B2B
-{ "email": "b2b.e2e@arbitrust.io", "password": "Password123!", "role": "EMPRESA_B2B" }
+{ "email": "b2b.e2e@livora.io", "password": "Password123!", "role": "EMPRESA_B2B" }
 
 // 5. Rol ALMACEN
-{ "email": "almacen.e2e@arbitrust.io", "password": "Password123!", "role": "ALMACEN" }
+{ "email": "almacen.e2e@livora.io", "password": "Password123!", "role": "ALMACEN" }
 
 // 6. Rol ADMIN
-{ "email": "admin.e2e@arbitrust.io", "password": "Password123!", "role": "ADMIN" }
+{ "email": "admin.e2e@livora.io", "password": "Password123!", "role": "ADMIN" }
 ```
 
 ### Paso 2.2: Autenticación (`POST /auth/login`) e Inyección del Token JWT
@@ -257,4 +257,4 @@ Inicia sesión como **CENTRO_ACOPIO**:
 
 ## 🎯 Conclusión del Manual
 
-Este manual cubre formal y exhaustivamente los **42 endpoints del sistema (100% de la API)**. Siguiendo estos 8 actos secuenciales en Swagger UI, cualquier auditor, tester o desarrollador podrá verificar la totalidad de las funcionalidades de **ArbiTrust**. 🚀
+Este manual cubre formal y exhaustivamente los **42 endpoints del sistema (100% de la API)**. Siguiendo estos 8 actos secuenciales en Swagger UI, cualquier auditor, tester o desarrollador podrá verificar la totalidad de las funcionalidades de **Livora**. 🚀

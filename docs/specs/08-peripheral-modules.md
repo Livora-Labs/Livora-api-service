@@ -1,6 +1,6 @@
 # Especificación Técnica Oficial: Módulos Periféricos (`MetricsModule`, `AdminModule`, `SalesModule`, `InventoryModule`)
 
-- **Proyecto:** ArbiTrust Backend (NestJS API Gateway)
+- **Proyecto:** Livora Backend (NestJS API Gateway)
 - **Módulos:** `MetricsModule`, `AdminModule`, `SalesModule`, `InventoryModule`
 - **Versión:** 1.0.0
 - **Estado:** Implementado, Auditado y Verificado
@@ -10,7 +10,7 @@
 
 ## 1. Resumen y Propósito de los Módulos Periféricos
 
-Los **Módulos Periféricos** completan el 100% de la cobertura del catálogo de APIs de ArbiTrust, proporcionando la capa administrativa, de reporte ESG, gestión comercial B2B y control de inventario físico en planta:
+Los **Módulos Periféricos** completan el 100% de la cobertura del catálogo de APIs de Livora, proporcionando la capa administrativa, de reporte ESG, gestión comercial B2B y control de inventario físico en planta:
 
 1. **Módulo de Métricas y Reportes (`MetricsModule`):**
    - Proporciona métricas agregadas de reciclaje e impacto ambiental para **Hogares** (solicitudes completadas, kg reciclados, EcoTokens ganados), **Recolectores** (reputación, score y badges), **Empresas B2B** (ahorro de CO2, agua y certificados) y **Administrador Global** (resumen ejecutivo del sistema).

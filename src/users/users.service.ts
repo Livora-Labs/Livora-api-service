@@ -40,7 +40,7 @@ export class UsersService {
     const encryptionKey =
       this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
       this.configService.get<string>('WALLET_SECRET_KEY') ||
-      'arbitrust_wallet_aes256_secret!';
+      'livora_wallet_aes256_secret!';
 
     // Encriptar clave privada con AES-256-GCM
     const encryptedPrivateKey = CryptoUtil.encrypt(privateKey, encryptionKey);

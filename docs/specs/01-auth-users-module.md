@@ -1,6 +1,6 @@
 # Especificación Técnica y Arquitectura: Módulo de Autenticación y Usuarios (Auth & Users Module)
 
-**Proyecto:** ArbiTrust - Backend Sistema de Trazabilidad de Reciclaje  
+**Proyecto:** Livora - Backend Sistema de Trazabilidad de Reciclaje  
 **Módulo:** `AuthModule` & `UsersModule`  
 **Ubicación:** `src/auth/` & `src/users/`  
 **Estado:** Producción / Implementado  
@@ -9,7 +9,7 @@
 
 ## 1. Resumen Arquitectónico
 
-El módulo de Autenticación y Gestión de Usuarios de **ArbiTrust** adopta un modelo de **Identidad Híbrido** combinando la robustez de **Supabase Auth** como Proveedor de Identidad (IdP) gestionado con la flexibilidad de **PostgreSQL + Prisma ORM** para los datos de dominio y trazabilidad.
+El módulo de Autenticación y Gestión de Usuarios de **Livora** adopta un modelo de **Identidad Híbrido** combinando la robustez de **Supabase Auth** como Proveedor de Identidad (IdP) gestionado con la flexibilidad de **PostgreSQL + Prisma ORM** para los datos de dominio y trazabilidad.
 
 ```
                     ┌─────────────────────────┐
@@ -19,7 +19,7 @@ El módulo de Autenticación y Gestión de Usuarios de **ArbiTrust** adopta un m
                    POST /auth/register | /auth/login
                                  ▼
                     ┌─────────────────────────┐
-                    │  ArbiTrust API Gateway  │
+                    │   Livora API Gateway    │
                     │       (NestJS)          │
                     └────┬───────────────┬────┘
                          │               │
@@ -121,7 +121,7 @@ Crea la cuenta en Supabase Auth, genera la billetera Web3 custodial cifrada y gu
 - **Body (`RegisterDto`):**
 ```json
 {
-  "email": "recolector@arbitrust.com",
+  "email": "recolector@livora.com",
   "password": "Password123!",
   "role": "RECOLECTOR"
 }
@@ -137,7 +137,7 @@ Crea la cuenta en Supabase Auth, genera la billetera Web3 custodial cifrada y gu
   "message": "Usuario registrado exitosamente",
   "user": {
     "id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
-    "email": "recolector@arbitrust.com",
+    "email": "recolector@livora.com",
     "role": "RECOLECTOR",
     "walletAddress": "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
     "createdAt": "2026-08-03T21:00:00.000Z",
@@ -158,7 +158,7 @@ Autentica las credenciales contra Supabase Auth y retorna los tokens JWT junto c
 - **Body (`LoginDto`):**
 ```json
 {
-  "email": "recolector@arbitrust.com",
+  "email": "recolector@livora.com",
   "password": "Password123!"
 }
 ```
@@ -171,7 +171,7 @@ Autentica las credenciales contra Supabase Auth y retorna los tokens JWT junto c
   "tokenType": "bearer",
   "user": {
     "id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
-    "email": "recolector@arbitrust.com",
+    "email": "recolector@livora.com",
     "role": "RECOLECTOR",
     "walletAddress": "0x71C7656EC7ab88b098defB751B7401B5f6d8976F"
   }
@@ -208,7 +208,7 @@ Ejemplo:
 
 ```env
 # Database Configuration
-DATABASE_URL="postgresql://arbitrust:arbitrust_secret@localhost:5432/arbitrust_db?schema=public"
+DATABASE_URL="postgresql://livora:livora_secret@localhost:5432/livora_db?schema=public"
 
 # Supabase Auth Configuration
 SUPABASE_URL=https://tu-proyecto.supabase.co

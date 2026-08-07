@@ -1,6 +1,6 @@
 # Especificación Técnica Oficial: Módulo de Recolección (CollectionsModule)
 
-- **Proyecto:** ArbiTrust Backend (NestJS Monorepo)
+- **Proyecto:** Livora Backend (NestJS Monorepo)
 - **Módulo:** `CollectionsModule`
 - **Versión:** 1.0.0
 - **Estado:** Implementado, Auditado y Verificado
@@ -10,7 +10,7 @@
 
 ## 1. Resumen y Propósito del Módulo
 
-El **Módulo de Recolección (`CollectionsModule`)** es el componente central de ArbiTrust encargado de coordinar y gestionar el ciclo de vida de las solicitudes de reciclaje entre los usuarios finales (**HOGAR**) y los recolectores de material (**RECOLECTOR**).
+El **Módulo de Recolección (`CollectionsModule`)** es el componente central de Livora encargado de coordinar y gestionar el ciclo de vida de las solicitudes de reciclaje entre los usuarios finales (**HOGAR**) y los recolectores de material (**RECOLECTOR**).
 
 ### Flujo de Negocio:
 1. **Creación de Solicitud (Rol HOGAR):** Un usuario con rol `HOGAR` registra una solicitud especificando la ubicación geográfica (`latitude`, `longitude`), la estimación de materiales en kg (`itemsEstimated`), una descripción opcional y una fotografía del material. La solicitud se crea con un **PIN aleatorio de 4 dígitos** para verificación presencial y en estado `PENDING`.
