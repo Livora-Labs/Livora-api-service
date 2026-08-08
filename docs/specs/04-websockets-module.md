@@ -48,7 +48,7 @@ El **Módulo de WebSockets (`WebsocketsModule`)** es el componente de comunicaci
 Para permitir la **escalabilidad horizontal** del Gateway de Socket.io en infraestructuras distribuidas (múltiples réplicas de la API en producción), se implementó un adaptador personalizado basado en Redis Pub/Sub.
 
 ### 1. Extensión de `IoAdapter`
-El adaptador [`RedisIoAdapter`](file:///c:/Users/Acer/Desktop/Estudio/Proyectos/ArbiTrust/src/websockets/adapters/redis-io.adapter.ts) extiende de `IoAdapter` (`@nestjs/platform-socket.io`).
+El adaptador [`RedisIoAdapter`](file:///c:/Users/Acer/Desktop/Estudio/Proyectos/Livora-Backend/src/websockets/adapters/redis-io.adapter.ts) extiende de `IoAdapter` (`@nestjs/platform-socket.io`).
 
 ```typescript
 export class RedisIoAdapter extends IoAdapter {
@@ -89,7 +89,7 @@ async connectToRedis(): Promise<void> {
 ```
 
 ### 3. Registro Global en `main.ts`
-El adaptador se conecta a Redis e inicializa globalmente antes de levantar la aplicación HTTP en [`main.ts`](file:///c:/Users/Acer/Desktop/Estudio/Proyectos/ArbiTrust/src/main.ts):
+El adaptador se conecta a Redis e inicializa globalmente antes de levantar la aplicación HTTP en [`main.ts`](file:///c:/Users/Acer/Desktop/Estudio/Proyectos/Livora-Backend/src/main.ts):
 
 ```typescript
 const configService = app.get(ConfigService);
@@ -102,7 +102,7 @@ app.useWebSocketAdapter(redisIoAdapter);
 
 ## 3. Seguridad y Autenticación en el Handshake (`websockets.gateway.ts`)
 
-La autenticación se realiza de manera síncrona durante el **handshake inicial** de la conexión Socket.io en [`WebsocketsGateway`](file:///c:/Users/Acer/Desktop/Estudio/Proyectos/ArbiTrust/src/websockets/websockets.gateway.ts).
+La autenticación se realiza de manera síncrona durante el **handshake inicial** de la conexión Socket.io en [`WebsocketsGateway`](file:///c:/Users/Acer/Desktop/Estudio/Proyectos/Livora-Backend/src/websockets/websockets.gateway.ts).
 
 ### Flujo de Validación JWT
 
@@ -180,7 +180,7 @@ if (role === 'CENTRO_ACOPIO') {
 
 ## 5. Servicio de Emisión de Eventos (`websockets.service.ts`)
 
-El servicio [`WebsocketsService`](file:///c:/Users/Acer/Desktop/Estudio/Proyectos/ArbiTrust/src/websockets/websockets.service.ts) proporciona una API inyectable y limpia para emitir eventos hacia Socket.io sin acoplar los módulos de negocio a los detalles de implementación del gateway.
+El servicio [`WebsocketsService`](file:///c:/Users/Acer/Desktop/Estudio/Proyectos/Livora-Backend/src/websockets/websockets.service.ts) proporciona una API inyectable y limpia para emitir eventos hacia Socket.io sin acoplar los módulos de negocio a los detalles de implementación del gateway.
 
 ```typescript
 @Injectable()

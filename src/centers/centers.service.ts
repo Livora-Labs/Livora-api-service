@@ -53,4 +53,21 @@ export class CentersService {
 
     return { receptionPin: updatedUser.receptionPin };
   }
+
+  /**
+   * Obtiene la lista de todos los Centros de Acopio registrados (Rol: CENTRO_ACOPIO)
+   */
+  async findAll() {
+    return this.prisma.user.findMany({
+      where: {
+        role: { in: ['CENTRO_ACOPIO', 'ALMACEN'] },
+      },
+      select: {
+        id: true,
+        email: true,
+        walletAddress: true,
+        receptionPin: true,
+      },
+    });
+  }
 }

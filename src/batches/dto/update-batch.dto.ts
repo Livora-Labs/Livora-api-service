@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsUUID } from 'class-validator';
+import { IsNotEmpty, IsUUID, IsOptional, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdateBatchDto {
@@ -6,5 +6,10 @@ export class UpdateBatchDto {
   @IsUUID('4', { message: 'destinationCenterId debe ser un UUID v4 válido' })
   @IsNotEmpty({ message: 'destinationCenterId es obligatorio' })
   destinationCenterId: string;
+
+  @ApiProperty({ example: 'IN_TRANSIT', description: 'Estado del lote (opcional)' })
+  @IsOptional()
+  @IsString()
+  status?: string;
 }
 

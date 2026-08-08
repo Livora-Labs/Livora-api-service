@@ -78,8 +78,24 @@ model User {
   role                Role
   walletAddress       String?  @unique
   encryptedPrivateKey String?
+  receptionPin        String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  householdRequests CollectionRequest[] @relation("HouseholdRequests")
+  collectorRequests CollectionRequest[] @relation("CollectorRequests")
+
+  collectorBatches     Batch[]             @relation("CollectorBatches")
+  destinationBatches   Batch[]             @relation("DestinationBatches")
+  notifications        Notification[]
+  centerConsolidations ConsolidatedBatch[] @relation("CenterConsolidations")
+  kycApplications      KycApplication[]
+  buyerSales           Sale[]              @relation("BuyerSales")
+  centerSales          Sale[]              @relation("CenterSales")
+  certificates         Certificate[]
+  inventoryItems       InventoryItem[]
+  inventoryMovements   InventoryMovement[]
+  complaints           Complaint[]
 
   @@map("users")
 }

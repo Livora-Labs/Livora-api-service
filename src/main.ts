@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { RedisIoAdapter } from './websockets/adapters/redis-io.adapter';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { IpfsGatewayInterceptor } from './common/interceptors/ipfs-gateway.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -22,6 +23,7 @@ async function bootstrap() {
   );
 
   const configService = app.get(ConfigService);
+  app.useGlobalInterceptors(new IpfsGatewayInterceptor(configService));
 
   const redisIoAdapter = new RedisIoAdapter(app, configService);
   await redisIoAdapter.connectToRedis();

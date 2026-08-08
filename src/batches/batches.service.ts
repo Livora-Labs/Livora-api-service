@@ -48,8 +48,8 @@ export class BatchesService {
     if (role === Role.RECOLECTOR) {
       // Forzar por seguridad que solo consulte sus propios lotes
       where.collectorId = userId;
-    } else if (role === Role.CENTRO_ACOPIO) {
-      // Forzar por seguridad que solo consulte los lotes destinados a su centro de acopio
+    } else if (role === Role.CENTRO_ACOPIO || role === Role.ALMACEN) {
+      // Forzar por seguridad que solo consulte los lotes destinados a su centro de acopio o almacén
       where.destinationCenterId = userId;
     } else {
       throw new ForbiddenException('Rol no autorizado para listar lotes');
@@ -67,7 +67,13 @@ export class BatchesService {
         destinationCenter: {
           select: { id: true, email: true },
         },
-        requests: true,
+        requests: {
+          include: {
+            household: {
+              select: { id: true, email: true },
+            },
+          },
+        },
       },
     });
   }
@@ -152,9 +158,9 @@ export class BatchesService {
       where: { id: dto.destinationCenterId },
     });
 
-    if (!destinationCenter || destinationCenter.role !== Role.CENTRO_ACOPIO) {
+    if (!destinationCenter || (destinationCenter.role !== Role.CENTRO_ACOPIO && destinationCenter.role !== Role.ALMACEN)) {
       throw new BadRequestException(
-        'El centro de acopio especificado no existe o no posee el rol CENTRO_ACOPIO',
+        'El centro de acopio o almacén especificado no existe o no posee un rol autorizado',
       );
     }
 

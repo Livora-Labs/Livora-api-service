@@ -18,6 +18,7 @@ import { CollectionsService } from './collections.service';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { FindCollectionsQueryDto } from './dto/find-collections-query.dto';
 import { UpdateCollectionStatusDto } from './dto/update-collection-status.dto';
+import { VerifyPinDto } from './dto/verify-pin.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -71,6 +72,17 @@ export class CollectionsController {
     @Body() dto: UpdateCollectionStatusDto,
   ) {
     return this.collectionsService.updateStatus(id, user.id, user.role, dto);
+  }
+
+  @Post(':id/verify')
+  @Roles(Role.RECOLECTOR)
+  @ApiOperation({ summary: 'Verificar entrega física mediante PIN de 4 dígitos del Hogar (Rol: RECOLECTOR)' })
+  async verifyPin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') collectorId: string,
+    @Body() dto: VerifyPinDto,
+  ) {
+    return this.collectionsService.verifyPin(id, collectorId, dto);
   }
 }
 

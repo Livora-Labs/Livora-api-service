@@ -27,8 +27,8 @@ export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
   @Post('sales')
-  @Roles(Role.CENTRO_ACOPIO)
-  @ApiOperation({ summary: 'Registrar venta de material consolidado a empresa B2B (Rol: CENTRO_ACOPIO)' })
+  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @ApiOperation({ summary: 'Registrar venta de material consolidado a empresa B2B (Rol: CENTRO_ACOPIO / ALMACEN)' })
   async createSale(
     @CurrentUser('id') centerId: string,
     @Body() dto: CreateSaleDto,
@@ -61,5 +61,15 @@ export class SalesController {
   @ApiOperation({ summary: 'Emitir / Mintear certificado ESG simulado con IPFS hash (Rol: ADMIN)' })
   async createCertificate(@Body() dto: CreateCertificateDto) {
     return this.salesService.createCertificate(dto);
+  }
+
+  @Get('sales')
+  @Roles(Role.EMPRESA_B2B, Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @ApiOperation({ summary: 'Obtener historial de compras/ventas (Rol: B2B o Acopio / Almacén)' })
+  async getSales(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
+  ) {
+    return this.salesService.getSalesForUser(userId, role);
   }
 }

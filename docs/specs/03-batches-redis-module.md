@@ -61,16 +61,18 @@ enum BatchStatus {
 
 ```prisma
 model Batch {
-  id                  String      @id @default(uuid()) @db.Uuid
-  status              BatchStatus @default(OPEN)
-  collectorId         String      @db.Uuid
-  destinationCenterId String?     @db.Uuid
+  id                  String             @id @default(uuid()) @db.Uuid
+  status              BatchStatus        @default(OPEN)
+  collectorId         String             @db.Uuid
+  destinationCenterId String?            @db.Uuid
   materialsActual     Json?
-  createdAt           DateTime    @default(now())
-  updatedAt           DateTime    @updatedAt
+  consolidatedBatchId String?            @db.Uuid
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 
-  collector         User                @relation("CollectorBatches", fields: [collectorId], references: [id])
-  destinationCenter User?               @relation("DestinationBatches", fields: [destinationCenterId], references: [id])
+  collector         User               @relation("CollectorBatches", fields: [collectorId], references: [id])
+  destinationCenter User?              @relation("DestinationBatches", fields: [destinationCenterId], references: [id])
+  consolidatedBatch ConsolidatedBatch? @relation(fields: [consolidatedBatchId], references: [id])
   requests          CollectionRequest[]
 
   @@map("batches")

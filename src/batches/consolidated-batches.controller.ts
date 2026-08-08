@@ -16,8 +16,8 @@ export class ConsolidatedBatchesController {
   constructor(private readonly batchesService: BatchesService) {}
 
   @Post()
-  @Roles(Role.CENTRO_ACOPIO)
-  @ApiOperation({ summary: 'Consolidar múltiples lotes recibidos (Rol: CENTRO_ACOPIO)' })
+  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @ApiOperation({ summary: 'Consolidar múltiples lotes recibidos (Rol: CENTRO_ACOPIO / ALMACEN)' })
   @ApiResponse({ status: 201, description: 'Lote consolidado creado exitosamente con estado PENDING_SALE' })
   async createConsolidatedBatch(
     @CurrentUser('id') centerId: string,

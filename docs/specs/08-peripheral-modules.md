@@ -1,7 +1,7 @@
-# Especificación Técnica Oficial: Módulos Periféricos (`MetricsModule`, `AdminModule`, `SalesModule`, `InventoryModule`)
+# Especificación Técnica Oficial: Módulos Periféricos (`MetricsModule`, `AdminModule`, `SalesModule`, `InventoryModule`, `CentersModule`)
 
 - **Proyecto:** Livora Backend (NestJS API Gateway)
-- **Módulos:** `MetricsModule`, `AdminModule`, `SalesModule`, `InventoryModule`
+- **Módulos:** `MetricsModule`, `AdminModule`, `SalesModule`, `InventoryModule`, `CentersModule`
 - **Versión:** 1.0.0
 - **Estado:** Implementado, Auditado y Verificado
 - **Fecha:** Agosto 2026
@@ -24,6 +24,9 @@ Los **Módulos Periféricos** completan el 100% de la cobertura del catálogo de
 
 4. **Módulo de Almacén e Inventario (`InventoryModule`):**
    - Controla el stock físico de materiales en planta (`InventoryItem`) y registra todos los movimientos de entrada y salida (`InventoryMovement`) bajo transacciones atómicas ACID.
+
+5. **Módulo de Centros de Acopio (`CentersModule`):**
+   - Permite a los Centros de Acopio (`CENTRO_ACOPIO`) gestionar su PIN de recepción de 4 dígitos, el cual sirve para autorizar y verificar la recepción de lotes de forma presencial. Si no posee uno, se autogenera en la primera consulta.
 
 ---
 
@@ -168,6 +171,8 @@ Bajo la **Regla de Oro** de cero dependencias o servicios externos adicionales:
 | **`POST`** | `/certificates` | `ADMIN` | Genera y emite un certificado ESG simulado guardando hash IPFS en BD. |
 | **`GET`** | `/inventory` | `CENTRO_ACOPIO`, `ALMACEN`, `ADMIN` | Consulta el stock físico de materiales en planta/almacén. |
 | **`POST`** | `/inventory/movements` | `CENTRO_ACOPIO`, `ALMACEN` | Registra entrada/salida de inventario y actualiza stock atómicamente. |
+| **`GET`** | `/centers/me/reception-pin` | `CENTRO_ACOPIO` | Obtiene el PIN de recepción del centro de acopio actual (se genera si no existe). |
+| **`POST`** | `/centers/me/reception-pin/refresh` | `CENTRO_ACOPIO` | Regenera y actualiza un nuevo PIN de recepción de 4 dígitos. |
 
 ---
 

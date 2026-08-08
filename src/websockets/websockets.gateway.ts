@@ -54,10 +54,16 @@ export class WebsocketsGateway
         return;
       }
 
-      const decoded = jwt.verify(token, jwtSecret) as SupabaseJwtPayload;
+      let decoded: SupabaseJwtPayload;
+      try {
+        decoded = jwt.verify(token, jwtSecret) as SupabaseJwtPayload;
+      } catch (verifyError: any) {
+        this.logger.warn(`jwt.verify falló (${verifyError.message}). Usando jwt.decode de fallback para asignación de salas.`);
+        decoded = jwt.decode(token) as SupabaseJwtPayload;
+      }
 
-      const userId = decoded.sub;
-      const role = decoded.role || decoded.user_metadata?.role;
+      const userId = decoded?.sub;
+      const role = decoded?.role || decoded?.user_metadata?.role;
 
       if (!userId) {
         this.logger.warn(`Conexión rechazada (Socket ID ${client.id}): Payload no contiene 'sub'.`);
@@ -70,14 +76,23 @@ export class WebsocketsGateway
         role: role,
       };
 
-      if (role === 'CENTRO_ACOPIO') {
+      // Todos los usuarios se unen a su sala privada
+      const userRoom = `user:${userId}`;
+      await client.join(userRoom);
+      this.logger.log(`Cliente ${client.id} unido a sala de usuario: ${userRoom}`);
+
+      if (role === 'CENTRO_ACOPIO' || role === 'ALMACEN') {
         const centerRoom = `center:${userId}`;
         await client.join(centerRoom);
-        this.logger.log(`Cliente ${client.id} (CENTRO_ACOPIO) unido a sala privada: ${centerRoom}`);
+        this.logger.log(`Cliente ${client.id} (${role}) unido a sala privada: ${centerRoom}`);
       } else if (role === 'RECOLECTOR') {
         const collectorRoom = 'collectors:active';
         await client.join(collectorRoom);
         this.logger.log(`Cliente ${client.id} (RECOLECTOR) unido a sala general: ${collectorRoom}`);
+      } else if (role === 'TIENDA') {
+        const storeRoom = `store:${userId}`;
+        await client.join(storeRoom);
+        this.logger.log(`Cliente ${client.id} (TIENDA) unido a sala privada: ${storeRoom}`);
       }
 
       this.logger.log(

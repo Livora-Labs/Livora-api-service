@@ -97,7 +97,6 @@ sol_storage! {
 
         // BatchTraceability State
         mapping(bytes32 => bool) processed_batches;
-        mapping(bytes32 => string) batch_ipfs_cids;
         mapping(bytes32 => uint64) batch_timestamps;
         mapping(bytes32 => uint256) batch_total_rewards;
         mapping(bytes32 => uint32) batch_recipients_counts;
@@ -202,7 +201,6 @@ impl EcoBatchRegistry {
 
         // 5. Registro de Estado de Trazabilidad
         self.processed_batches.insert(batch_id, true);
-        self.batch_ipfs_cids.setter(batch_id).set_str(&ipfs_cid);
         self.batch_timestamps.insert(batch_id, U64::from(now));
         self.batch_total_rewards.insert(batch_id, total_batch_reward);
         self.batch_recipients_counts.insert(batch_id, U32::from(recipients.len()));

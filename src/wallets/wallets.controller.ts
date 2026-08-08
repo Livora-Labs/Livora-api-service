@@ -30,4 +30,11 @@ export class WalletsController {
   ) {
     return this.walletsService.sendTransaction(userId, dto);
   }
+
+  @Get('transactions/history')
+  @ApiOperation({ summary: 'Consultar historial de transacciones (recompensas y canjes) del usuario' })
+  @ApiResponse({ status: 200, description: 'Historial retornado exitosamente' })
+  async getTransactionHistory(@CurrentUser('id') userId: string) {
+    return this.walletsService.getTransactionHistory(userId);
+  }
 }

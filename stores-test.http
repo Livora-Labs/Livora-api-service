@@ -1,0 +1,71 @@
+### ==============================================================================
+### Livora Backend - StoresModule HTTP Test Suite & Verification Scenarios
+### ==============================================================================
+
+@baseUrl = http://localhost:3000
+@storeToken = YOUR_TIENDA_SUPABASE_TOKEN
+@householdToken = YOUR_HOGAR_SUPABASE_TOKEN
+@adminToken = YOUR_ADMIN_SUPABASE_TOKEN
+
+### ------------------------------------------------------------------------------
+### Escenario 1: Crear perfil de tienda (Rol: TIENDA)
+### ------------------------------------------------------------------------------
+POST {{baseUrl}}/stores/profile
+Authorization: Bearer {{storeToken}}
+Content-Type: application/json
+
+{
+  "businessName": "EcoMarket Miraflores S.A.C.",
+  "ruc": "20601122334",
+  "address": "Calle Cantuarias 140, Miraflores",
+  "bankAccount": "BCP - CCI: 002-191001234567890-54",
+  "logoUrl": "https://ecomarket.pe/assets/logo.jpg"
+}
+
+### ------------------------------------------------------------------------------
+### Escenario 2: Generar QR para canje (Rol: TIENDA)
+### ------------------------------------------------------------------------------
+POST {{baseUrl}}/stores/redemptions/qr
+Authorization: Bearer {{storeToken}}
+Content-Type: application/json
+
+{
+  "tokenAmount": 15.5
+}
+
+### ------------------------------------------------------------------------------
+### Escenario 3: Confirmar canje escaneando QR (Rol: HOGAR)
+### ------------------------------------------------------------------------------
+# Reemplazar {{qrCodeRef}} con el string devuelto en el escenario anterior (ej. "LIVORA-QR-...")
+@qrCodeRef = LIVORA-QR-PLACEHOLDER
+
+POST {{baseUrl}}/stores/redemptions/confirm/{{qrCodeRef}}
+Authorization: Bearer {{householdToken}}
+Content-Type: application/json
+
+{}
+
+### ------------------------------------------------------------------------------
+### Escenario 4: Solicitar liquidación (Rol: TIENDA)
+### ------------------------------------------------------------------------------
+POST {{baseUrl}}/stores/settlements
+Authorization: Bearer {{storeToken}}
+Content-Type: application/json
+
+{
+  "tokenAmount": 55.0
+}
+
+### ------------------------------------------------------------------------------
+### Escenario 5: Procesar pago de liquidación (Rol: ADMIN)
+### ------------------------------------------------------------------------------
+# Reemplazar {{settlementId}} con el ID obtenido en el escenario anterior (ej. un UUID)
+@settlementId = SETTLEMENT-ID-PLACEHOLDER
+
+PATCH {{baseUrl}}/stores/settlements/{{settlementId}}/pay
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "receiptUrl": "https://supabase.co/storage/v1/object/public/receipts/comprobante-987.pdf"
+}

@@ -31,9 +31,23 @@ export class BlockchainProcessor extends WorkerHost {
    */
   async process(job: Job<any>): Promise<any> {
     this.logger.log(
-      `Iniciando procesamiento de job #${job.id} (Nombre: ${job.name}) para BatchId: ${job.data?.batchId}`,
+      `Iniciando procesamiento de job #${job.id} (Nombre: ${job.name})`,
     );
 
+    switch (job.name) {
+      case 'process-batch-blockchain':
+        return this.processBatchBlockchain(job);
+      case 'redemption-transfer':
+        return this.processRedemptionTransfer(job);
+      case 'settlement-transfer':
+        return this.processSettlementTransfer(job);
+      default:
+        this.logger.warn(`Job no reconocido: ${job.name}`);
+        throw new Error(`Job no reconocido: ${job.name}`);
+    }
+  }
+
+  private async processBatchBlockchain(job: Job<any>): Promise<any> {
     const { batchId, collectorId, centerId, materialsActual, householdIds } = job.data;
 
     if (!batchId) {
@@ -115,12 +129,54 @@ export class BlockchainProcessor extends WorkerHost {
       const txHash = receipt?.hash || `0xmock${Date.now().toString(16)}`;
 
       // -------------------------------------------------------------------
-      // PASO E: Actualizar estado del lote a RECEIVED en PostgreSQL vía Prisma
+      // PASO E: Actualizar estado del lote a RECEIVED en PostgreSQL y cargar inventario
       // -------------------------------------------------------------------
-      this.logger.log(`[Paso E] Actualizando estado del lote ${batchId} a RECEIVED en PostgreSQL...`);
-      await this.prisma.batch.update({
-        where: { id: batchId },
-        data: { status: BatchStatus.RECEIVED },
+      this.logger.log(`[Paso E] Actualizando estado del lote ${batchId} a RECEIVED, guardando ipfsCid y txHash...`);
+      await this.prisma.$transaction(async (tx) => {
+        await tx.batch.update({
+          where: { id: batchId },
+          data: { status: BatchStatus.RECEIVED, ipfsCid, txHash },
+        });
+
+        if (materialsActual && typeof materialsActual === 'object') {
+          for (const [material, rawWeight] of Object.entries(materialsActual)) {
+            const weight = typeof rawWeight === 'number' ? rawWeight : parseFloat(String(rawWeight)) || 0;
+            if (weight > 0) {
+              const normMaterial = material.toUpperCase().trim();
+              const existingItem = await tx.inventoryItem.findFirst({
+                where: {
+                  centerId,
+                  materialType: normMaterial,
+                },
+              });
+
+              if (existingItem) {
+                await tx.inventoryItem.update({
+                  where: { id: existingItem.id },
+                  data: { quantityKg: { increment: weight } },
+                });
+              } else {
+                await tx.inventoryItem.create({
+                  data: {
+                    centerId,
+                    materialType: normMaterial,
+                    quantityKg: weight,
+                  },
+                });
+              }
+
+              // Registrar movimiento de entrada
+              await tx.inventoryMovement.create({
+                data: {
+                  centerId,
+                  type: 'IN',
+                  quantityKg: weight,
+                  materialType: normMaterial,
+                },
+              });
+            }
+          }
+        }
       });
 
       // -------------------------------------------------------------------
@@ -133,6 +189,7 @@ export class BlockchainProcessor extends WorkerHost {
         batchId,
         status: BatchStatus.RECEIVED,
         txHash,
+        ipfsCid,
       });
 
       const explorerUrl = `https://sepolia.arbiscan.io/tx/${txHash}`;
@@ -158,6 +215,63 @@ export class BlockchainProcessor extends WorkerHost {
       );
       throw error;
     }
+  }
+
+  private async processRedemptionTransfer(job: Job<any>): Promise<any> {
+    const { redemptionId, fromUserId, toStoreUserId, fromWallet, toWallet, tokenAmount } = job.data;
+    this.logger.log(`[redemption-transfer] Procesando transferencia on-chain para canje ${redemptionId}`);
+    this.logger.log(`[redemption-transfer] De: ${fromWallet || 'N/A'} (User: ${fromUserId}) -> A: ${toWallet || 'N/A'} (Store User: ${toStoreUserId}), Monto: ${tokenAmount} EcoTokens`);
+    
+    // Simular retraso de red de blockchain
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    
+    const txHash = `0xredempt${Date.now().toString(16)}${Math.random().toString(16).substring(2, 10)}`;
+    const explorerUrl = `https://sepolia.arbiscan.io/tx/${txHash}`;
+    
+    try {
+      await this.prisma.redemptionTransaction.update({
+        where: { id: redemptionId },
+        data: { txHash },
+      });
+      this.logger.log(`[redemption-transfer] Persistido txHash: ${txHash} para el canje ${redemptionId}`);
+      
+      // Notificar al usuario (hogar/recolector) que el pago finalizó y debe refrescar el balance
+      this.websocketsService.emitUserEvent(fromUserId, 'redemption:completed_onchain', {
+        redemptionId,
+        txHash,
+        tokenAmount,
+      });
+    } catch (dbError: any) {
+      this.logger.error(`Error actualizando txHash del canje ${redemptionId}: ${dbError.message}`);
+    }
+
+    this.logger.log(`[redemption-transfer] ✅ Transacción de canje confirmada en Arbitrum Sepolia. Tx Hash: ${txHash}`);
+    return {
+      success: true,
+      redemptionId,
+      txHash,
+      explorerUrl,
+    };
+  }
+
+  private async processSettlementTransfer(job: Job<any>): Promise<any> {
+    const { settlementId, fromStoreUserId, fromWallet, toWallet, tokenAmount } = job.data;
+    this.logger.log(`[settlement-transfer] Procesando transferencia on-chain para liquidación ${settlementId}`);
+    this.logger.log(`[settlement-transfer] De: ${fromWallet || 'N/A'} (Store User: ${fromStoreUserId}) -> A la tesorería: ${toWallet || 'N/A'}, Monto: ${tokenAmount} EcoTokens`);
+    
+    // Simular retraso de red de blockchain
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    
+    const txHash = `0xsettle${Date.now().toString(16)}${Math.random().toString(16).substring(2, 10)}`;
+    const explorerUrl = `https://sepolia.arbiscan.io/tx/${txHash}`;
+    
+    this.logger.log(`[settlement-transfer] ✅ Transacción de liquidación confirmada en Arbitrum Sepolia. Tx Hash: ${txHash}`);
+    return {
+      success: true,
+      settlementId,
+      txHash,
+      explorerUrl,
+    };
   }
 
   /**

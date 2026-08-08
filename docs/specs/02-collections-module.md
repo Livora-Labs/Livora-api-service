@@ -48,11 +48,13 @@ model CollectionRequest {
   longitude       Float
   householdId     String        @db.Uuid
   collectorId     String?       @db.Uuid
+  batchId         String?       @db.Uuid
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  household User  @relation("HouseholdRequests", fields: [householdId], references: [id])
-  collector User? @relation("CollectorRequests", fields: [collectorId], references: [id])
+  household User   @relation("HouseholdRequests", fields: [householdId], references: [id])
+  collector User?  @relation("CollectorRequests", fields: [collectorId], references: [id])
+  batch     Batch? @relation(fields: [batchId], references: [id])
 
   @@map("collection_requests")
 }
@@ -105,7 +107,8 @@ WHERE status = 'PENDING'::"RequestStatus"
     ST_MakePoint(longitude, latitude),
     ST_MakePoint(${lng}, ${lat})
   ) <= ${radiusInMeters}
-ORDER BY distance ASC;
+ORDER BY distance ASC
+LIMIT ${limit} OFFSET ${skip};
 ```
 
 ### Puntos Clave de la Implementación Espacial:

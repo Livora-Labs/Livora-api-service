@@ -15,6 +15,7 @@ enum Role {
   EMPRESA_B2B
   ALMACEN
   ADMIN
+  TIENDA
 }
 
 model User {
@@ -29,7 +30,6 @@ model User {
 
   householdRequests CollectionRequest[] @relation("HouseholdRequests")
   collectorRequests CollectionRequest[] @relation("CollectorRequests")
-
   collectorBatches     Batch[]             @relation("CollectorBatches")
   destinationBatches   Batch[]             @relation("DestinationBatches")
   notifications        Notification[]
@@ -41,9 +41,16 @@ model User {
   inventoryItems       InventoryItem[]
   inventoryMovements   InventoryMovement[]
   complaints           Complaint[]
+  buyerTransfers       B2bTransfer[]       @relation("BuyerTransfers")
+  centerTransfers      B2bTransfer[]       @relation("CenterTransfers")
+
+  storeProfile        StoreProfile?
+  redemptions         RedemptionTransaction[] @relation("HouseholdRedemptions")
 
   @@map("users")
 }
+
+
 
 enum RequestStatus {
   PENDING
@@ -89,6 +96,8 @@ model Batch {
   destinationCenterId String?            @db.Uuid
   materialsActual     Json?
   consolidatedBatchId String?            @db.Uuid
+  ipfsCid             String?
+  txHash              String?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
@@ -238,5 +247,88 @@ model Complaint {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("complaints")
+}
+
+enum RedemptionStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum SettlementStatus {
+  PENDING
+  APPROVED_PENDING_PAYMENT
+  PAID
+  REJECTED
+}
+
+model StoreProfile {
+  id           String                  @id @default(uuid()) @db.Uuid
+  userId       String                  @unique @db.Uuid
+  businessName String
+  ruc          String
+  address      String
+  bankAccount  String
+  logoUrl      String?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  user         User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  redemptions  RedemptionTransaction[]
+  settlements  SettlementRequest[]
+
+  @@map("store_profiles")
+}
+
+model RedemptionTransaction {
+  id          String           @id @default(uuid()) @db.Uuid
+  storeId     String           @db.Uuid
+  userId      String?          @db.Uuid
+  tokenAmount Float
+  qrCodeRef   String           @unique
+  status      RedemptionStatus @default(PENDING)
+  txHash      String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  store       StoreProfile     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  user        User?            @relation("HouseholdRedemptions", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("redemption_transactions")
+}
+
+model SettlementRequest {
+  id          String           @id @default(uuid()) @db.Uuid
+  storeId     String           @db.Uuid
+  tokenAmount Float
+  fiatAmount  Float
+  status      SettlementStatus @default(PENDING)
+  receiptUrl  String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  store       StoreProfile     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@map("settlement_requests")
+}
+
+enum B2bTransferStatus {
+  IN_TRANSIT
+  RECEIVED
+}
+
+model B2bTransfer {
+  id          String            @id @default(uuid()) @db.Uuid
+  materials   Json
+  status      B2bTransferStatus @default(IN_TRANSIT)
+  buyerId     String            @db.Uuid
+  centerId    String            @db.Uuid
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  buyer       User              @relation("BuyerTransfers", fields: [buyerId], references: [id])
+  center      User              @relation("CenterTransfers", fields: [centerId], references: [id])
+
+  @@map("b2b_transfers")
 }
 

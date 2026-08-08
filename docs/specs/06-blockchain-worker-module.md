@@ -60,8 +60,9 @@ Define las constantes globales de configuración, nombres de colas, interfaz del
 - **ABI de EcoBatchRegistry**:
   ```typescript
   export const ECO_BATCH_REGISTRY_ABI = [
-    'function register_batch(bytes32 batchId, string ipfsCid, address[] recipients, uint256[] amounts) external',
-    'event BatchRegistered(bytes32 indexed batchId, string ipfsCid, address[] recipients, uint256[] amounts)',
+    'function registerBatch(bytes32 batchId, string ipfsCid, address[] recipients, uint256[] amounts) external returns (bool)',
+    'function isBatchProcessed(bytes32 batchId) external view returns (bool)',
+    'event BatchRegistered(bytes32 indexed batchId, string ipfsCid, address indexed worker, uint256 totalReward, uint32 recipientsCount, uint64 timestamp)',
   ];
   ```
 - **Tabla de Tasas por Material (`MATERIAL_RATES`)**:

@@ -41,5 +41,10 @@ export class CreateCollectionDto {
   @Min(-180)
   @Max(180)
   longitude: number;
+
+  @ApiPropertyOptional({ example: 'https://...', description: 'URL de la foto opcional' })
+  @IsOptional()
+  @IsString()
+  photoUrl?: string;
 }
 

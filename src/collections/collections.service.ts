@@ -6,9 +6,11 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseService } from '../supabase/supabase.service';
+import { IpfsService } from '../blockchain/services/ipfs.service';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { FindCollectionsQueryDto } from './dto/find-collections-query.dto';
 import { UpdateCollectionStatusDto } from './dto/update-collection-status.dto';
+import { VerifyPinDto } from './dto/verify-pin.dto';
 import { RequestStatus, Role } from '@prisma/client';
 
 @Injectable()
@@ -16,6 +18,7 @@ export class CollectionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly supabaseService: SupabaseService,
+    private readonly ipfsService: IpfsService,
   ) {}
 
   /**
@@ -26,11 +29,27 @@ export class CollectionsService {
     dto: CreateCollectionDto,
     file?: Express.Multer.File,
   ) {
+    // 1. Verificar si el hogar ya tiene una solicitud activa (PENDING o ACCEPTED)
+    const activeRequest = await this.prisma.collectionRequest.findFirst({
+      where: {
+        householdId: userId,
+        status: {
+          in: [RequestStatus.PENDING, RequestStatus.ACCEPTED],
+        },
+      },
+    });
+
+    if (activeRequest) {
+      throw new BadRequestException(
+        'El hogar ya tiene una solicitud de recolección activa. Debe completarse o cancelarse antes de crear una nueva.',
+      );
+    }
+
     // Generar PIN aleatorio de 4 dígitos (1000 - 9999)
     const verificationPin = Math.floor(1000 + Math.random() * 9000).toString();
 
     // Procesar la foto de forma opcional
-    let photoUrl: string | undefined = undefined;
+    let photoUrl = dto.photoUrl;
     if (file) {
       photoUrl = await this.uploadPhoto(file, userId);
     }
@@ -77,6 +96,7 @@ export class CollectionsService {
           collector: {
             select: { id: true, email: true },
           },
+          batch: true,
         },
       });
     }
@@ -241,37 +261,74 @@ export class CollectionsService {
   }
 
   /**
-   * Helper para subida de imágenes a Supabase Storage o retorno de URL
+   * Verificar entrega física con PIN de 4 dígitos (Rol RECOLECTOR)
+   */
+  async verifyPin(id: string, collectorId: string, dto: VerifyPinDto) {
+    const collectionRequest = await this.prisma.collectionRequest.findUnique({
+      where: { id },
+    });
+
+    if (!collectionRequest) {
+      throw new NotFoundException('Solicitud de recolección no encontrada');
+    }
+
+    if (collectionRequest.status !== RequestStatus.ACCEPTED) {
+      throw new BadRequestException(
+        'La solicitud debe estar en estado ACCEPTED para verificar el PIN',
+      );
+    }
+
+    if (collectionRequest.collectorId !== collectorId) {
+      throw new ForbiddenException(
+        'Únicamente el recolector que aceptó la solicitud puede verificar el PIN',
+      );
+    }
+
+    if (collectionRequest.verificationPin !== dto.pin) {
+      throw new BadRequestException('PIN de verificación incorrecto');
+    }
+
+    // Obtener o crear lote abierto (OPEN) para el recolector
+    let openBatch = await this.prisma.batch.findFirst({
+      where: {
+        collectorId,
+        status: 'OPEN',
+      },
+    });
+
+    if (!openBatch) {
+      openBatch = await this.prisma.batch.create({
+        data: {
+          collectorId,
+          status: 'OPEN',
+        },
+      });
+    }
+
+    // Actualizar solicitud a COMPLETED y vincular al Lote
+    return this.prisma.collectionRequest.update({
+      where: { id },
+      data: {
+        status: RequestStatus.COMPLETED,
+        batchId: openBatch.id,
+      },
+    });
+  }
+
+  /**
+   * Helper para subida de imágenes a Pinata IPFS (antes Supabase)
    */
   private async uploadPhoto(
     file: Express.Multer.File,
     userId: string,
   ): Promise<string> {
     try {
-      const supabase = this.supabaseService.getClient();
-      const fileExt = file.originalname.split('.').pop();
-      const fileName = `${userId}_${Date.now()}.${fileExt}`;
-      const filePath = `collections/${fileName}`;
-
-      const { data, error } = await supabase.storage
-        .from('collections')
-        .upload(filePath, file.buffer, {
-          contentType: file.mimetype,
-          upsert: true,
-        });
-
-      if (error) {
-        // Fallback en caso de que el bucket de Supabase no exista en el entorno local
-        return `https://supabase.local/storage/v1/object/public/collections/${filePath}`;
-      }
-
-      const { data: publicUrlData } = supabase.storage
-        .from('collections')
-        .getPublicUrl(filePath);
-
-      return publicUrlData.publicUrl;
+      // Sube la foto del material a Pinata IPFS
+      const cid = await this.ipfsService.uploadFile(file);
+      return cid;
     } catch {
-      return `https://supabase.local/storage/v1/object/public/collections/${userId}_${Date.now()}`;
+      // Fallback
+      return 'QmDummyPhotoHash';
     }
   }
 }

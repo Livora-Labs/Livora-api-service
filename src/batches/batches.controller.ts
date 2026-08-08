@@ -34,8 +34,8 @@ export class BatchesController {
    * Devuelve el historial de lotes paginado con forzado de seguridad por rol.
    */
   @Get()
-  @Roles(Role.RECOLECTOR, Role.CENTRO_ACOPIO)
-  @ApiOperation({ summary: 'Listar historial de lotes paginado (Rol: RECOLECTOR / CENTRO_ACOPIO)' })
+  @Roles(Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @ApiOperation({ summary: 'Listar historial de lotes paginado (Rol: RECOLECTOR / CENTRO_ACOPIO / ALMACEN)' })
   async findAll(
     @CurrentUser() user: any,
     @Query() query: FindBatchesQueryDto,
@@ -70,13 +70,13 @@ export class BatchesController {
   }
 
   /**
-   * POST /batches/:id/receive (Rol: CENTRO_ACOPIO)
+   * POST /batches/:id/receive (Rol: CENTRO_ACOPIO / ALMACEN)
    * Endpoint crítico de pesaje industrial y patrón HTTP 202.
    */
   @Post(':id/receive')
   @HttpCode(HttpStatus.ACCEPTED)
-  @Roles(Role.CENTRO_ACOPIO)
-  @ApiOperation({ summary: 'Recepción del lote en Centro de Acopio (Dispara procesador Blockchain / BullMQ - HTTP 202)' })
+  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @ApiOperation({ summary: 'Recepción del lote en Centro de Acopio / Almacén (Dispara procesador Blockchain / BullMQ - HTTP 202)' })
   @ApiResponse({ status: 202, description: 'Recepción aceptada y trabajo encolado en BullMQ' })
   async receiveBatch(
     @Param('id', ParseUUIDPipe) id: string,

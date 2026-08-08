@@ -1,12 +1,16 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { IpfsService } from '../blockchain/services/ipfs.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { CreateCertificateDto } from '../certificates/dto/create-certificate.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @Injectable()
 export class SalesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly ipfsService: IpfsService,
+  ) {}
 
   /**
    * POST /sales (Rol: CENTRO_ACOPIO)
@@ -82,15 +86,42 @@ export class SalesService {
       throw new NotFoundException('La empresa compradora B2B especificada no existe');
     }
 
-    const fakeIpfsHash = `ipfs://Qm${Date.now().toString(36)}${Math.random().toString(36).substring(2, 12)}CertESG`;
+    // Subir metadatos de impacto ESG reales a Pinata IPFS
+    const ipfsHash = await this.ipfsService.uploadJson(
+      dto.esgImpact,
+      `certificate-${dto.buyerId}-${Date.now()}`,
+    );
 
     return this.prisma.certificate.create({
       data: {
         buyerId: dto.buyerId,
         esgImpact: dto.esgImpact,
-        ipfsHash: fakeIpfsHash,
+        ipfsHash,
         status: 'ACTIVE',
       },
     });
+  }
+
+  async getSalesForUser(userId: string, role: string) {
+    if (role === 'EMPRESA_B2B') {
+      return this.prisma.sale.findMany({
+        where: { buyerId: userId },
+        include: {
+          center: { select: { id: true, email: true } },
+          buyer: { select: { id: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    } else if (role === 'CENTRO_ACOPIO' || role === 'ALMACEN') {
+      return this.prisma.sale.findMany({
+        where: { centerId: userId },
+        include: {
+          buyer: { select: { id: true, email: true } },
+          center: { select: { id: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+    return [];
   }
 }
