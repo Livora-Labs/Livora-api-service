@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: livora-api
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build && npx prisma generate
+    startCommand: npx prisma migrate deploy && node dist/main
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: WALLET_ENCRYPTION_KEY
+        sync: false
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        value: 6379
+      - key: ARBITRUM_RPC_URL
+        sync: false
+      - key: WORKER_PRIVATE_KEY
+        sync: false
+      - key: ECOTOKEN_CONTRACT_ADDRESS
+        sync: false
+      - key: PINATA_API_KEY
+        sync: false
+      - key: PINATA_SECRET_KEY
+        sync: false
+      - key: IPFS_GATEWAY_URL
+        sync: false
