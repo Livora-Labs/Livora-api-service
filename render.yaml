@@ -3,13 +3,13 @@ services:
     name: livora-api
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build && npx prisma generate
-    startCommand: npx prisma migrate deploy && node dist/main
+    buildCommand: npm ci && npx prisma generate && npm run build
+    startCommand: npx prisma migrate deploy && npm run start:prod
     envVars:
+      - key: NODE_VERSION
+        value: 22.22.2
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 3000
       - key: DATABASE_URL
         sync: false
       - key: SUPABASE_URL
