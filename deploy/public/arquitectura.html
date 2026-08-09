@@ -1,0 +1,371 @@
+<title>Livora — Arquitectura del sistema</title>
+<style>
+  :root {
+    --bg: #F5F8F3;
+    --surface: #FFFFFF;
+    --ink: #212A20;
+    --muted: #64715D;
+    --line: #DAE2D2;
+    --eco: #2E8B57;
+    --eco-ink: #24714A;
+    --eco-soft: #E4F0E6;
+    --chain: #2B66C9;
+    --chain-soft: #E5EDFA;
+    --code-bg: #EDF2E9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141912;
+      --surface: #1C231A;
+      --ink: #E6ECE0;
+      --muted: #9AA78F;
+      --line: #303B2B;
+      --eco: #64C08E;
+      --eco-ink: #7BCC9E;
+      --eco-soft: #20301F;
+      --chain: #7FA8EF;
+      --chain-soft: #1E2A42;
+      --code-bg: #232D20;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141912;
+    --surface: #1C231A;
+    --ink: #E6ECE0;
+    --muted: #9AA78F;
+    --line: #303B2B;
+    --eco: #64C08E;
+    --eco-ink: #7BCC9E;
+    --eco-soft: #20301F;
+    --chain: #7FA8EF;
+    --chain-soft: #1E2A42;
+    --code-bg: #232D20;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 48px 20px 64px;
+  }
+  main { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 40px; }
+  code, .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  h1, h2 { line-height: 1.2; text-wrap: balance; margin: 0; }
+  h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
+  h2 { font-size: 19px; font-weight: 650; }
+  p { margin: 0; }
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--eco-ink);
+    font-weight: 600;
+  }
+  header { display: flex; flex-direction: column; gap: 14px; }
+  .lede { color: var(--muted); max-width: 62ch; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11.5px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    border-radius: 999px;
+    padding: 4px 11px;
+    color: var(--muted);
+  }
+  .chip.eco { border-color: var(--eco); color: var(--eco-ink); background: var(--eco-soft); }
+  .chip.chain { border-color: var(--chain); color: var(--chain); background: var(--chain-soft); }
+
+  section { display: flex; flex-direction: column; gap: 16px; }
+  figure { margin: 0; }
+  .diagram-scroll {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+    padding: 20px 12px;
+  }
+  .diagram-scroll svg { min-width: 860px; display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  figcaption { font-size: 13px; color: var(--muted); padding: 10px 4px 0; }
+
+  svg text { font-family: inherit; fill: var(--ink); }
+  svg .sub { fill: var(--muted); font-size: 10.5px; }
+  svg .edge { fill: var(--muted); font-size: 10.5px; }
+  svg .mono-t { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  svg .node { fill: var(--surface); stroke: var(--ink); stroke-width: 1.2; rx: 8; }
+  svg .modchip { fill: var(--eco-soft); stroke: var(--line); stroke-width: 1; rx: 6; }
+  svg .ext { fill: var(--bg); stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: none; rx: 8; }
+  svg .onchain { fill: var(--chain-soft); stroke: var(--chain); stroke-width: 1.4; rx: 8; }
+  svg .wire { stroke: var(--ink); stroke-width: 1.2; fill: none; }
+  svg .wire-chain { stroke: var(--chain); stroke-width: 1.4; fill: none; }
+  svg .wire-soft { stroke: var(--muted); stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
+
+  ol.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; counter-reset: paso; }
+  ol.steps li {
+    counter-increment: paso;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 13px 16px 13px 50px;
+    position: relative;
+    font-size: 14px;
+  }
+  ol.steps li::before {
+    content: counter(paso);
+    position: absolute;
+    left: 15px; top: 13px;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: var(--eco-soft);
+    color: var(--eco-ink);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  ol.steps b { display: block; font-weight: 650; margin-bottom: 2px; }
+  ol.steps span { color: var(--muted); }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .card.blue { border-color: var(--chain); }
+  .card h3 { margin: 0; font-size: 14px; font-weight: 650; }
+  .card.blue h3 { color: var(--chain); }
+  .card ul { margin: 0; padding-left: 18px; font-size: 13.5px; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }
+  .card ul b { color: var(--ink); font-weight: 600; }
+  .note { font-size: 13.5px; color: var(--muted); border-left: 3px solid var(--eco); padding-left: 14px; }
+
+  .layers { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+  .layer {
+    flex: 1 1 180px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 13.5px;
+  }
+  .layer b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--eco-ink); margin-bottom: 3px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .layer span { color: var(--muted); }
+  .layer-arrow { align-self: center; padding: 0 10px; color: var(--muted); font-size: 16px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 16px; border-top: 1px solid var(--line); vertical-align: top; }
+  thead th { border-top: none; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  td:first-child { white-space: nowrap; font-weight: 600; }
+  td:last-child { color: var(--muted); }
+
+  footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  a { color: var(--eco-ink); }
+  a:focus-visible { outline: 2px solid var(--eco); outline-offset: 2px; border-radius: 2px; }
+
+  @media (max-width: 640px) {
+    ol.steps, .split { grid-template-columns: 1fr; }
+    body { padding: 28px 14px 48px; }
+    h1 { font-size: 25px; }
+  }
+</style>
+
+<main>
+  <header>
+    <p class="eyebrow">Livora Labs · ETH Lima 2026</p>
+    <h1>Livora — Arquitectura del sistema</h1>
+    <p class="lede">Plataforma de reciclaje trazable con liquidación de incentivos Web3. Cada kilo pesado y verificado en un centro de acopio se ancla en Arbitrum y dispara el minteo automático de EcoTokens hacia las billeteras de hogares y recolectores.</p>
+    <div class="chips">
+      <span class="chip eco">NestJS 11</span>
+      <span class="chip chain">Arbitrum Stylus · Rust→WASM</span>
+      <span class="chip">PostgreSQL 16 + PostGIS</span>
+      <span class="chip">Redis · BullMQ</span>
+      <span class="chip">IPFS · Pinata</span>
+      <span class="chip">Supabase Auth</span>
+      <span class="chip">Ethers.js v6</span>
+      <span class="chip">Socket.IO</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Vista general</h2>
+    <figure>
+      <div class="diagram-scroll">
+      <svg viewBox="0 0 960 500" role="img" aria-label="Diagrama de arquitectura: las apps móviles consumen el API Gateway NestJS, que usa Supabase Auth, PostgreSQL y Redis; un worker asíncrono publica el manifiesto en IPFS y registra el lote en el contrato EcoBatchRegistry de Arbitrum Stylus, notificando el resultado por WebSockets.">
+        <defs>
+          <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L8,4 L0,8 z" fill="var(--ink)"></path>
+          </marker>
+          <marker id="ahm" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"></path>
+          </marker>
+          <marker id="ahc" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L8,4 L0,8 z" fill="var(--chain)"></path>
+          </marker>
+        </defs>
+
+        <!-- Clientes -->
+        <rect class="node" x="24" y="110" width="170" height="70" rx="8"></rect>
+        <text x="109" y="140" text-anchor="middle" font-size="12.5" font-weight="600">App móvil</text>
+        <text x="109" y="158" text-anchor="middle" class="sub">HOGAR · RECOLECTOR</text>
+
+        <rect class="node" x="24" y="230" width="170" height="70" rx="8"></rect>
+        <text x="109" y="260" text-anchor="middle" font-size="12.5" font-weight="600">App Centro de Acopio</text>
+        <text x="109" y="278" text-anchor="middle" class="sub">pesaje · recepción</text>
+
+        <!-- API Gateway -->
+        <rect class="node" x="250" y="72" width="230" height="300" rx="10"></rect>
+        <text x="365" y="100" text-anchor="middle" font-size="13.5" font-weight="700">API Gateway</text>
+        <text x="365" y="117" text-anchor="middle" class="sub">NestJS · REST + WebSockets</text>
+
+        <rect class="modchip" x="266" y="136" width="198" height="30" rx="6"></rect>
+        <text x="365" y="155" text-anchor="middle" font-size="11.5">Auth &amp; Users · wallet custodial</text>
+        <rect class="modchip" x="266" y="174" width="198" height="30" rx="6"></rect>
+        <text x="365" y="193" text-anchor="middle" font-size="11.5">Collections · matching PostGIS</text>
+        <rect class="modchip" x="266" y="212" width="198" height="30" rx="6"></rect>
+        <text x="365" y="231" text-anchor="middle" font-size="11.5">Batches · idempotencia 409</text>
+        <rect class="modchip" x="266" y="250" width="198" height="30" rx="6"></rect>
+        <text x="365" y="269" text-anchor="middle" font-size="11.5">Stores · B2B · Sales</text>
+        <rect class="modchip" x="266" y="288" width="198" height="30" rx="6"></rect>
+        <text x="365" y="307" text-anchor="middle" font-size="11.5">WebSockets · Socket.IO</text>
+
+        <!-- Clientes -> Gateway -->
+        <line class="wire" x1="198" y1="145" x2="244" y2="145" marker-end="url(#ah)"></line>
+        <text x="221" y="136" text-anchor="middle" class="edge">REST · JWT</text>
+        <line class="wire" x1="198" y1="248" x2="244" y2="248" marker-end="url(#ah)"></line>
+        <line class="wire-soft" x1="250" y1="282" x2="202" y2="282" marker-end="url(#ahm)"></line>
+        <text x="222" y="298" text-anchor="middle" class="edge">tiempo real</text>
+
+        <!-- Supabase -->
+        <rect class="ext" x="548" y="64" width="180" height="52" rx="8"></rect>
+        <text x="638" y="86" text-anchor="middle" font-size="12.5" font-weight="600">Supabase Auth</text>
+        <text x="638" y="103" text-anchor="middle" class="sub">IdP · emisión y firma de JWT</text>
+        <line class="wire" x1="480" y1="90" x2="542" y2="90" marker-end="url(#ah)"></line>
+        <text x="511" y="81" text-anchor="middle" class="edge">valida JWT</text>
+
+        <!-- PostgreSQL -->
+        <rect class="ext" x="548" y="150" width="180" height="56" rx="8"></rect>
+        <text x="638" y="173" text-anchor="middle" font-size="12.5" font-weight="600">PostgreSQL + PostGIS</text>
+        <text x="638" y="191" text-anchor="middle" class="sub">Prisma ORM · dominio y estados</text>
+        <line class="wire" x1="480" y1="178" x2="542" y2="178" marker-end="url(#ah)"></line>
+        <text x="511" y="169" text-anchor="middle" class="edge">SQL</text>
+
+        <!-- Redis -->
+        <rect class="ext" x="548" y="240" width="180" height="56" rx="8"></rect>
+        <text x="638" y="263" text-anchor="middle" font-size="12.5" font-weight="600">Redis · BullMQ</text>
+        <text x="638" y="281" text-anchor="middle" class="sub mono-t">blockchain-queue</text>
+        <line class="wire" x1="480" y1="268" x2="542" y2="268" marker-end="url(#ah)"></line>
+        <text x="511" y="259" text-anchor="middle" class="edge">encola · 202</text>
+
+        <!-- Worker -->
+        <rect class="node" x="548" y="340" width="180" height="64" rx="8"></rect>
+        <text x="638" y="366" text-anchor="middle" font-size="12.5" font-weight="600">BlockchainProcessor</text>
+        <text x="638" y="384" text-anchor="middle" class="sub">worker asíncrono · Ethers v6</text>
+        <line class="wire" x1="638" y1="296" x2="638" y2="334" marker-end="url(#ah)"></line>
+        <text x="648" y="319" class="edge">consume</text>
+
+        <!-- IPFS -->
+        <rect class="ext" x="772" y="292" width="168" height="52" rx="8"></rect>
+        <text x="856" y="314" text-anchor="middle" font-size="12.5" font-weight="600">IPFS · Pinata</text>
+        <text x="856" y="331" text-anchor="middle" class="sub">manifiesto del lote</text>
+        <polyline class="wire" points="728,352 752,352 752,318 766,318" marker-end="url(#ah)"></polyline>
+        <text x="748" y="306" text-anchor="middle" class="edge">pin JSON → CID</text>
+
+        <!-- Arbitrum -->
+        <rect class="onchain" x="772" y="386" width="168" height="84" rx="8"></rect>
+        <text x="856" y="410" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--chain)">Arbitrum Stylus</text>
+        <text x="856" y="428" text-anchor="middle" class="sub mono-t">EcoBatchRegistry · Rust→WASM</text>
+        <text x="856" y="446" text-anchor="middle" class="sub">ERC-20 ECO · mint 80/20</text>
+        <text x="856" y="461" text-anchor="middle" class="sub">evento BatchRegistered</text>
+        <polyline class="wire-chain" points="728,392 752,392 752,428 766,428" marker-end="url(#ahc)"></polyline>
+        <text x="741" y="445" text-anchor="middle" class="edge mono-t" fill="var(--chain)">register_batch()</text>
+
+        <!-- Retorno WebSocket -->
+        <polyline class="wire-soft" points="548,372 514,372 514,307 486,307" marker-end="url(#ahm)"></polyline>
+        <text x="514" y="345" text-anchor="middle" class="edge" transform="rotate(-90 508 345)">txHash · evento</text>
+      </svg>
+      </div>
+      <figcaption>El pesaje de un lote responde de inmediato (HTTP 202) y delega a un worker el anclaje en IPFS, la transacción en Arbitrum y la notificación en tiempo real al centro de acopio.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Ciclo de vida de un lote</h2>
+    <ol class="steps">
+      <li><b>Pesaje industrial</b><span><code>POST /batches/:id/receive</code> valida el estado <code>IN_TRANSIT</code> y responde <code>202 Accepted</code>; el lote pasa a <code>PROCESSING</code>.</span></li>
+      <li><b>Encolado resiliente</b><span>Job en <code>blockchain-queue</code> (BullMQ) con 3 reintentos y backoff exponencial ante fallos de RPC o Pinata.</span></li>
+      <li><b>Manifiesto en IPFS</b><span>Participantes, materiales y pesos reales se fijan en Pinata; se obtiene el <code>CID</code> content-addressed.</span></li>
+      <li><b>Cálculo de incentivos</b><span>Tarifas por material (PET 10 ECO/kg, aluminio 15…), distribución <b>80% hogares / 20% recolector</b>, resolución de wallets vía Prisma.</span></li>
+      <li><b>Transacción on-chain</b><span><code>register_batch(batchId, cid, wallets[], montos[])</code>: minteo vectorizado y atómico de ECO a N beneficiarios en una sola transacción.</span></li>
+      <li><b>Confirmación</b><span>Estado <code>RECEIVED</code> en PostgreSQL y evento Socket.IO con el <code>txHash</code> al centro de acopio.</span></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Diseño híbrido on-chain / off-chain</h2>
+    <div class="split">
+      <div class="card blue">
+        <h3>On-chain — Arbitrum Stylus</h3>
+        <ul>
+          <li><b>batch_id</b> (bytes32) y <b>timestamp</b> sellados</li>
+          <li><b>CID de IPFS</b> — ancla criptográfica del manifiesto</li>
+          <li><b>Saldos ERC-20</b> de EcoToken y recompensa total del lote</li>
+          <li>Evento <b>BatchRegistered</b> auditable por terceros</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Off-chain — IPFS + PostgreSQL</h3>
+        <ul>
+          <li><b>Manifiesto completo</b>: desglose por material, kg en báscula</li>
+          <li><b>Participantes</b> y solicitudes de recolección vinculadas</li>
+          <li><b>Estados operativos</b> del flujo (OPEN → … → CONSOLIDATED)</li>
+          <li><b>Geodatos</b> PostGIS para matching por proximidad</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note">El contrato solo almacena el hash CID de 46 caracteres: alterar un byte del manifiesto lo invalida. Arbitrum actúa como notario criptográfico del dato completo a una fracción del costo de guardarlo en la cadena.</p>
+  </section>
+
+  <section>
+    <h2>Idempotencia en 3 capas — cero pagos duplicados</h2>
+    <div class="layers">
+      <div class="layer"><b>1 · Redis lock</b><span>rechaza reintentos simultáneos del mismo lote (HTTP 409)</span></div>
+      <div class="layer-arrow">→</div>
+      <div class="layer"><b>2 · Job ID BullMQ</b><span>un solo job por lote: <code>batch-${batchId}</code></span></div>
+      <div class="layer-arrow">→</div>
+      <div class="layer"><b>3 · On-chain</b><span>el mapping <code>processed_batches</code> revierte con <code>BatchAlreadyExists</code></span></div>
+    </div>
+    <p class="note">El acceso al contrato está restringido por roles: solo la wallet del worker backend (o el owner) puede registrar lotes y mintear. Cada usuario recibe al registrarse una billetera Ethereum custodial con clave privada cifrada — usuarios sin experiencia cripto participan sin fricción.</p>
+  </section>
+
+  <section>
+    <h2>Stack y despliegue</h2>
+    <table>
+      <thead><tr><th>Capa</th><th>Tecnología</th><th>Rol</th></tr></thead>
+      <tbody>
+        <tr><td>Smart contract</td><td>Rust + Stylus SDK → WASM</td><td>ERC-20 EcoToken + registro inmutable de lotes en un solo contrato; ABI 100% compatible con EVM. Desplegado en Arbitrum Sepolia.</td></tr>
+        <tr><td>Backend</td><td>NestJS 11 · Prisma · Ethers v6</td><td>API Gateway modular, worker BullMQ, firma de transacciones con wallet en custodia.</td></tr>
+        <tr><td>Datos</td><td>PostgreSQL 16 + PostGIS · Redis 7</td><td>Dominio y trazabilidad operativa; colas y adapter de Socket.IO.</td></tr>
+        <tr><td>Identidad</td><td>Supabase Auth</td><td>IdP gestionado: credenciales, hashing y emisión de JWT; UUID maestro sincronizado con la tabla local.</td></tr>
+        <tr><td>Infraestructura</td><td>AWS Lightsail · Docker Compose</td><td>API + Postgres + Redis en contenedores; entorno alterno en Render.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    <span>Livora Labs — ETH Lima 2026</span>
+    <span>Backend: monorepo NestJS · Contrato: <span class="mono">contracts/ecotoken_registry</span></span>
+  </footer>
+</main>

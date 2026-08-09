@@ -1,10 +1,23 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: livora_caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/public:/srv/public:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
   api:
     build: .
     container_name: livora_api
     restart: always
-    ports:
-      - "80:3000"
     env_file: .env.production
     depends_on:
       - postgres
@@ -31,3 +44,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  caddy_data:
+  caddy_config:
