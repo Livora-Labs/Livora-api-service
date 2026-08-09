@@ -6,7 +6,7 @@ services:
     buildCommand: npm install && npm run build && npx prisma generate
     # El proyecto no usa migraciones (no existe prisma/migrations), por eso
     # `migrate deploy` no aplicaba nada: db push sincroniza el esquema real.
-    startCommand: npx prisma db push && node dist/main
+    startCommand: npx prisma db push && node dist/src/main
     envVars:
       - key: NODE_ENV
         value: production
