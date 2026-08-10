@@ -1,100 +1,152 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# ♻️ Livora — Reciclaje trazable con incentivos Web3 en Arbitrum
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+**Livora** convierte cada kilo de material reciclado en un hecho verificable on-chain y en un pago automático. Los hogares separan residuos, los recolectores los consolidan en lotes y los centros de acopio los pesan industrialmente; el contrato inteligente en **Arbitrum Stylus** calcula las recompensas a partir de los pesos verificados y mintea **EcoTokens (ECO)** directamente a las billeteras de los participantes.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Proyecto presentado en la **Hackathon Ethereum Lima 2026**.
 
-# Livora
+## 🌐 Enlaces en vivo
 
-## Description
+| Recurso | URL |
+|---|---|
+| API en producción (HTTPS) | https://52.200.2.107.sslip.io |
+| Swagger — documentación interactiva | https://52.200.2.107.sslip.io/api/docs |
+| Arquitectura del sistema | https://52.200.2.107.sslip.io/arquitectura |
+| Contrato `EcoBatchRegistry` en Arbitrum Sepolia | https://sepolia.arbiscan.io/address/0xdbe5cc4b3d5a5a1d1f6b1d702367c44a2056c2d8 |
+| Demo del cálculo on-chain (evento `BatchWeighed`) | https://sepolia.arbiscan.io/tx/0x54e8f64b6c6d0e3a8738b4a0ddc862a07601ce8c386deaf995d5dbb829b4caba |
 
-**Livora** es el backend y API Gateway de la plataforma de reciclaje trazable y liquidación de incentivos Web3 (NestJS, PostgreSQL, Prisma, Redis, Supabase & Arbitrum Stylus).
+## 🏗️ Arquitectura
 
-## Project setup
-
-```bash
-$ npm install
+```
+Apps (HOGAR / RECOLECTOR / CENTRO)
+        │  REST + JWT · WebSockets
+        ▼
+API Gateway NestJS ──► Supabase Auth (IdP) · PostgreSQL+PostGIS (Prisma) · Redis (BullMQ)
+        │  pesaje industrial → HTTP 202 + job encolado
+        ▼
+Worker asíncrono ──► IPFS/Pinata (manifiesto → CID)
+        │
+        ▼
+Arbitrum Stylus · EcoBatchRegistry (Rust→WASM)
+   tarifas × peso · split 80/20 · minteo ERC-20 atómico
+        │
+        ▼
+PostgreSQL (estado RECEIVED) + notificación Socket.IO en tiempo real
 ```
 
-## Compile and run the project
+El cálculo de incentivos ocurre **dentro del contrato**: el backend solo reporta pesos en gramos y el contrato aplica las tarifas por material (PET 10 ECO/kg, aluminio 15, vidrio 3…) y la distribución 80% hogares / 20% recolector, emitiendo el evento `BatchWeighed` como auditoría pública. Detalle completo en la [página de arquitectura](https://52.200.2.107.sslip.io/arquitectura) y en [`docs/specs/`](docs/specs/).
+
+## 🧰 Stack
+
+NestJS 11 · TypeScript · Prisma · PostgreSQL 16 + PostGIS · Redis 7 + BullMQ · Socket.IO · Supabase Auth · Ethers.js v6 · IPFS (Pinata) · **Rust + Arbitrum Stylus SDK** · Docker
+
+## 🚀 Instalación y ejecución local
+
+### Requisitos previos
+
+- Node.js 22+
+- Docker y Docker Compose
+- (Solo para el contrato) Rust 1.90 + `cargo-stylus` 0.10.2
+
+### 1. Clonar e instalar dependencias
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+git clone https://github.com/Livora-Labs/Livora-api-service.git
+cd Livora-api-service
+npm install
 ```
 
-## Run tests
+### 2. Levantar PostgreSQL y Redis
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+docker compose up -d
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### 3. Configurar variables de entorno
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+cp .env.example .env
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Completar en `.env`:
 
-## Resources
+| Variable | Descripción |
+|---|---|
+| `DATABASE_URL` | Conexión a Postgres (el compose local expone el puerto definido en `DB_PORT`) |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_JWT_SECRET` | Proyecto de Supabase Auth (gratuito) |
+| `WALLET_ENCRYPTION_KEY` | Clave de 32 bytes para cifrar las billeteras custodiales |
+| `ARBITRUM_RPC_URL` | RPC de Arbitrum Sepolia: `https://sepolia-rollup.arbitrum.io/rpc` |
+| `WORKER_PRIVATE_KEY` | Clave privada de la wallet que firma las transacciones (necesita ETH de Sepolia del [faucet](https://faucet.quicknode.com/arbitrum/sepolia)) |
+| `ECOTOKEN_CONTRACT_ADDRESS` | Contrato desplegado (ya incluido en `.env.example`) |
+| `PINATA_API_KEY` / `PINATA_SECRET_KEY` | Credenciales de [Pinata](https://pinata.cloud) para IPFS (con fallback en desarrollo si faltan) |
 
-Check out a few resources that may come in handy when working with NestJS:
+### 4. Sincronizar el esquema de base de datos
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```bash
+npx prisma db push
+npx prisma generate
+```
 
-## Support
+### 5. Arrancar el API
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```bash
+npm run start:dev
+```
 
-## Stay in touch
+Swagger disponible en `http://localhost:3000/api/docs`. Los archivos `*.http` de la raíz (`auth-test.http`, `collections-test.http`, `batches-test.http`, `stores-test.http`) contienen requests de ejemplo de los flujos completos.
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+### Pruebas
 
-## License
+```bash
+npm run test        # unitarias
+npm run test:e2e    # end-to-end
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+## ⛓️ Contrato inteligente (Arbitrum Stylus)
+
+Ubicación: [`contracts/ecotoken_registry/`](contracts/ecotoken_registry/) — Rust compilado a WASM con el Stylus SDK. Fusiona el token ERC-20 **EcoToken** con el registro inmutable de lotes y el **cálculo de incentivos on-chain** (`register_batch_weighed`).
+
+```bash
+# Toolchain
+rustup toolchain install 1.90.0
+rustup target add wasm32-unknown-unknown --toolchain 1.90.0
+cargo +1.90.0 install cargo-stylus --version 0.10.2 --locked
+
+cd contracts/ecotoken_registry
+
+# Compilar y validar
+cargo check --target wasm32-unknown-unknown
+cargo stylus check --endpoint https://sepolia-rollup.arbitrum.io/rpc
+
+# Desplegar (requiere ETH de Sepolia en la wallet)
+cargo stylus deploy \
+  --endpoint https://sepolia-rollup.arbitrum.io/rpc \
+  --private-key $WORKER_PRIVATE_KEY \
+  --no-verify --max-fee-per-gas-gwei 0.5
+```
+
+Tras el deploy, llamar `init(workerAddress)` (siembra las tarifas por material y fija el split 80/20) y actualizar `ECOTOKEN_CONTRACT_ADDRESS` en `.env`.
+
+## ☁️ Despliegue en producción
+
+- **AWS Lightsail (actual):** `docker-compose.prod.yml` levanta API + Postgres/PostGIS + Redis + Caddy (TLS automático con Let's Encrypt). Deploy con un comando: `./deploy-lightsail.sh <IP> <llave.pem>`.
+- **Render (alternativo):** configuración lista en `render.yaml`.
+
+## 📁 Estructura del proyecto
+
+```
+src/
+├── auth/ users/          # Identidad híbrida Supabase + billeteras custodiales
+├── collections/          # Solicitudes de recolección · matching por proximidad (PostGIS)
+├── batches/              # Lotes: consolidación, tránsito, pesaje, idempotencia
+├── blockchain/           # Worker BullMQ: IPFS → pesos → contrato Stylus
+├── websockets/           # Notificaciones en tiempo real (Socket.IO + Redis adapter)
+├── stores/ b2b/ sales/   # Canje QR, liquidaciones, transferencias B2B, ventas
+└── inventory/ centers/   # Inventario por centro y conservación de masa
+contracts/
+└── ecotoken_registry/    # Contrato Stylus en Rust (ERC-20 + registro + cálculo on-chain)
+docs/specs/               # Especificaciones técnicas por módulo
+```
+
+## 👥 Equipo
+
+**Livora Labs** — Hackathon Ethereum Lima 2026.
