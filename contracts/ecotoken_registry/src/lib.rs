@@ -20,6 +20,14 @@ sol! {
         uint64 timestamp
     );
     event WorkerUpdated(address indexed old_worker, address indexed new_worker);
+    event MaterialRateUpdated(bytes32 indexed material_code, uint256 rate_wei_per_kg);
+    event BatchWeighed(
+        bytes32 indexed batch_id,
+        uint256 total_weight_grams,
+        uint256 total_reward,
+        uint256 collector_reward,
+        uint32 households_count
+    );
 
     // --- Custom Errors ---
     error Unauthorized(address caller);
@@ -46,8 +54,18 @@ sol_storage! {
         mapping(bytes32 => uint64) batch_timestamps;
         mapping(bytes32 => uint256) batch_total_rewards;
         mapping(bytes32 => uint32) batch_recipients_counts;
+
+        // On-chain incentive economics (wei ECO per kg, keyed by ASCII bytes32 code)
+        mapping(bytes32 => uint256) material_rates;
+        uint256 default_rate;
+        uint256 collector_share_bps;
     }
 }
+
+/// 1 ECO = 1e18 wei
+const ONE_ECO: u64 = 1_000_000_000_000_000_000;
+/// Basis points denominator (10000 = 100%)
+const BPS_DENOMINATOR: u64 = 10_000;
 
 #[public]
 impl EcoBatchRegistry {
@@ -59,6 +77,30 @@ impl EcoBatchRegistry {
         let sender = msg::sender();
         self.owner.set(sender);
         self.worker_address.set(worker);
+
+        // Seed incentive economics: rates in wei ECO per kg
+        let eco = U256::from(ONE_ECO);
+        self.default_rate.set(U256::from(5u64) * eco);
+        self.collector_share_bps.set(U256::from(2_000u64)); // 20% collector / 80% households
+        let presets: [(&[u8], u64); 7] = [
+            (b"PET", 10),
+            (b"CARTON", 5),
+            (b"VIDRIO", 3),
+            (b"PLASTICO", 10),
+            (b"ALUMINIO", 15),
+            (b"TETRAPAK", 4),
+            (b"PAPEL", 5),
+        ];
+        for (name, rate) in presets {
+            let code = Self::material_code(name);
+            let rate_wei = U256::from(rate) * eco;
+            self.material_rates.insert(code, rate_wei);
+            evm::log(MaterialRateUpdated {
+                material_code: code,
+                rate_wei_per_kg: rate_wei,
+            });
+        }
+
         evm::log(WorkerUpdated {
             old_worker: Address::ZERO,
             new_worker: worker,
@@ -224,6 +266,147 @@ impl EcoBatchRegistry {
         Ok(true)
     }
 
+    /// Registers a batch from raw material weights: the CONTRACT computes the
+    /// rewards on-chain (rate per material × weight, then 80/20 split), so the
+    /// backend can no longer dictate arbitrary mint amounts — token issuance is
+    /// verifiably derived from the weighed materials anchored in the IPFS manifest.
+    ///
+    /// * `material_codes` — ASCII bytes32 codes (e.g. "PET"), normalized uppercase without accents.
+    /// * `weights_grams`  — integer weights in grams (kg × 1000), parallel to `material_codes`.
+    pub fn register_batch_weighed(
+        &mut self,
+        batch_id: B256,
+        ipfs_cid: String,
+        collector: Address,
+        households: Vec<Address>,
+        material_codes: Vec<B256>,
+        weights_grams: Vec<U256>,
+    ) -> Result<bool, Vec<u8>> {
+        // 1. Access control + idempotency (same 3-layer guarantee as register_batch)
+        self.require_worker_or_owner()?;
+        if self.processed_batches.get(batch_id) {
+            return Err(BatchAlreadyExists { batch_id }.abi_encode());
+        }
+        if batch_id == B256::ZERO {
+            return Err(InvalidBatchId {}.abi_encode());
+        }
+        if collector == Address::ZERO {
+            return Err(InvalidRecipient {}.abi_encode());
+        }
+        if material_codes.len() != weights_grams.len() || material_codes.is_empty() {
+            return Err(InvalidInputLength {}.abi_encode());
+        }
+
+        // 2. On-chain incentive math: total = Σ weight_g × rate_wei_per_kg / 1000
+        let grams_per_kg = U256::from(1_000u64);
+        let mut total_reward = U256::ZERO;
+        let mut total_weight_grams = U256::ZERO;
+        for i in 0..material_codes.len() {
+            let weight = weights_grams[i];
+            if weight == U256::ZERO {
+                return Err(ZeroAmount {}.abi_encode());
+            }
+            let rate = self.effective_rate(material_codes[i]);
+            total_reward += weight * rate / grams_per_kg;
+            total_weight_grams += weight;
+        }
+        if total_reward == U256::ZERO {
+            return Err(ZeroAmount {}.abi_encode());
+        }
+
+        // 3. Distribution: collector takes `collector_share_bps`; households split the
+        //    rest equally; rounding dust goes to the collector so supply is conserved.
+        //    With no households the collector receives 100% (defensive edge case).
+        let households_count = households.len();
+        let mut collector_reward = total_reward;
+        let mut per_household = U256::ZERO;
+        if households_count > 0 {
+            collector_reward =
+                total_reward * self.collector_share_bps.get() / U256::from(BPS_DENOMINATOR);
+            let households_total = total_reward - collector_reward;
+            per_household = households_total / U256::from(households_count as u64);
+            collector_reward +=
+                households_total - per_household * U256::from(households_count as u64);
+        }
+
+        // 4. Atomic vectorized minting
+        let now = block::timestamp();
+        if per_household > U256::ZERO {
+            for household in households.iter() {
+                if *household == Address::ZERO {
+                    return Err(InvalidRecipient {}.abi_encode());
+                }
+                self.internal_mint(*household, per_household);
+            }
+        }
+        if collector_reward > U256::ZERO {
+            self.internal_mint(collector, collector_reward);
+        }
+
+        // 5. Traceability record (collector + households)
+        let recipients_count = (households_count as u32) + 1;
+        self.processed_batches.insert(batch_id, true);
+        self.batch_timestamps.insert(batch_id, U64::from(now));
+        self.batch_total_rewards.insert(batch_id, total_reward);
+        self.batch_recipients_counts.insert(batch_id, U32::from(recipients_count));
+
+        // 6. On-chain audit trail
+        evm::log(BatchWeighed {
+            batch_id,
+            total_weight_grams,
+            total_reward,
+            collector_reward,
+            households_count: households_count as u32,
+        });
+        evm::log(BatchRegistered {
+            batch_id,
+            ipfs_cid,
+            worker: msg::sender(),
+            total_reward,
+            recipients_count,
+            timestamp: now,
+        });
+
+        Ok(true)
+    }
+
+    // --- On-chain incentive economics (owner/worker governed) ---
+
+    /// Set the reward rate (wei ECO per kg) for a material code.
+    pub fn set_material_rate(&mut self, material_code: B256, rate_wei_per_kg: U256) -> Result<(), Vec<u8>> {
+        self.require_worker_or_owner()?;
+        self.material_rates.insert(material_code, rate_wei_per_kg);
+        evm::log(MaterialRateUpdated { material_code, rate_wei_per_kg });
+        Ok(())
+    }
+
+    /// Set the fallback rate for uncatalogued materials.
+    pub fn set_default_rate(&mut self, rate_wei_per_kg: U256) -> Result<(), Vec<u8>> {
+        self.require_worker_or_owner()?;
+        self.default_rate.set(rate_wei_per_kg);
+        Ok(())
+    }
+
+    /// Set the collector share in basis points (2000 = 20%).
+    pub fn set_collector_share_bps(&mut self, bps: U256) -> Result<(), Vec<u8>> {
+        self.require_worker_or_owner()?;
+        if bps > U256::from(BPS_DENOMINATOR) {
+            return Err(InvalidInputLength {}.abi_encode());
+        }
+        self.collector_share_bps.set(bps);
+        Ok(())
+    }
+
+    /// Effective rate (wei ECO per kg) for a material code; falls back to default_rate.
+    pub fn material_rate(&self, material_code: B256) -> U256 {
+        self.effective_rate(material_code)
+    }
+
+    /// Current collector share in basis points.
+    pub fn collector_share(&self) -> U256 {
+        self.collector_share_bps.get()
+    }
+
     /// Check if a batch_id has already been processed.
     pub fn is_batch_processed(&self, batch_id: B256) -> bool {
         self.processed_batches.get(batch_id)
@@ -245,6 +428,24 @@ impl EcoBatchRegistry {
 
 // --- Internal Helper Functions ---
 impl EcoBatchRegistry {
+    /// ASCII name → bytes32 code (left-aligned, zero-padded), matching
+    /// ethers.encodeBytes32String on the backend side.
+    fn material_code(name: &[u8]) -> B256 {
+        let mut buf = [0u8; 32];
+        let n = name.len().min(32);
+        buf[..n].copy_from_slice(&name[..n]);
+        B256::from(buf)
+    }
+
+    fn effective_rate(&self, code: B256) -> U256 {
+        let stored = self.material_rates.get(code);
+        if stored == U256::ZERO {
+            self.default_rate.get()
+        } else {
+            stored
+        }
+    }
+
     fn require_worker_or_owner(&self) -> Result<(), Vec<u8>> {
         let sender = msg::sender();
         let worker = self.worker_address.get();

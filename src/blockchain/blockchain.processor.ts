@@ -11,6 +11,7 @@ import {
   BLOCKCHAIN_QUEUE,
   DEFAULT_MATERIAL_RATE,
   MATERIAL_RATES,
+  normalizeMaterialCode,
 } from './blockchain.constants';
 
 @Processor(BLOCKCHAIN_QUEUE)
@@ -71,43 +72,38 @@ export class BlockchainProcessor extends WorkerHost {
       const ipfsCid = await this.ipfsService.uploadBatchMetadata(manifest);
 
       // -------------------------------------------------------------------
-      // PASO B: Calcular la distribución de EcoTokens
+      // PASO B: Preparar vectores de pesos y participantes. El cálculo de
+      // tokens (tarifa × peso y distribución 80/20) ocurre ON-CHAIN dentro
+      // del contrato Stylus: el backend solo reporta pesos verificables.
       // -------------------------------------------------------------------
-      this.logger.log(`[Paso B] Calculando distribución de EcoTokens para el lote ${batchId}...`);
-      const totalTokens = this.calculateTotalTokens(materialsActual);
+      const { materialCodes, weightsGrams, totalKg } =
+        this.buildWeightVectors(materialsActual);
+
+      if (materialCodes.length === 0) {
+        throw new Error(
+          `El lote ${batchId} no contiene materiales con peso > 0; nada que registrar on-chain.`,
+        );
+      }
+
+      const estimatedTokens = this.calculateTotalTokens(materialsActual);
+      this.logger.log(
+        `[Paso B] ${materialCodes.length} materiales, ${totalKg} kg totales. Estimación off-chain: ~${estimatedTokens} ECO (el monto final lo calcula el contrato).`,
+      );
 
       // Normalizar lista de IDs de hogares para evitar errores
       const validHouseholdIds: string[] = Array.isArray(householdIds)
         ? householdIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
         : [];
 
-      let collectorTokens = 0;
-      let householdTokensEach = 0;
-
-      // Validación defensiva de Hogares Vacíos:
       if (validHouseholdIds.length === 0) {
         this.logger.warn(
-          `El lote ${batchId} no posee hogares vinculados. Redirigiendo el 100% de los EcoTokens (${totalTokens}) al recolector ${collectorId}.`,
+          `El lote ${batchId} no posee hogares vinculados. El contrato asignará el 100% de la recompensa al recolector ${collectorId}.`,
         );
-        collectorTokens = totalTokens;
-        householdTokensEach = 0;
-      } else {
-        const householdShareTotal = totalTokens * 0.8;
-        collectorTokens = totalTokens * 0.2;
-        householdTokensEach = householdShareTotal / validHouseholdIds.length;
       }
 
-      this.logger.log(
-        `Total Tokens: ${totalTokens} | Recolector: ${collectorTokens} | Por Hogar (${validHouseholdIds.length}): ${householdTokensEach}`,
-      );
-
       // Consulta de Billeteras en Prisma con mapeo defensivo y fallbacks
-      const { recipients, amounts } = await this.buildRecipientsAndAmounts(
-        collectorId,
-        collectorTokens,
-        validHouseholdIds,
-        householdTokensEach,
-      );
+      const { collectorWallet, householdWallets } =
+        await this.resolveParticipantWallets(collectorId, validHouseholdIds);
 
       // -------------------------------------------------------------------
       // PASO C: Convertir batchId (UUID string) a bytes32 hex
@@ -119,11 +115,13 @@ export class BlockchainProcessor extends WorkerHost {
       // PASO D: Invocar contrato inteligente on-chain en Arbitrum
       // -------------------------------------------------------------------
       this.logger.log(`[Paso D] Enviando transacción on-chain al contrato inteligente...`);
-      const receipt = await this.blockchainService.executeBatchRegistration(
+      const receipt = await this.blockchainService.executeBatchRegistrationWeighed(
         batchIdBytes32,
         ipfsCid,
-        recipients,
-        amounts,
+        collectorWallet,
+        householdWallets,
+        materialCodes,
+        weightsGrams,
       );
 
       const txHash = receipt?.hash || `0xmock${Date.now().toString(16)}`;
@@ -294,18 +292,44 @@ export class BlockchainProcessor extends WorkerHost {
   }
 
   /**
-   * Mapea IDs de recolector y hogares a sus direcciones de billetera guardadas en Prisma.
-   * Aplica fallback (ethers.ZeroAddress o la dirección del worker) si algún usuario no tiene billetera.
+   * Convierte materialsActual ({"Cartón": 12.5}) en los vectores paralelos que
+   * consume el contrato: códigos bytes32 normalizados y pesos enteros en gramos.
    */
-  private async buildRecipientsAndAmounts(
-    collectorId: string,
-    collectorTokens: number,
-    householdIds: string[],
-    householdTokensEach: number,
-  ): Promise<{ recipients: string[]; amounts: bigint[] }> {
-    const recipients: string[] = [];
-    const amounts: bigint[] = [];
+  private buildWeightVectors(materialsActual: Record<string, any>): {
+    materialCodes: string[];
+    weightsGrams: bigint[];
+    totalKg: number;
+  } {
+    const materialCodes: string[] = [];
+    const weightsGrams: bigint[] = [];
+    let totalKg = 0;
 
+    if (materialsActual && typeof materialsActual === 'object') {
+      for (const [material, rawWeight] of Object.entries(materialsActual)) {
+        const weightKg =
+          typeof rawWeight === 'number' ? rawWeight : parseFloat(String(rawWeight)) || 0;
+        const grams = Math.round(weightKg * 1000);
+        if (grams <= 0) continue;
+
+        materialCodes.push(
+          ethers.encodeBytes32String(normalizeMaterialCode(material)),
+        );
+        weightsGrams.push(BigInt(grams));
+        totalKg += weightKg;
+      }
+    }
+
+    return { materialCodes, weightsGrams, totalKg };
+  }
+
+  /**
+   * Mapea IDs de recolector y hogares a sus direcciones de billetera guardadas en Prisma.
+   * Aplica fallback (la dirección del worker o ethers.ZeroAddress) si algún usuario no tiene billetera.
+   */
+  private async resolveParticipantWallets(
+    collectorId: string,
+    householdIds: string[],
+  ): Promise<{ collectorWallet: string; householdWallets: string[] }> {
     // Fallback por defecto si la dirección de un usuario es nula o inválida
     const workerAddress = this.blockchainService.getWorkerAddress();
     const fallbackAddress =
@@ -330,11 +354,9 @@ export class BlockchainProcessor extends WorkerHost {
       }
     }
 
-    recipients.push(collectorWallet);
-    amounts.push(ethers.parseUnits(collectorTokens.toFixed(4), 18));
-
     // 2. Resolver billeteras de Hogares (si existen)
-    if (householdIds.length > 0 && householdTokensEach > 0) {
+    const householdWallets: string[] = [];
+    if (householdIds.length > 0) {
       const householdUsers = await this.prisma.user.findMany({
         where: { id: { in: householdIds } },
         select: { id: true, walletAddress: true },
@@ -355,11 +377,10 @@ export class BlockchainProcessor extends WorkerHost {
           );
         }
 
-        recipients.push(hWallet);
-        amounts.push(ethers.parseUnits(householdTokensEach.toFixed(4), 18));
+        householdWallets.push(hWallet);
       }
     }
 
-    return { recipients, amounts };
+    return { collectorWallet, householdWallets };
   }
 }

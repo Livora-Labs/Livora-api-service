@@ -130,6 +130,70 @@ export class BlockchainService implements OnModuleInit {
   }
 
   /**
+   * Invoca register_batch_weighed: el contrato calcula on-chain las recompensas
+   * (tarifa por material × peso y distribución 80/20), de modo que el backend
+   * solo reporta pesos y no puede dictar montos arbitrarios de minteo.
+   * @param batchIdBytes32 Identificador del lote en formato bytes32 hex
+   * @param ipfsCid CID del manifiesto en IPFS
+   * @param collector Dirección del recolector
+   * @param households Direcciones de los hogares participantes
+   * @param materialCodes Códigos bytes32 de materiales (encodeBytes32String)
+   * @param weightsGrams Pesos enteros en gramos, paralelos a materialCodes
+   */
+  async executeBatchRegistrationWeighed(
+    batchIdBytes32: string,
+    ipfsCid: string,
+    collector: string,
+    households: string[],
+    materialCodes: string[],
+    weightsGrams: bigint[],
+  ): Promise<ethers.TransactionReceipt> {
+    this.logger.log(
+      `Ejecutando register_batch_weighed en contrato [${await this.contract.getAddress()}]. BatchIdBytes32: ${batchIdBytes32}, CID: ${ipfsCid}, materiales: ${materialCodes.length}, hogares: ${households.length}`,
+    );
+
+    try {
+      const contractAddress = await this.contract.getAddress();
+      if (contractAddress === ethers.ZeroAddress) {
+        this.logger.warn(
+          'El contrato inteligente está apuntando a ZeroAddress. Simulando confirmación de transacción on-chain.',
+        );
+        return {
+          hash: `0xmock${Date.now().toString(16)}00000000000000000000000000000000000000000000`,
+          status: 1,
+          blockNumber: 1234567,
+          from: this.wallet.address,
+          to: contractAddress,
+        } as unknown as ethers.TransactionReceipt;
+      }
+
+      const tx = await this.contract.registerBatchWeighed(
+        batchIdBytes32,
+        ipfsCid,
+        collector,
+        households,
+        materialCodes,
+        weightsGrams,
+      );
+
+      this.logger.log(`Transacción enviada a Arbitrum. Tx Hash: ${tx.hash}`);
+
+      const receipt = await tx.wait();
+      this.logger.log(
+        `Transacción confirmada en bloque #${receipt.blockNumber}. Tx Hash: ${receipt.hash}`,
+      );
+
+      return receipt;
+    } catch (error: any) {
+      this.logger.error(
+        `Error al ejecutar transacción on-chain register_batch_weighed: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Retorna la dirección de la billetera del worker.
    */
   getWorkerAddress(): string {

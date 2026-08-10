@@ -171,6 +171,20 @@
   td:first-child { white-space: nowrap; font-weight: 600; }
   td:last-child { color: var(--muted); }
 
+  .tag { display: inline-block; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; border-radius: 999px; padding: 2px 9px; font-weight: 700; vertical-align: 2px; }
+  .tag.now { background: var(--eco-soft); color: var(--eco-ink); }
+  .tag.road { border: 1px solid var(--line); color: var(--muted); }
+  .invariant {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 14px;
+    text-align: center;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 18px;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
   footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
   a { color: var(--eco-ink); }
   a:focus-visible { outline: 2px solid var(--eco); outline-offset: 2px; border-radius: 2px; }
@@ -339,6 +353,36 @@
   </section>
 
   <section>
+    <h2>Modelo de confianza — resolviendo el oráculo físico</h2>
+    <p class="lede">El punto de confianza crítico de todo sistema de trazabilidad es el puente entre el mundo físico y la cadena. Livora lo ataca con verificación cruzada entre actores con intereses contrapuestos (teoría de juegos) y un invariante de conservación de masa.</p>
+    <div class="split">
+      <div class="card">
+        <h3>Capa 1 · Hogar ↔ Recolector <span class="tag now">hoy</span></h3>
+        <ul>
+          <li>El hogar declara <b>itemsEstimated</b>; el recolector valida en persona con <b>PIN de 4 dígitos</b> y confirma lo recogido.</li>
+          <li>Dos partes independientes registran el mismo material: las discrepancias quedan trazadas por solicitud.</li>
+          <li><b>EcoScore</b> <span class="tag road">roadmap</span>: precisión ±10% otorga multiplicador de bonificación; desvíos &gt;30% reiterados penalizan reputación y bloquean temporalmente nuevas solicitudes.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Capa 2 · Recolector ↔ Centro <span class="tag now">hoy</span></h3>
+        <ul>
+          <li>El pesaje industrial (<b>materialsActual</b>) se contrasta contra la suma de recolecciones vinculadas al lote.</li>
+          <li><b>Margen de merma tolerable</b> <span class="tag road">roadmap</span>: 3–5% por humedad y descarte no reciclable.</li>
+          <li>Si la discrepancia excede el margen, el lote pasa a <b>Auditoría / Disputa</b> y la liberación de tokens se suspende hasta revisión.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Capa 3 · Invariante de conservación de masa <span class="tag road">roadmap</span></h3>
+      <p style="font-size: 13.5px; color: var(--muted); margin: 0;">Un centro de acopio no puede vender ni despachar material que nunca registró como entrada. Los módulos de inventario y transferencias B2B ya registran ambos lados de la ecuación; el sistema valida el invariante al autorizar cada despacho:</p>
+      <p class="invariant">∑ salidas<sub>B2B</sub>(centro, material)  ≤  ∑ entradas<sub>pesadas</sub>(centro, material) × (1 − δ<sub>merma</sub>)</p>
+      <p style="font-size: 13.5px; color: var(--muted); margin: 0;">Inflar un pesaje de entrada genera inventario fantasma que la contabilidad de masa expone en el primer despacho; subdeclarar entradas impide vender el material real. El equilibrio racional de cada actor es reportar el peso verdadero.</p>
+    </div>
+    <p class="note"><b>Custodia de claves</b> — hoy: billeteras custodiales con clave privada cifrada (AES) por usuario. Roadmap: llave maestra en KMS/HSM, flujo de exportación a self-custody y migración a <b>account abstraction (ERC-4337)</b>, nativo en Arbitrum, para que el usuario gradúe de custodial a soberano sin fricción.</p>
+  </section>
+
+  <section>
     <h2>Idempotencia en 3 capas — cero pagos duplicados</h2>
     <div class="layers">
       <div class="layer"><b>1 · Redis lock</b><span>rechaza reintentos simultáneos del mismo lote (HTTP 409)</span></div>
@@ -348,6 +392,41 @@
       <div class="layer"><b>3 · On-chain</b><span>el mapping <code>processed_batches</code> revierte con <code>BatchAlreadyExists</code></span></div>
     </div>
     <p class="note">El acceso al contrato está restringido por roles: solo la wallet del worker backend (o el owner) puede registrar lotes y mintear. Cada usuario recibe al registrarse una billetera Ethereum custodial con clave privada cifrada — usuarios sin experiencia cripto participan sin fricción.</p>
+  </section>
+
+  <section>
+    <h2>Por qué Stylus y no Solidity</h2>
+    <div class="split">
+      <div class="card blue">
+        <h3>Minteo vectorizado de lotes <span class="tag now">hoy</span></h3>
+        <ul>
+          <li>Un lote industrial consolida <b>50–100 hogares</b>: <code>register_batch</code> itera y mintea a todos en <b>una transacción atómica</b>.</li>
+          <li>En Solidity, loops de ese tamaño arriesgan <b>out-of-gas</b>; la ejecución WASM itera estructuras dinámicas en memoria a un costo marginal muy inferior al de la EVM interpretada.</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <h3>Matemática de impacto on-chain <span class="tag road">roadmap</span></h3>
+        <ul>
+          <li>Tarifas por material, distribución 80/20 y <b>equivalencias de CO₂ evitado</b> por polímero (PET, HDPE…) calculadas dentro del contrato con aritmética de punto fijo.</li>
+          <li>El backend deja de dictar montos: los tokens se <b>derivan verificablemente de los pesos</b> — menos confianza en el worker, más cómputo donde WASM abarata.</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <h3>Verificación criptográfica de evidencia <span class="tag road">roadmap</span></h3>
+        <ul>
+          <li>Validación de <b>pruebas de Merkle</b> sobre el manifiesto IPFS (fotos, recolecciones individuales) con librerías nativas de Rust, antes de autorizar el minteo.</li>
+          <li>Verificar hashes y estructuras de datos complejas es prohibitivo en gas EVM; en WASM es cómputo casi nativo.</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <h3>Seguridad por construcción <span class="tag now">hoy</span></h3>
+        <ul>
+          <li>El <b>borrow checker</b> de Rust elimina clases enteras de errores de memoria y aritmética en compilación.</li>
+          <li><b>Reentrada desactivada por defecto</b> a nivel de VM en Stylus — sin depender de guards externos.</li>
+          <li>Sin el límite <i>stack too deep</i> de Solidity al manejar lotes con metadatos ricos (pesos por material, participantes, geodatos).</li>
+        </ul>
+      </div>
+    </div>
   </section>
 
   <section>
