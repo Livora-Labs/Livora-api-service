@@ -301,10 +301,10 @@
         <rect class="onchain" x="772" y="386" width="168" height="84" rx="8"></rect>
         <text x="856" y="410" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--chain)">Arbitrum Stylus</text>
         <text x="856" y="428" text-anchor="middle" class="sub mono-t">EcoBatchRegistry · Rust→WASM</text>
-        <text x="856" y="446" text-anchor="middle" class="sub">ERC-20 ECO · mint 80/20</text>
-        <text x="856" y="461" text-anchor="middle" class="sub">evento BatchRegistered</text>
+        <text x="856" y="446" text-anchor="middle" class="sub">tarifas × peso · 80/20 on-chain</text>
+        <text x="856" y="461" text-anchor="middle" class="sub">ERC-20 ECO · evento BatchWeighed</text>
         <polyline class="wire-chain" points="728,392 752,392 752,428 766,428" marker-end="url(#ahc)"></polyline>
-        <text x="741" y="445" text-anchor="middle" class="edge mono-t" fill="var(--chain)">register_batch()</text>
+        <text x="741" y="445" text-anchor="middle" class="edge mono-t" fill="var(--chain)">pesos (g)</text>
 
         <!-- Retorno WebSocket -->
         <polyline class="wire-soft" points="548,372 514,372 514,307 486,307" marker-end="url(#ahm)"></polyline>
@@ -321,8 +321,8 @@
       <li><b>Pesaje industrial</b><span><code>POST /batches/:id/receive</code> valida el estado <code>IN_TRANSIT</code> y responde <code>202 Accepted</code>; el lote pasa a <code>PROCESSING</code>.</span></li>
       <li><b>Encolado resiliente</b><span>Job en <code>blockchain-queue</code> (BullMQ) con 3 reintentos y backoff exponencial ante fallos de RPC o Pinata.</span></li>
       <li><b>Manifiesto en IPFS</b><span>Participantes, materiales y pesos reales se fijan en Pinata; se obtiene el <code>CID</code> content-addressed.</span></li>
-      <li><b>Cálculo de incentivos</b><span>Tarifas por material (PET 10 ECO/kg, aluminio 15…), distribución <b>80% hogares / 20% recolector</b>, resolución de wallets vía Prisma.</span></li>
-      <li><b>Transacción on-chain</b><span><code>register_batch(batchId, cid, wallets[], montos[])</code>: minteo vectorizado y atómico de ECO a N beneficiarios en una sola transacción.</span></li>
+      <li><b>Preparación de vectores</b><span>Normalización de materiales a códigos bytes32, pesos a gramos enteros y resolución de wallets custodiales vía Prisma.</span></li>
+      <li><b>Cálculo y minteo on-chain</b><span><code>register_batch_weighed(id, cid, recolector, hogares[], materiales[], gramos[])</code>: el <b>contrato</b> aplica tarifas (PET 10 ECO/kg, aluminio 15…) y el split <b>80/20</b>, y mintea atómico a N beneficiarios.</span></li>
       <li><b>Confirmación</b><span>Estado <code>RECEIVED</code> en PostgreSQL y evento Socket.IO con el <code>txHash</code> al centro de acopio.</span></li>
     </ol>
   </section>
@@ -405,10 +405,10 @@
         </ul>
       </div>
       <div class="card blue">
-        <h3>Matemática de impacto on-chain <span class="tag road">roadmap</span></h3>
+        <h3>Matemática de incentivos on-chain <span class="tag now">hoy</span></h3>
         <ul>
-          <li>Tarifas por material, distribución 80/20 y <b>equivalencias de CO₂ evitado</b> por polímero (PET, HDPE…) calculadas dentro del contrato con aritmética de punto fijo.</li>
-          <li>El backend deja de dictar montos: los tokens se <b>derivan verificablemente de los pesos</b> — menos confianza en el worker, más cómputo donde WASM abarata.</li>
+          <li><code>register_batch_weighed</code> recibe <b>pesos en gramos</b>: el contrato aplica las tarifas por material y el split 80/20 con aritmética de punto fijo, y emite el evento <code>BatchWeighed</code> como auditoría pública del cálculo.</li>
+          <li>El backend ya no dicta montos: los tokens se <b>derivan verificablemente de los pesos</b> anclados en IPFS. Tarifas gobernables on-chain (<code>set_material_rate</code>). Equivalencias de CO₂ por polímero: <span class="tag road">roadmap</span>.</li>
         </ul>
       </div>
       <div class="card blue">
@@ -445,6 +445,6 @@
 
   <footer>
     <span>Livora Labs — ETH Lima 2026</span>
-    <span>Backend: monorepo NestJS · Contrato: <span class="mono">contracts/ecotoken_registry</span></span>
+    <span>Contrato en Arbitrum Sepolia: <a href="https://sepolia.arbiscan.io/address/0xdbe5cc4b3d5a5a1d1f6b1d702367c44a2056c2d8" rel="noopener">0xdbe5…c2d8</a></span>
   </footer>
 </main>
