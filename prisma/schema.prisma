@@ -98,6 +98,8 @@ model Batch {
   consolidatedBatchId String?            @db.Uuid
   ipfsCid             String?
   txHash              String?
+  hasDiscrepancy      Boolean            @default(false)
+  discrepancyNote     String?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
@@ -167,12 +169,13 @@ model KycApplication {
 }
 
 model Sale {
-  id          String   @id @default(uuid()) @db.Uuid
-  weightKg    Float
-  totalAmount Float
-  buyerId     String   @db.Uuid
-  centerId    String   @db.Uuid
-  createdAt   DateTime @default(now())
+  id           String   @id @default(uuid()) @db.Uuid
+  materialType String
+  weightKg     Float
+  totalAmount  Float
+  buyerId      String   @db.Uuid
+  centerId     String   @db.Uuid
+  createdAt    DateTime @default(now())
 
   buyer  User @relation("BuyerSales", fields: [buyerId], references: [id])
   center User @relation("CenterSales", fields: [centerId], references: [id])

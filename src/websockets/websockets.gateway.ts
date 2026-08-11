@@ -58,8 +58,11 @@ export class WebsocketsGateway
       try {
         decoded = jwt.verify(token, jwtSecret) as SupabaseJwtPayload;
       } catch (verifyError: any) {
-        this.logger.warn(`jwt.verify falló (${verifyError.message}). Usando jwt.decode de fallback para asignación de salas.`);
-        decoded = jwt.decode(token) as SupabaseJwtPayload;
+        this.logger.warn(
+          `Conexión de WebSocket rechazada (Socket ID ${client.id}): JWT verify falló (${verifyError.message})`,
+        );
+        client.disconnect();
+        return;
       }
 
       const userId = decoded?.sub;

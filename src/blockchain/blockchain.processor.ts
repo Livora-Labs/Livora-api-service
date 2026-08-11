@@ -133,7 +133,7 @@ export class BlockchainProcessor extends WorkerHost {
       await this.prisma.$transaction(async (tx) => {
         await tx.batch.update({
           where: { id: batchId },
-          data: { status: BatchStatus.RECEIVED, ipfsCid, txHash },
+          data: { status: BatchStatus.RECEIVED, ipfsCid: this.ipfsService.getGatewayUrl(ipfsCid), txHash },
         });
 
         if (materialsActual && typeof materialsActual === 'object') {
@@ -187,7 +187,7 @@ export class BlockchainProcessor extends WorkerHost {
         batchId,
         status: BatchStatus.RECEIVED,
         txHash,
-        ipfsCid,
+        ipfsCid: this.ipfsService.getGatewayUrl(ipfsCid),
       });
 
       const explorerUrl = `https://sepolia.arbiscan.io/tx/${txHash}`;
@@ -201,7 +201,7 @@ export class BlockchainProcessor extends WorkerHost {
       return {
         success: true,
         batchId,
-        ipfsCid,
+        ipfsCid: this.ipfsService.getGatewayUrl(ipfsCid),
         txHash,
         explorerUrl,
         status: BatchStatus.RECEIVED,

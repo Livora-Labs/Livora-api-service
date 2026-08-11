@@ -1,7 +1,12 @@
-import { IsNotEmpty, IsNumber, IsPositive, IsUUID } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsPositive, IsString, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateSaleDto {
+  @ApiProperty({ example: 'PET', description: 'Tipo de material vendido' })
+  @IsNotEmpty({ message: 'materialType es requerido' })
+  @IsString({ message: 'materialType debe ser una cadena de texto' })
+  materialType: string;
+
   @ApiProperty({ example: 500.0, description: 'Peso total vendido en kilogramos' })
   @IsNotEmpty({ message: 'weightKg es requerido' })
   @IsNumber({}, { message: 'weightKg debe ser un número' })

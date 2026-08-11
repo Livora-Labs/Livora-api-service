@@ -20,9 +20,49 @@ export class B2bTransfersService {
       throw new NotFoundException('La empresa compradora B2B no existe.');
     }
 
-    // Validate each material line has sufficient stock
+    const SHRINK_FACTOR = 0.05; // 5% de merma industrial
+
+    // Validate each material line has sufficient stock and satisfies conservation of mass
     for (const line of dto.materials) {
       const normMaterial = line.material.toUpperCase().trim();
+
+      // 1. Validar la restricción contable de conservación de masa:
+      //    salidas_totales <= entradas_pesadas * (1 - SHRINK_FACTOR)
+      const aggregateIn = await this.prisma.inventoryMovement.aggregate({
+        where: {
+          centerId,
+          materialType: { equals: normMaterial, mode: 'insensitive' },
+          type: 'IN',
+        },
+        _sum: {
+          quantityKg: true,
+        },
+      });
+
+      const aggregateOut = await this.prisma.inventoryMovement.aggregate({
+        where: {
+          centerId,
+          materialType: { equals: normMaterial, mode: 'insensitive' },
+          type: 'OUT',
+        },
+        _sum: {
+          quantityKg: true,
+        },
+      });
+
+      const totalIn = aggregateIn._sum.quantityKg || 0;
+      const totalOut = aggregateOut._sum.quantityKg || 0;
+
+      const allowedLimit = totalIn * (1 - SHRINK_FACTOR);
+      if (totalOut + line.weightKg > allowedLimit) {
+        throw new BadRequestException(
+          `La transferencia excede el límite contable de conservación de masa con merma del 5% para ${normMaterial}. ` +
+          `Total entradas: ${totalIn} kg (límite con merma: ${allowedLimit.toFixed(2)} kg), ` +
+          `Salidas históricas: ${totalOut} kg, Solicitado: ${line.weightKg} kg.`
+        );
+      }
+
+      // 2. Validar existencia de stock físico libre en InventoryItem
       const invItem = await this.prisma.inventoryItem.findFirst({
         where: {
           centerId,

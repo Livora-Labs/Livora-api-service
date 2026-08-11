@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -16,6 +17,8 @@ import { CreateConsolidatedBatchDto } from './dto/create-consolidated-batch.dto'
 
 @Injectable()
 export class BatchesService {
+  private readonly logger = new Logger(BatchesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue('blockchain-queue') private readonly blockchainQueue: Queue,
@@ -220,13 +223,55 @@ export class BatchesService {
       );
     }
 
+    // --- Control de Discrepancias entre Estimación y Pesaje Real ---
+    let totalEstimatedKg = 0;
+    for (const req of batch.requests) {
+      if (req.itemsEstimated && typeof req.itemsEstimated === 'object') {
+        const estimatedObj = req.itemsEstimated as Record<string, any>;
+        for (const val of Object.values(estimatedObj)) {
+          const weight = parseFloat(String(val)) || 0;
+          totalEstimatedKg += weight;
+        }
+      }
+    }
+
+    let totalActualKg = 0;
+    if (dto.materialsActual && typeof dto.materialsActual === 'object') {
+      for (const val of Object.values(dto.materialsActual)) {
+        const weight = parseFloat(String(val)) || 0;
+        totalActualKg += weight;
+      }
+    }
+
+    let hasDiscrepancy = false;
+    let discrepancyNote: string | null = null;
+    const tolerance = 0.30; // Tolerancia del ±30%
+
+    if (totalEstimatedKg > 0) {
+      const diffPercent = Math.abs(totalActualKg - totalEstimatedKg) / totalEstimatedKg;
+      if (diffPercent > tolerance) {
+        hasDiscrepancy = true;
+        discrepancyNote = `Discrepancia detectada: estimado total de ${totalEstimatedKg.toFixed(2)} kg vs pesado real de ${totalActualKg.toFixed(2)} kg (desviación del ${(diffPercent * 100).toFixed(1)}%, excede ±30% de tolerancia)`;
+      }
+    } else if (totalActualKg > 0) {
+      hasDiscrepancy = true;
+      discrepancyNote = `Discrepancia detectada: estimado era 0 kg pero se pesaron reales ${totalActualKg.toFixed(2)} kg`;
+    }
+
+    if (hasDiscrepancy) {
+      this.logger.warn(`[ALERTA DE DESVÍO DE PESO] Lote ${id}: ${discrepancyNote}`);
+    }
+
     // Transacción Asíncrona:
-    // a) Actualiza el estado del lote a PROCESSING y guarda los pesos industriales en materialsActual
+    // a) Actualiza el estado del lote a PROCESSING, guarda los pesos industriales en materialsActual,
+    //    y persiste el estado de discrepancia.
     const updatedBatch = await this.prisma.batch.update({
       where: { id },
       data: {
         status: BatchStatus.PROCESSING,
         materialsActual: dto.materialsActual,
+        hasDiscrepancy,
+        discrepancyNote,
       },
     });
 
@@ -236,6 +281,7 @@ export class BatchesService {
     );
 
     // b) Encola un trabajo (Job) en la cola 'blockchain-queue' con el payload completo (Opción 3A)
+    //    y define un jobId determinista e inmutable basado en el ID del lote para la idempotencia de Capa 2.
     const jobPayload = {
       batchId: updatedBatch.id,
       collectorId: updatedBatch.collectorId,
@@ -244,7 +290,11 @@ export class BatchesService {
       householdIds,
     };
 
-    const job = await this.blockchainQueue.add('process-batch-blockchain', jobPayload);
+    const job = await this.blockchainQueue.add(
+      'process-batch-blockchain',
+      jobPayload,
+      { jobId: `batch-${updatedBatch.id}` },
+    );
 
     // c) Responde de inmediato al cliente con HTTP 202 Accepted
     return {

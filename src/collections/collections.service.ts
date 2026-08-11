@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { IpfsService } from '../blockchain/services/ipfs.service';
+import { WebsocketsService } from '../websockets/websockets.service';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { FindCollectionsQueryDto } from './dto/find-collections-query.dto';
 import { UpdateCollectionStatusDto } from './dto/update-collection-status.dto';
@@ -19,6 +20,7 @@ export class CollectionsService {
     private readonly prisma: PrismaService,
     private readonly supabaseService: SupabaseService,
     private readonly ipfsService: IpfsService,
+    private readonly websocketsService: WebsocketsService,
   ) {}
 
   /**
@@ -48,13 +50,16 @@ export class CollectionsService {
     // Generar PIN aleatorio de 4 dígitos (1000 - 9999)
     const verificationPin = Math.floor(1000 + Math.random() * 9000).toString();
 
-    // Procesar la foto de forma opcional
+    // Procesar la foto de forma opcional y formatear con IPFS gateway
     let photoUrl = dto.photoUrl;
     if (file) {
-      photoUrl = await this.uploadPhoto(file, userId);
+      const cid = await this.uploadPhoto(file, userId);
+      photoUrl = this.ipfsService.getGatewayUrl(cid);
+    } else if (photoUrl) {
+      photoUrl = this.ipfsService.getGatewayUrl(photoUrl);
     }
 
-    return this.prisma.collectionRequest.create({
+    const newRequest = await this.prisma.collectionRequest.create({
       data: {
         status: RequestStatus.PENDING,
         itemsEstimated: dto.itemsEstimated,
@@ -66,6 +71,11 @@ export class CollectionsService {
         householdId: userId,
       },
     });
+
+    // Emitir en tiempo real que se ha creado la solicitud para que los recolectores la vean
+    this.websocketsService.emitCollectionCreated(newRequest);
+
+    return newRequest;
   }
 
   /**
@@ -136,7 +146,10 @@ export class CollectionsService {
           LIMIT ${limit} OFFSET ${skip};
         `;
 
-        return results;
+        return results.map((item) => ({
+          ...item,
+          photoUrl: item.photoUrl ? this.ipfsService.getGatewayUrl(item.photoUrl) : item.photoUrl,
+        }));
       }
 
       // Si el recolector no provee lat/lng, retornar todas las solicitudes PENDING con paginación

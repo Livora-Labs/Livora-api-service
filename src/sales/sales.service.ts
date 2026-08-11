@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { IpfsService } from '../blockchain/services/ipfs.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -24,17 +24,91 @@ export class SalesService {
       throw new NotFoundException('La empresa compradora B2B no existe o no posee el rol EMPRESA_B2B');
     }
 
-    return this.prisma.sale.create({
-      data: {
+    const normMaterial = dto.materialType.toUpperCase().trim();
+    const SHRINK_FACTOR = 0.05; // 5% de merma industrial
+
+    // 1. Validar la restricción contable de conservación de masa:
+    //    salidas_totales <= entradas_pesadas * (1 - SHRINK_FACTOR)
+    const aggregateIn = await this.prisma.inventoryMovement.aggregate({
+      where: {
         centerId,
-        buyerId: dto.buyerId,
-        weightKg: dto.weightKg,
-        totalAmount: dto.totalAmount,
+        materialType: { equals: normMaterial, mode: 'insensitive' },
+        type: 'IN',
       },
-      include: {
-        buyer: { select: { id: true, email: true } },
-        center: { select: { id: true, email: true } },
+      _sum: {
+        quantityKg: true,
       },
+    });
+
+    const aggregateOut = await this.prisma.inventoryMovement.aggregate({
+      where: {
+        centerId,
+        materialType: { equals: normMaterial, mode: 'insensitive' },
+        type: 'OUT',
+      },
+      _sum: {
+        quantityKg: true,
+      },
+    });
+
+    const totalIn = aggregateIn._sum.quantityKg || 0;
+    const totalOut = aggregateOut._sum.quantityKg || 0;
+
+    const allowedLimit = totalIn * (1 - SHRINK_FACTOR);
+    if (totalOut + dto.weightKg > allowedLimit) {
+      throw new BadRequestException(
+        `La venta excede el límite contable de conservación de masa con merma del 5% para ${normMaterial}. ` +
+        `Total entradas: ${totalIn} kg (límite con merma: ${allowedLimit.toFixed(2)} kg), ` +
+        `Salidas históricas: ${totalOut} kg, Solicitado: ${dto.weightKg} kg.`
+      );
+    }
+
+    // 2. Verificar existencia de stock libre en InventoryItem
+    const invItem = await this.prisma.inventoryItem.findFirst({
+      where: {
+        centerId,
+        materialType: { equals: normMaterial, mode: 'insensitive' },
+      },
+    });
+
+    if (!invItem || invItem.quantityKg < dto.weightKg) {
+      throw new BadRequestException(
+        `Inventario insuficiente para ${normMaterial}. Disponible: ${invItem?.quantityKg || 0} kg, requerido: ${dto.weightKg} kg.`
+      );
+    }
+
+    // 3. Ejecutar la operación de venta de manera atómica
+    return this.prisma.$transaction(async (tx) => {
+      // Decrementar stock
+      await tx.inventoryItem.update({
+        where: { id: invItem.id },
+        data: { quantityKg: { decrement: dto.weightKg } },
+      });
+
+      // Crear movimiento de salida (OUT)
+      await tx.inventoryMovement.create({
+        data: {
+          centerId,
+          materialType: normMaterial,
+          quantityKg: dto.weightKg,
+          type: 'OUT',
+        },
+      });
+
+      // Registrar venta
+      return tx.sale.create({
+        data: {
+          centerId,
+          buyerId: dto.buyerId,
+          materialType: normMaterial,
+          weightKg: dto.weightKg,
+          totalAmount: dto.totalAmount,
+        },
+        include: {
+          buyer: { select: { id: true, email: true } },
+          center: { select: { id: true, email: true } },
+        },
+      });
     });
   }
 

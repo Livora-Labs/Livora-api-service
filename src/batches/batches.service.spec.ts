@@ -134,13 +134,17 @@ describe('BatchesService', () => {
         batchId: 'batch-1',
         transactionJobId: 'job-12345',
       });
-      expect(queueMock.add).toHaveBeenCalledWith('process-batch-blockchain', {
-        batchId: 'batch-1',
-        collectorId: 'collector-1',
-        centerId: 'center-1',
-        materialsActual: materials,
-        householdIds: ['h-1', 'h-2'],
-      });
+      expect(queueMock.add).toHaveBeenCalledWith(
+        'process-batch-blockchain',
+        {
+          batchId: 'batch-1',
+          collectorId: 'collector-1',
+          centerId: 'center-1',
+          materialsActual: materials,
+          householdIds: ['h-1', 'h-2'],
+        },
+        { jobId: 'batch-batch-1' },
+      );
     });
 
     it('should throw ConflictException (HTTP 409) if batch is already PROCESSING or RECEIVED', async () => {
