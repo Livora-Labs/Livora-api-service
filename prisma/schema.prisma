@@ -335,3 +335,11 @@ model B2bTransfer {
   @@map("b2b_transfers")
 }
 
+
+model BetaSignup {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String
+  createdAt DateTime @default(now())
+
+  @@map("beta_signups")
+}

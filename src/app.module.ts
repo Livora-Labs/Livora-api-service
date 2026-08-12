@@ -18,6 +18,7 @@ import { WebsocketsModule } from './websockets/websockets.module';
 import { BlockchainModule } from './blockchain/blockchain.module';
 import { StoresModule } from './stores/stores.module';
 import { B2bTransfersModule } from './b2b/b2b-transfers.module';
+import { BetaModule } from './beta/beta.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -53,6 +54,7 @@ import { AppService } from './app.service';
     BlockchainModule,
     StoresModule,
     B2bTransfersModule,
+    BetaModule,
   ],
   controllers: [AppController],
   providers: [AppService],

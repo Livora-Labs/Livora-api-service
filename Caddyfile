@@ -4,9 +4,21 @@
 
 # HTTPS con certificado automático de Let's Encrypt (dominio sslip.io -> IP)
 52.200.2.107.sslip.io {
+	# Landing para usuarios finales en la raíz del dominio
+	handle / {
+		root * /srv/public
+		rewrite * /landing.html
+		file_server
+	}
 	handle /arquitectura* {
 		root * /srv/public
 		rewrite * /arquitectura.html
+		file_server
+	}
+	handle /app-release.apk {
+		root * /srv/public
+		header Content-Type application/vnd.android.package-archive
+		header Content-Disposition "attachment; filename=livora.apk"
 		file_server
 	}
 	handle {
