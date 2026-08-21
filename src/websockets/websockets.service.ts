@@ -12,7 +12,9 @@ export class WebsocketsService {
    * @param payload Datos de la recolección creada
    */
   emitCollectionCreated(payload: any): void {
-    this.logger.log(`Emitiendo evento 'collection:created' a la sala 'collectors:active'`);
+    this.logger.log(
+      `Emitiendo evento 'collection:created' a la sala 'collectors:active'`,
+    );
     this.websocketsGateway.server
       .to('collectors:active')
       .emit('collection:created', payload);
@@ -37,7 +39,9 @@ export class WebsocketsService {
    */
   emitStoreNotification(storeUserId: string, event: string, data: any): void {
     const room = `store:${storeUserId}`;
-    this.logger.log(`Emitiendo evento '${event}' a la sala privada de la tienda '${room}'`);
+    this.logger.log(
+      `Emitiendo evento '${event}' a la sala privada de la tienda '${room}'`,
+    );
     this.websocketsGateway.server.to(room).emit(event, data);
   }
 
@@ -46,7 +50,9 @@ export class WebsocketsService {
    */
   emitUserEvent(userId: string, event: string, data: any): void {
     const room = `user:${userId}`;
-    this.logger.log(`Emitiendo evento '${event}' a la sala de usuario '${room}'`);
+    this.logger.log(
+      `Emitiendo evento '${event}' a la sala de usuario '${room}'`,
+    );
     this.websocketsGateway.server.to(room).emit(event, data);
   }
 }

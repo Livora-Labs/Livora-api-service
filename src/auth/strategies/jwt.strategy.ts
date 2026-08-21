@@ -22,14 +22,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('SUPABASE_JWT_SECRET') || 'your_supabase_jwt_secret',
+      secretOrKey:
+        configService.get<string>('SUPABASE_JWT_SECRET') ||
+        'your_supabase_jwt_secret',
     });
   }
 
   async validate(payload: SupabaseJwtPayload) {
     const user = await this.usersService.findById(payload.sub);
     if (!user) {
-      throw new UnauthorizedException('Usuario no registrado o token no válido');
+      throw new UnauthorizedException(
+        'Usuario no registrado o token no válido',
+      );
     }
     const { encryptedPrivateKey, ...safeUser } = user;
     return safeUser;

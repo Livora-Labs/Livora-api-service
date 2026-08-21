@@ -24,7 +24,8 @@ export class AdminService {
   async createB2bApplication(dto: CreateB2bApplicationDto) {
     return {
       status: 'RECEIVED',
-      message: 'Solicitud B2B recibida exitosamente. Nuestro equipo se pondrá en contacto.',
+      message:
+        'Solicitud B2B recibida exitosamente. Nuestro equipo se pondrá en contacto.',
       companyName: dto.companyName,
       email: dto.email,
       taxId: dto.taxId,
@@ -56,7 +57,9 @@ export class AdminService {
     });
 
     if (!kycApp) {
-      throw new NotFoundException('Solicitud KYC no encontrada para este usuario');
+      throw new NotFoundException(
+        'Solicitud KYC no encontrada para este usuario',
+      );
     }
 
     return this.prisma.kycApplication.update({
@@ -92,7 +95,10 @@ export class AdminService {
     };
   }
 
-  async updateComplaintStatus(complaintId: string, dto: UpdateComplaintStatusDto) {
+  async updateComplaintStatus(
+    complaintId: string,
+    dto: UpdateComplaintStatusDto,
+  ) {
     const complaint = await this.prisma.complaint.findUnique({
       where: { id: complaintId },
     });

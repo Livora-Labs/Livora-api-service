@@ -42,14 +42,18 @@ export class WebsocketsGateway
         (client.handshake.auth?.token as string);
 
       if (!token) {
-        this.logger.warn(`Conexión rechazada (Socket ID ${client.id}): Token JWT no proporcionado.`);
+        this.logger.warn(
+          `Conexión rechazada (Socket ID ${client.id}): Token JWT no proporcionado.`,
+        );
         client.disconnect();
         return;
       }
 
       const jwtSecret = this.configService.get<string>('SUPABASE_JWT_SECRET');
       if (!jwtSecret) {
-        this.logger.error('SUPABASE_JWT_SECRET no configurado en variables de entorno.');
+        this.logger.error(
+          'SUPABASE_JWT_SECRET no configurado en variables de entorno.',
+        );
         client.disconnect();
         return;
       }
@@ -69,7 +73,9 @@ export class WebsocketsGateway
       const role = decoded?.role || decoded?.user_metadata?.role;
 
       if (!userId) {
-        this.logger.warn(`Conexión rechazada (Socket ID ${client.id}): Payload no contiene 'sub'.`);
+        this.logger.warn(
+          `Conexión rechazada (Socket ID ${client.id}): Payload no contiene 'sub'.`,
+        );
         client.disconnect();
         return;
       }
@@ -82,27 +88,37 @@ export class WebsocketsGateway
       // Todos los usuarios se unen a su sala privada
       const userRoom = `user:${userId}`;
       await client.join(userRoom);
-      this.logger.log(`Cliente ${client.id} unido a sala de usuario: ${userRoom}`);
+      this.logger.log(
+        `Cliente ${client.id} unido a sala de usuario: ${userRoom}`,
+      );
 
       if (role === 'CENTRO_ACOPIO' || role === 'ALMACEN') {
         const centerRoom = `center:${userId}`;
         await client.join(centerRoom);
-        this.logger.log(`Cliente ${client.id} (${role}) unido a sala privada: ${centerRoom}`);
+        this.logger.log(
+          `Cliente ${client.id} (${role}) unido a sala privada: ${centerRoom}`,
+        );
       } else if (role === 'RECOLECTOR') {
         const collectorRoom = 'collectors:active';
         await client.join(collectorRoom);
-        this.logger.log(`Cliente ${client.id} (RECOLECTOR) unido a sala general: ${collectorRoom}`);
+        this.logger.log(
+          `Cliente ${client.id} (RECOLECTOR) unido a sala general: ${collectorRoom}`,
+        );
       } else if (role === 'TIENDA') {
         const storeRoom = `store:${userId}`;
         await client.join(storeRoom);
-        this.logger.log(`Cliente ${client.id} (TIENDA) unido a sala privada: ${storeRoom}`);
+        this.logger.log(
+          `Cliente ${client.id} (TIENDA) unido a sala privada: ${storeRoom}`,
+        );
       }
 
       this.logger.log(
         `Cliente autenticado y conectado: Socket ${client.id} | User: ${userId} | Role: ${role || 'N/A'}`,
       );
     } catch (error) {
-      this.logger.error(`Falló autenticación JWT en Socket ${client.id}: ${error.message}`);
+      this.logger.error(
+        `Falló autenticación JWT en Socket ${client.id}: ${error.message}`,
+      );
       client.disconnect();
     }
   }

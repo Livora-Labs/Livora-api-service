@@ -4,7 +4,9 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export class FindCollectionsQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ description: 'Latitud para la búsqueda geográfica (-90 a 90)' })
+  @ApiPropertyOptional({
+    description: 'Latitud para la búsqueda geográfica (-90 a 90)',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber({}, { message: 'lat debe ser un número' })
@@ -12,7 +14,9 @@ export class FindCollectionsQueryDto extends PaginationQueryDto {
   @Max(90)
   lat?: number;
 
-  @ApiPropertyOptional({ description: 'Longitud para la búsqueda geográfica (-180 a 180)' })
+  @ApiPropertyOptional({
+    description: 'Longitud para la búsqueda geográfica (-180 a 180)',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber({}, { message: 'lng debe ser un número' })
@@ -20,7 +24,10 @@ export class FindCollectionsQueryDto extends PaginationQueryDto {
   @Max(180)
   lng?: number;
 
-  @ApiPropertyOptional({ default: 5, description: 'Radio de búsqueda en kilómetros' })
+  @ApiPropertyOptional({
+    default: 5,
+    description: 'Radio de búsqueda en kilómetros',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber({}, { message: 'radius debe ser un número' })

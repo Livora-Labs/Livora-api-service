@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from '../auth/dto/register.dto';
 import { CryptoUtil } from '../common/utils/crypto.util';
-import { ethers } from 'ethers';
+import { Keypair } from '@stellar/stellar-sdk';
 import { User } from '@prisma/client';
 
 @Injectable()
@@ -25,16 +25,21 @@ export class UsersService {
     });
   }
 
-  async create(supabaseUserId: string, registerDto: RegisterDto): Promise<Omit<User, 'encryptedPrivateKey'>> {
+  async create(
+    supabaseUserId: string,
+    registerDto: RegisterDto,
+  ): Promise<Omit<User, 'encryptedPrivateKey'>> {
     const existingUser = await this.findByEmail(registerDto.email);
     if (existingUser) {
-      throw new ConflictException('El correo electrónico ya se encuentra registrado');
+      throw new ConflictException(
+        'El correo electrónico ya se encuentra registrado',
+      );
     }
 
-    // Generar billetera Web3 aleatoria con ethers.js
-    const randomWallet = ethers.Wallet.createRandom();
-    const walletAddress = randomWallet.address;
-    const privateKey = randomWallet.privateKey;
+    // Generar billetera Web3 aleatoria con Stellar
+    const pair = Keypair.random();
+    const walletAddress = pair.publicKey();
+    const privateKey = pair.secret();
 
     // Obtener la clave secreta de encriptación
     const encryptionKey =
@@ -59,5 +64,25 @@ export class UsersService {
     // Retornar usuario despojando campos sensibles
     const { encryptedPrivateKey: _, ...userWithoutSecrets } = createdUser;
     return userWithoutSecrets;
+  }
+
+  async updateFcmToken(id: string, fcmToken: string): Promise<User> {
+    return this.prisma.user.update({
+      where: { id },
+      data: { fcmToken },
+    });
+  }
+
+  async deleteAccountGDPR(id: string): Promise<User> {
+    const anonymousEmail = `deleted_${id.substring(0, 8)}_${Date.now()}@deleted.livora.org`;
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        email: anonymousEmail,
+        encryptedPrivateKey: null,
+        fcmToken: null,
+        receptionPin: null,
+      },
+    });
   }
 }

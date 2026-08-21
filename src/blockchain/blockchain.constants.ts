@@ -6,6 +6,8 @@ export const ECO_BATCH_REGISTRY_ABI = [
   'function isBatchProcessed(bytes32 batchId) external view returns (bool)',
   'function materialRate(bytes32 materialCode) external view returns (uint256)',
   'function collectorShare() external view returns (uint256)',
+  'function nonces(address owner) external view returns (uint256)',
+  'function transferDelegated(address from, address to, uint256 amount, uint256 nonce, uint8 v, bytes32 r, bytes32 s) external returns (bool)',
   'event BatchRegistered(bytes32 indexed batchId, string ipfsCid, address indexed worker, uint256 totalReward, uint32 recipientsCount, uint64 timestamp)',
   'event BatchWeighed(bytes32 indexed batchId, uint256 totalWeightGrams, uint256 totalReward, uint256 collectorReward, uint32 householdsCount)',
 ];
@@ -15,13 +17,8 @@ export const ECO_BATCH_REGISTRY_ABI = [
  * mayúsculas, sin acentos ni espacios ("Cartón" -> "CARTON").
  */
 export function normalizeMaterialCode(material: string): string {
-  return material
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toUpperCase()
-    .trim();
+  return material.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().trim();
 }
-
 
 export const MATERIAL_RATES: Record<string, number> = {
   PET: 10,

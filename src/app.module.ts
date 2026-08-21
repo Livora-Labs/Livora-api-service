@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { UsersModule } from './users/users.module';
@@ -21,12 +23,17 @@ import { B2bTransfersModule } from './b2b/b2b-transfers.module';
 import { BetaModule } from './beta/beta.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { MailService } from './common/services/mail.service';
+import { RedisModule } from './redis/redis.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    RedisModule,
+    HealthModule,
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -55,9 +62,18 @@ import { AppService } from './app.service';
     StoresModule,
     B2bTransfersModule,
     BetaModule,
+    ThrottlerModule.forRoot([{
+      ttl: 60000,
+      limit: 100,
+    }]),
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}
-

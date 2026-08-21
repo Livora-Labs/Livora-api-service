@@ -35,15 +35,18 @@ export class IpfsService {
         },
       };
 
-      const response = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          pinata_api_key: apiKey,
-          pinata_secret_api_key: secretKey,
+      const response = await fetch(
+        'https://api.pinata.cloud/pinning/pinJSONToIPFS',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            pinata_api_key: apiKey,
+            pinata_secret_api_key: secretKey,
+          },
+          body: JSON.stringify(body),
         },
-        body: JSON.stringify(body),
-      });
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -53,7 +56,9 @@ export class IpfsService {
       const data = (await response.json()) as { IpfsHash?: string };
 
       if (data && data.IpfsHash) {
-        this.logger.log(`JSON subido exitosamente a IPFS. CID: ${data.IpfsHash}`);
+        this.logger.log(
+          `JSON subido exitosamente a IPFS. CID: ${data.IpfsHash}`,
+        );
         return data.IpfsHash;
       }
 
@@ -104,14 +109,17 @@ export class IpfsService {
       });
       formData.append('pinataMetadata', pinataMetadata);
 
-      const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
-        method: 'POST',
-        headers: {
-          pinata_api_key: apiKey,
-          pinata_secret_api_key: secretKey,
+      const response = await fetch(
+        'https://api.pinata.cloud/pinning/pinFileToIPFS',
+        {
+          method: 'POST',
+          headers: {
+            pinata_api_key: apiKey,
+            pinata_secret_api_key: secretKey,
+          },
+          body: formData,
         },
-        body: formData,
-      });
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -121,7 +129,9 @@ export class IpfsService {
       const data = (await response.json()) as { IpfsHash?: string };
 
       if (data && data.IpfsHash) {
-        this.logger.log(`Archivo subido exitosamente a IPFS. CID: ${data.IpfsHash}`);
+        this.logger.log(
+          `Archivo subido exitosamente a IPFS. CID: ${data.IpfsHash}`,
+        );
         return data.IpfsHash;
       }
 
@@ -142,7 +152,9 @@ export class IpfsService {
   getGatewayUrl(cidOrPath: string): string {
     if (!cidOrPath) return '';
 
-    const gateway = this.configService.get<string>('IPFS_GATEWAY_URL') || 'https://ipfs.io/ipfs/';
+    const gateway =
+      this.configService.get<string>('IPFS_GATEWAY_URL') ||
+      'https://ipfs.io/ipfs/';
     const cleanGateway = gateway.endsWith('/') ? gateway : `${gateway}/`;
 
     // Si ya empieza con http:// o https://

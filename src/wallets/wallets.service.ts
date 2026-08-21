@@ -1,33 +1,38 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ethers } from 'ethers';
+import {
+  Keypair,
+  rpc as StellarRpc,
+  Account,
+  TransactionBuilder,
+  Operation,
+  Address,
+  nativeToScVal,
+} from '@stellar/stellar-sdk';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
-
-const ERC20_ABI = [
-  'function balanceOf(address account) external view returns (uint256)',
-  'function transfer(address recipient, uint256 amount) external returns (bool)',
-];
+import { BlockchainService } from '../blockchain/services/blockchain.service';
 
 @Injectable()
 export class WalletsService {
   private readonly logger = new Logger(WalletsService.name);
-  private provider: ethers.JsonRpcProvider;
+  private rpcServer: StellarRpc.Server;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly blockchainService: BlockchainService,
   ) {
     const rpcUrl = this.configService.get<string>(
-      'ARBITRUM_RPC_URL',
-      'https://sepolia-rollup.arbitrum.io/rpc',
+      'STELLAR_RPC_URL',
+      'https://soroban-testnet.stellar.org',
     );
-    this.provider = new ethers.JsonRpcProvider(rpcUrl);
+    this.rpcServer = new StellarRpc.Server(rpcUrl);
   }
 
   /**
    * GET /wallets/me/balance
-   * Consulta directa al Smart Contract en Arbitrum Sepolia usando ethers.js v6
+   * Consulta directa al Smart Contract en Stellar/Soroban
    */
   async getBalance(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -50,16 +55,17 @@ export class WalletsService {
     const totalSpent = redemptions.reduce((sum, r) => sum + r.tokenAmount, 0);
 
     // 2. Try to get on-chain balance first
-    const contractAddress = this.configService.get<string>('ECOTOKEN_CONTRACT_ADDRESS');
-    if (contractAddress && ethers.isAddress(contractAddress) && contractAddress !== ethers.ZeroAddress) {
+    const contractId = this.configService.get<string>('ECOTOKEN_CONTRACT_ID');
+    if (contractId && contractId !== 'C...') {
       try {
-        const contract = new ethers.Contract(contractAddress, ERC20_ABI, this.provider);
-        const balanceWei: bigint = await contract.balanceOf(user.walletAddress);
-        const onChainBalance = parseFloat(ethers.formatEther(balanceWei));
+        const onChainBalanceStr = await this.blockchainService.getBalance(user.walletAddress);
+        const onChainBalance = parseFloat(onChainBalanceStr);
         const finalBalance = Math.max(0, onChainBalance - totalSpent);
         return { balance: finalBalance.toFixed(2) };
       } catch (error: any) {
-        this.logger.error(`Error al consultar balance ERC-20 on-chain: ${error.message}`);
+        this.logger.error(
+          `Error al consultar balance Soroban on-chain: ${error.message}`,
+        );
       }
     }
 
@@ -73,10 +79,12 @@ export class WalletsService {
         const mats = (b.materialsActual as Record<string, number>) || {};
         let batchTotal = 0;
         for (const [mat, wt] of Object.entries(mats)) {
-          const rate = { PET: 10, CARTON: 5, CARTÓN: 5, VIDRIO: 3, PLASTICO: 10, PLÁSTICO: 10, ALUMINIO: 15, HDPE: 10 }[mat.toUpperCase()] || 5;
+          const rate = await this.blockchainService.getMaterialRate(mat);
           batchTotal += wt * rate;
         }
-        const reqs = await this.prisma.collectionRequest.findMany({ where: { batchId: b.id } });
+        const reqs = await this.prisma.collectionRequest.findMany({
+          where: { batchId: b.id },
+        });
         if (reqs.length === 0) {
           totalEarned += batchTotal;
         } else {
@@ -85,18 +93,25 @@ export class WalletsService {
       }
     } else if (user.role === 'HOGAR') {
       const reqs = await this.prisma.collectionRequest.findMany({
-        where: { householdId: userId, status: 'COMPLETED', batchId: { not: null } },
+        where: {
+          householdId: userId,
+          status: 'COMPLETED',
+          batchId: { not: null },
+        },
         include: { batch: true },
       });
       for (const r of reqs) {
         if (r.batch?.status === 'RECEIVED') {
-          const mats = (r.batch.materialsActual as Record<string, number>) || {};
+          const mats =
+            (r.batch.materialsActual as Record<string, number>) || {};
           let batchTotal = 0;
           for (const [mat, wt] of Object.entries(mats)) {
-            const rate = { PET: 10, CARTON: 5, CARTÓN: 5, VIDRIO: 3, PLASTICO: 10, PLÁSTICO: 10, ALUMINIO: 15, HDPE: 10 }[mat.toUpperCase()] || 5;
+            const rate = await this.blockchainService.getMaterialRate(mat);
             batchTotal += wt * rate;
           }
-          const siblings = await this.prisma.collectionRequest.count({ where: { batchId: r.batchId } });
+          const siblings = await this.prisma.collectionRequest.count({
+            where: { batchId: r.batchId },
+          });
           const divisor = siblings || 1;
           totalEarned += (batchTotal * 0.8) / divisor;
         }
@@ -114,7 +129,7 @@ export class WalletsService {
       }
     }
 
-    const finalBalance = Math.max(0, 150.0 + totalEarned - totalSpent);
+    const finalBalance = Math.max(0, totalEarned - totalSpent);
     return { balance: finalBalance.toFixed(2) };
   }
 
@@ -131,44 +146,79 @@ export class WalletsService {
       throw new NotFoundException('Usuario no encontrado');
     }
 
-    const masterPrivateKey =
-      this.configService.get<string>('MASTER_WALLET_PRIVATE_KEY') ||
-      this.configService.get<string>('WORKER_PRIVATE_KEY');
-
-    const contractAddress = this.configService.get<string>('ECOTOKEN_CONTRACT_ADDRESS');
+    const workerSecretKey = this.configService.get<string>('WORKER_SECRET_KEY');
+    const contractId = this.configService.get<string>('ECOTOKEN_CONTRACT_ID');
 
     let txHash: string;
 
     if (
-      masterPrivateKey &&
-      masterPrivateKey !== '0x...' &&
-      ethers.isHexString(masterPrivateKey.startsWith('0x') ? masterPrivateKey : `0x${masterPrivateKey}`, 32) &&
-      contractAddress &&
-      ethers.isAddress(contractAddress) &&
-      contractAddress !== ethers.ZeroAddress
+      workerSecretKey &&
+      workerSecretKey !== 'S...' &&
+      contractId &&
+      contractId !== 'C...'
     ) {
       try {
-        const formattedKey = masterPrivateKey.startsWith('0x') ? masterPrivateKey : `0x${masterPrivateKey}`;
-        const relayerWallet = new ethers.Wallet(formattedKey, this.provider);
-        const contract = new ethers.Contract(contractAddress, ERC20_ABI, relayerWallet);
+        const workerKeypair = Keypair.fromSecret(workerSecretKey);
+        const amountBig = BigInt(Math.round(dto.amount * 10000000));
 
-        const amountWei = ethers.parseEther(dto.amount.toString());
-        const tx = await contract.transfer(dto.toAddress, amountWei);
-        txHash = tx.hash;
-        this.logger.log(`Transacción de Relayer enviada on-chain. Tx Hash: ${txHash}`);
+        const accountInfo = await this.rpcServer.getAccount(workerKeypair.publicKey());
+        const sourceAccount = new Account(workerKeypair.publicKey(), accountInfo.sequenceNumber());
+
+        const tx = new TransactionBuilder(sourceAccount, {
+          fee: '1000',
+          networkPassphrase: this.configService.get<string>(
+            'STELLAR_NETWORK_PASSPHRASE',
+            'Test SDF Network ; September 2015',
+          ),
+        })
+          .addOperation(
+            Operation.invokeContractFunction({
+              contract: contractId,
+              function: 'transfer',
+              args: [
+                Address.fromString(workerKeypair.publicKey()).toScVal(),
+                Address.fromString(dto.toAddress).toScVal(),
+                nativeToScVal(amountBig, { type: 'i128' }),
+              ],
+            }),
+          )
+          .setTimeout(30)
+          .build();
+
+        const simRes = await this.rpcServer.simulateTransaction(tx);
+        if (!StellarRpc.Api.isSimulationSuccess(simRes)) {
+          throw new Error(`Simulation failed: ${JSON.stringify(simRes.error || simRes)}`);
+        }
+
+        const assembledTx = StellarRpc.assembleTransaction(tx, simRes).build();
+        assembledTx.sign(workerKeypair);
+
+        const response = await this.rpcServer.sendTransaction(assembledTx);
+        if (response.status === 'ERROR') {
+          throw new Error(`Transaction failed: ${JSON.stringify(response.errorResult || response)}`);
+        }
+        txHash = response.hash;
+        this.logger.log(
+          `Transacción de Relayer enviada on-chain. Tx Hash: ${txHash}`,
+        );
       } catch (err: any) {
-        this.logger.error(`Fallo en envío de transacción on-chain por Relayer: ${err.message}`);
-        txHash = `0xrelayer${Date.now().toString(16)}${Math.random().toString(16).substring(2, 10)}`;
+        this.logger.error(
+          `Fallo en envío de transacción on-chain por Relayer: ${err.message}`,
+        );
+        txHash = `relayer${Date.now().toString(16)}${Math.random().toString(16).substring(2, 10)}`;
       }
     } else {
-      this.logger.warn('Relayer ejecutando transacción en modo simulado / entorno local.');
-      txHash = `0xrelayer${Date.now().toString(16)}${Math.random().toString(16).substring(2, 10)}`;
+      this.logger.warn(
+        'Relayer ejecutando transacción en modo simulado / entorno local.',
+      );
+      txHash = `relayer${Date.now().toString(16)}${Math.random().toString(16).substring(2, 10)}`;
     }
 
     return {
       status: 'PROCESSING',
       transactionId: txHash,
-      message: 'Transacción subsidiada por el Relayer y enviada a la red Arbitrum Sepolia',
+      message:
+        'Transacción subsidiada por el Relayer y enviada a la red Stellar Testnet',
       fromUser: user.email,
       toAddress: dto.toAddress,
       amount: dto.amount,
@@ -208,7 +258,9 @@ export class WalletsService {
         amount: r.tokenAmount,
         direction: 'OUT',
         recipientName: r.store.businessName || r.store.user.email.split('@')[0],
-        recipientWallet: r.store.user.walletAddress || '0x0000000000000000000000000000000000000000',
+        recipientWallet:
+          r.store.user.walletAddress ||
+          'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
         txHash: r.txHash || null,
         createdAt: r.updatedAt,
       });
@@ -228,11 +280,23 @@ export class WalletsService {
         const mats = (b.materialsActual as Record<string, number>) || {};
         let batchTotal = 0;
         for (const [mat, wt] of Object.entries(mats)) {
-          const rate = { PET: 10, CARTON: 5, CARTÓN: 5, VIDRIO: 3, PLASTICO: 10, PLÁSTICO: 10, ALUMINIO: 15, HDPE: 10 }[mat.toUpperCase()] || 5;
+          const rate =
+            {
+              PET: 10,
+              CARTON: 5,
+              CARTÓN: 5,
+              VIDRIO: 3,
+              PLASTICO: 10,
+              PLÁSTICO: 10,
+              ALUMINIO: 15,
+              HDPE: 10,
+            }[mat.toUpperCase()] || 5;
           batchTotal += wt * rate;
         }
 
-        const reqs = await this.prisma.collectionRequest.findMany({ where: { batchId: b.id } });
+        const reqs = await this.prisma.collectionRequest.findMany({
+          where: { batchId: b.id },
+        });
         const rewardAmount = reqs.length === 0 ? batchTotal : batchTotal * 0.2;
 
         txs.push({
@@ -241,7 +305,9 @@ export class WalletsService {
           amount: Number(rewardAmount.toFixed(2)),
           direction: 'IN',
           recipientName: 'Sistema Livora (EcoTokens)',
-          recipientWallet: b.destinationCenter?.walletAddress || '0x6D3d2b0efe49fB9d2f3F54c5Df697EC892E82d8B', // Fallback to master wallet
+          recipientWallet:
+            b.destinationCenter?.walletAddress ||
+            'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
           txHash: b.txHash || null,
           ipfsCid: b.ipfsCid || null,
           createdAt: b.updatedAt,
@@ -249,11 +315,17 @@ export class WalletsService {
       }
     } else if (user.role === 'HOGAR') {
       const reqs = await this.prisma.collectionRequest.findMany({
-        where: { householdId: userId, status: 'COMPLETED', batchId: { not: null } },
+        where: {
+          householdId: userId,
+          status: 'COMPLETED',
+          batchId: { not: null },
+        },
         include: {
           batch: {
             include: {
-              destinationCenter: { select: { email: true, walletAddress: true } },
+              destinationCenter: {
+                select: { email: true, walletAddress: true },
+              },
             },
           },
         },
@@ -262,14 +334,27 @@ export class WalletsService {
 
       for (const r of reqs) {
         if (r.batch?.status === 'RECEIVED') {
-          const mats = (r.batch.materialsActual as Record<string, number>) || {};
+          const mats =
+            (r.batch.materialsActual as Record<string, number>) || {};
           let batchTotal = 0;
           for (const [mat, wt] of Object.entries(mats)) {
-            const rate = { PET: 10, CARTON: 5, CARTÓN: 5, VIDRIO: 3, PLASTICO: 10, PLÁSTICO: 10, ALUMINIO: 15, HDPE: 10 }[mat.toUpperCase()] || 5;
+            const rate =
+              {
+                PET: 10,
+                CARTON: 5,
+                CARTÓN: 5,
+                VIDRIO: 3,
+                PLASTICO: 10,
+                PLÁSTICO: 10,
+                ALUMINIO: 15,
+                HDPE: 10,
+              }[mat.toUpperCase()] || 5;
             batchTotal += wt * rate;
           }
 
-          const siblings = await this.prisma.collectionRequest.count({ where: { batchId: r.batchId } });
+          const siblings = await this.prisma.collectionRequest.count({
+            where: { batchId: r.batchId },
+          });
           const divisor = siblings || 1;
           const rewardAmount = (batchTotal * 0.8) / divisor;
 
@@ -279,7 +364,9 @@ export class WalletsService {
             amount: Number(rewardAmount.toFixed(2)),
             direction: 'IN',
             recipientName: 'Sistema Livora (EcoTokens)',
-            recipientWallet: r.batch.destinationCenter?.walletAddress || '0x6D3d2b0efe49fB9d2f3F54c5Df697EC892E82d8B',
+            recipientWallet:
+              r.batch.destinationCenter?.walletAddress ||
+              'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
             txHash: r.batch.txHash || null,
             ipfsCid: r.batch.ipfsCid || null,
             createdAt: r.batch.updatedAt,
@@ -289,7 +376,9 @@ export class WalletsService {
     }
 
     // Sort by date descending
-    return txs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return txs.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
   }
 }
-

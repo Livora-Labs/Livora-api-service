@@ -1,3 +1,4 @@
+import './instrument';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
@@ -6,14 +7,32 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { RedisIoAdapter } from './websockets/adapters/redis-io.adapter';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { IpfsGatewayInterceptor } from './common/interceptors/ipfs-gateway.interceptor';
+import helmet from 'helmet';
 
 async function bootstrap() {
+
   const app = await NestFactory.create(AppModule);
 
-  // Allow all origins in development; in production accept the FRONTEND_URL env var
-  const frontendUrl = process.env.FRONTEND_URL;
+  // Configuración de cabeceras de seguridad HTTP con Helmet
+  app.use(helmet({
+    contentSecurityPolicy: false, // Permitir Swagger UI
+  }));
+
+  // Habilitar Graceful Shutdown para cerrar conexiones limpiamente
+  app.enableShutdownHooks();
+  
+  // Habilitar trust proxy para Cloudflare rate-limiting
+  const expressApp = app.getHttpAdapter().getInstance();
+  if (typeof expressApp.set === 'function') {
+    expressApp.set('trust proxy', 1);
+  }
+
+  const configService = app.get(ConfigService);
+
+  // Configuración de CORS restrictiva usando la variable de entorno CORS_ORIGIN
+  const corsOrigin = configService.get<string>('CORS_ORIGIN');
   app.enableCors({
-    origin: frontendUrl ? [frontendUrl, 'http://localhost:3001'] : true,
+    origin: corsOrigin ? corsOrigin.split(',').map(o => o.trim()) : ['http://localhost:3000', 'http://localhost:3001'],
     credentials: true,
   });
 
@@ -27,7 +46,6 @@ async function bootstrap() {
     }),
   );
 
-  const configService = app.get(ConfigService);
   app.useGlobalInterceptors(new IpfsGatewayInterceptor(configService));
 
   const redisIoAdapter = new RedisIoAdapter(app, configService);
@@ -54,4 +72,3 @@ async function bootstrap() {
   console.log(`📚 Swagger UI disponible en: http://localhost:${port}/api/docs`);
 }
 bootstrap();
-

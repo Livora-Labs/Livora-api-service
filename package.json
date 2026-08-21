@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@getbrevo/brevo": "^6.0.3",
     "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
@@ -28,15 +29,19 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/platform-socket.io": "^11.1.28",
     "@nestjs/swagger": "^11.4.6",
+    "@nestjs/throttler": "^6.5.0",
     "@nestjs/websockets": "^11.1.28",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
+    "@sentry/nestjs": "^10.70.0",
     "@socket.io/redis-adapter": "^8.3.0",
+    "@stellar/stellar-sdk": "^17.0.0",
     "@supabase/supabase-js": "^2.112.0",
     "bullmq": "^5.81.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
-    "ethers": "^6.17.0",
+    "firebase-admin": "^14.3.0",
+    "helmet": "^8.3.0",
     "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^9.0.5",
@@ -94,6 +99,9 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "transformIgnorePatterns": [
+      "node_modules/(?!(uint8array-extras|@exodus|@stellar/stellar-sdk|@noble)/)"
+    ]
   }
 }

@@ -40,14 +40,18 @@ export class StoresController {
 
   @Get('profile')
   @Roles(Role.TIENDA)
-  @ApiOperation({ summary: 'Obtener perfil de tienda del usuario autenticado (Rol: TIENDA)' })
+  @ApiOperation({
+    summary: 'Obtener perfil de tienda del usuario autenticado (Rol: TIENDA)',
+  })
   async getProfile(@CurrentUser('id') userId: string) {
     return this.storesService.getProfile(userId);
   }
 
   @Post('redemptions/qr')
   @Roles(Role.TIENDA)
-  @ApiOperation({ summary: 'Generar código QR para canje de EcoTokens (Rol: TIENDA)' })
+  @ApiOperation({
+    summary: 'Generar código QR para canje de EcoTokens (Rol: TIENDA)',
+  })
   async generateQrRedemption(
     @CurrentUser() user: any,
     @Body() dto: CreateQrRedemptionDto,
@@ -57,14 +61,18 @@ export class StoresController {
 
   @Get('redemptions/:qrCodeRef')
   @Roles(Role.HOGAR, Role.RECOLECTOR)
-  @ApiOperation({ summary: 'Consultar detalles del cobro (Rol: HOGAR / RECOLECTOR)' })
+  @ApiOperation({
+    summary: 'Consultar detalles del cobro (Rol: HOGAR / RECOLECTOR)',
+  })
   async getRedemptionDetails(@Param('qrCodeRef') qrCodeRef: string) {
     return this.storesService.getRedemptionDetails(qrCodeRef);
   }
 
   @Post('redemptions/confirm/:qrCodeRef')
   @Roles(Role.HOGAR, Role.RECOLECTOR)
-  @ApiOperation({ summary: 'Confirmar pago de canje de EcoTokens (Rol: HOGAR / RECOLECTOR)' })
+  @ApiOperation({
+    summary: 'Confirmar pago de canje de EcoTokens (Rol: HOGAR / RECOLECTOR)',
+  })
   async confirmRedemption(
     @CurrentUser('id') buyerUserId: string,
     @Param('qrCodeRef') qrCodeRef: string,
@@ -74,7 +82,10 @@ export class StoresController {
 
   @Post('settlements')
   @Roles(Role.TIENDA)
-  @ApiOperation({ summary: 'Solicitar liquidación de EcoTokens acumulados a FIAT (Rol: TIENDA)' })
+  @ApiOperation({
+    summary:
+      'Solicitar liquidación de EcoTokens acumulados a FIAT (Rol: TIENDA)',
+  })
   async requestSettlement(
     @CurrentUser() user: any,
     @Body() dto: CreateSettlementRequestDto,
@@ -84,7 +95,9 @@ export class StoresController {
 
   @Patch('settlements/:id/pay')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Aprobar y registrar pago de liquidación (Rol: ADMIN)' })
+  @ApiOperation({
+    summary: 'Aprobar y registrar pago de liquidación (Rol: ADMIN)',
+  })
   async paySettlement(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: PaySettlementDto,
@@ -94,14 +107,18 @@ export class StoresController {
 
   @Get('redemptions')
   @Roles(Role.TIENDA)
-  @ApiOperation({ summary: 'Obtener historial de canjes de la tienda (Rol: TIENDA)' })
+  @ApiOperation({
+    summary: 'Obtener historial de canjes de la tienda (Rol: TIENDA)',
+  })
   async getRedemptions(@CurrentUser('id') userId: string) {
     return this.storesService.getRedemptions(userId);
   }
 
   @Get('settlements/history')
   @Roles(Role.TIENDA)
-  @ApiOperation({ summary: 'Obtener historial de liquidaciones de la tienda (Rol: TIENDA)' })
+  @ApiOperation({
+    summary: 'Obtener historial de liquidaciones de la tienda (Rol: TIENDA)',
+  })
   async getSettlements(@CurrentUser('id') userId: string) {
     return this.storesService.getSettlements(userId);
   }

@@ -1,5 +1,10 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { BatchesService } from './batches.service';
 import { CreateConsolidatedBatchDto } from './dto/create-consolidated-batch.dto';
@@ -17,8 +22,14 @@ export class ConsolidatedBatchesController {
 
   @Post()
   @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
-  @ApiOperation({ summary: 'Consolidar múltiples lotes recibidos (Rol: CENTRO_ACOPIO / ALMACEN)' })
-  @ApiResponse({ status: 201, description: 'Lote consolidado creado exitosamente con estado PENDING_SALE' })
+  @ApiOperation({
+    summary:
+      'Consolidar múltiples lotes recibidos (Rol: CENTRO_ACOPIO / ALMACEN)',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Lote consolidado creado exitosamente con estado PENDING_SALE',
+  })
   async createConsolidatedBatch(
     @CurrentUser('id') centerId: string,
     @Body() dto: CreateConsolidatedBatchDto,

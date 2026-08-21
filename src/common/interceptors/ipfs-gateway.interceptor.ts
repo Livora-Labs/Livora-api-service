@@ -13,14 +13,14 @@ export class IpfsGatewayInterceptor implements NestInterceptor {
   private gatewayUrl: string;
 
   constructor(private readonly configService: ConfigService) {
-    const gateway = this.configService.get<string>('IPFS_GATEWAY_URL') || 'https://ipfs.io/ipfs/';
+    const gateway =
+      this.configService.get<string>('IPFS_GATEWAY_URL') ||
+      'https://ipfs.io/ipfs/';
     this.gatewayUrl = gateway.endsWith('/') ? gateway : `${gateway}/`;
   }
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    return next.handle().pipe(
-      map((data) => this.formatResponse(data)),
-    );
+    return next.handle().pipe(map((data) => this.formatResponse(data)));
   }
 
   private formatResponse(data: any): any {
@@ -50,7 +50,7 @@ export class IpfsGatewayInterceptor implements NestInterceptor {
 
   private shouldFormatField(key: string, value: string): boolean {
     const ipfsKeys = ['ipfsCid', 'ipfsHash', 'photoUrl'];
-    
+
     // Si la llave está en nuestra lista de llaves de IPFS
     if (ipfsKeys.includes(key)) {
       return true;
@@ -78,7 +78,7 @@ export class IpfsGatewayInterceptor implements NestInterceptor {
 
   private formatIpfsUrl(value: string): string {
     if (!value) return value;
-    
+
     // Si ya empieza con http:// o https://
     if (value.startsWith('http://') || value.startsWith('https://')) {
       // Si es un enlace de ipfs redundante, lo re-formateamos al gateway dedicado

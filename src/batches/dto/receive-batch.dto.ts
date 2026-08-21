@@ -10,4 +10,3 @@ export class ReceiveBatchDto {
   @IsNotEmpty()
   materialsActual: Record<string, any>;
 }
-

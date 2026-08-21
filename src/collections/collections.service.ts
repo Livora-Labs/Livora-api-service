@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { IpfsService } from '../blockchain/services/ipfs.service';
 import { WebsocketsService } from '../websockets/websockets.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { FindCollectionsQueryDto } from './dto/find-collections-query.dto';
 import { UpdateCollectionStatusDto } from './dto/update-collection-status.dto';
@@ -21,6 +22,7 @@ export class CollectionsService {
     private readonly supabaseService: SupabaseService,
     private readonly ipfsService: IpfsService,
     private readonly websocketsService: WebsocketsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -75,6 +77,24 @@ export class CollectionsService {
     // Emitir en tiempo real que se ha creado la solicitud para que los recolectores la vean
     this.websocketsService.emitCollectionCreated(newRequest);
 
+    // Buscar todos los recolectores con token FCM para enviar la notificación
+    this.prisma.user.findMany({
+      where: {
+        role: Role.RECOLECTOR,
+        fcmToken: { not: null },
+      },
+      select: { id: true },
+    }).then((collectors) => {
+      for (const col of collectors) {
+        this.notificationsService.sendPushNotification(
+          col.id,
+          '♻️ Nueva solicitud de reciclaje',
+          'Hay una nueva solicitud de recogida de materiales lista en tu zona.',
+          { requestId: newRequest.id },
+        ).catch(() => {});
+      }
+    }).catch(() => {});
+
     return newRequest;
   }
 
@@ -94,7 +114,8 @@ export class CollectionsService {
     const sanitizedSortBy = allowedSortFields.includes(query.sortBy || '')
       ? query.sortBy!
       : 'createdAt';
-    const sortOrder = (query.sortOrder || 'DESC').toLowerCase() as 'asc' | 'desc';
+    const sortOrder = (query.sortOrder || 'DESC').toLowerCase() as
+      'asc' | 'desc';
 
     if (user.role === Role.HOGAR) {
       return this.prisma.collectionRequest.findMany({
@@ -116,7 +137,7 @@ export class CollectionsService {
 
       if (lat !== undefined && lng !== undefined) {
         const radiusInMeters = radius * 1000;
-        
+
         // Búsqueda espacial con PostGIS ST_DistanceSphere (LIMIT y OFFSET de forma segura)
         const results = await this.prisma.$queryRaw<any[]>`
           SELECT 
@@ -148,7 +169,9 @@ export class CollectionsService {
 
         return results.map((item) => ({
           ...item,
-          photoUrl: item.photoUrl ? this.ipfsService.getGatewayUrl(item.photoUrl) : item.photoUrl,
+          photoUrl: item.photoUrl
+            ? this.ipfsService.getGatewayUrl(item.photoUrl)
+            : item.photoUrl,
         }));
       }
 
@@ -166,7 +189,9 @@ export class CollectionsService {
       });
     }
 
-    throw new ForbiddenException('Rol no autorizado para listar solicitudes de recolección');
+    throw new ForbiddenException(
+      'Rol no autorizado para listar solicitudes de recolección',
+    );
   }
 
   /**
@@ -193,7 +218,9 @@ export class CollectionsService {
     }
 
     if (role === Role.HOGAR && collectionRequest.householdId !== userId) {
-      throw new ForbiddenException('No tienes permisos para ver esta solicitud');
+      throw new ForbiddenException(
+        'No tienes permisos para ver esta solicitud',
+      );
     }
 
     return collectionRequest;
@@ -226,13 +253,22 @@ export class CollectionsService {
           );
         }
 
-        return this.prisma.collectionRequest.update({
+        const updated = await this.prisma.collectionRequest.update({
           where: { id },
           data: {
             status: RequestStatus.ACCEPTED,
             collectorId: userId,
           },
         });
+
+        this.notificationsService.sendPushNotification(
+          collectionRequest.householdId,
+          '♻️ Tu solicitud ha sido aceptada',
+          'Un recolector está en camino a tu ubicación para recoger los materiales.',
+          { requestId: id },
+        ).catch(() => {});
+
+        return updated;
       }
 
       throw new BadRequestException(

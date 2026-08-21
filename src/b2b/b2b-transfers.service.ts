@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { IpfsService } from '../blockchain/services/ipfs.service';
 import { CreateB2bTransferDto } from './dto/create-b2b-transfer.dto';
@@ -57,8 +61,8 @@ export class B2bTransfersService {
       if (totalOut + line.weightKg > allowedLimit) {
         throw new BadRequestException(
           `La transferencia excede el límite contable de conservación de masa con merma del 5% para ${normMaterial}. ` +
-          `Total entradas: ${totalIn} kg (límite con merma: ${allowedLimit.toFixed(2)} kg), ` +
-          `Salidas históricas: ${totalOut} kg, Solicitado: ${line.weightKg} kg.`
+            `Total entradas: ${totalIn} kg (límite con merma: ${allowedLimit.toFixed(2)} kg), ` +
+            `Salidas históricas: ${totalOut} kg, Solicitado: ${line.weightKg} kg.`,
         );
       }
 
@@ -72,7 +76,7 @@ export class B2bTransfersService {
 
       if (!invItem || invItem.quantityKg < line.weightKg) {
         throw new BadRequestException(
-          `Inventario insuficiente para ${normMaterial}. Disponible: ${invItem?.quantityKg || 0} kg, requerido: ${line.weightKg} kg.`
+          `Inventario insuficiente para ${normMaterial}. Disponible: ${invItem?.quantityKg || 0} kg, requerido: ${line.weightKg} kg.`,
         );
       }
     }
@@ -81,7 +85,10 @@ export class B2bTransfersService {
     for (const line of dto.materials) {
       const normMaterial = line.material.toUpperCase().trim();
       const invItem = await this.prisma.inventoryItem.findFirst({
-        where: { centerId, materialType: { equals: normMaterial, mode: 'insensitive' } },
+        where: {
+          centerId,
+          materialType: { equals: normMaterial, mode: 'insensitive' },
+        },
       });
 
       await this.prisma.inventoryItem.update({
@@ -140,11 +147,15 @@ export class B2bTransfersService {
     }
 
     if (transfer.buyerId !== buyerId) {
-      throw new BadRequestException('No tienes autorización para recibir esta transferencia.');
+      throw new BadRequestException(
+        'No tienes autorización para recibir esta transferencia.',
+      );
     }
 
     if (transfer.status !== B2bTransferStatus.IN_TRANSIT) {
-      throw new BadRequestException('La transferencia ya ha sido recibida o procesada.');
+      throw new BadRequestException(
+        'La transferencia ya ha sido recibida o procesada.',
+      );
     }
 
     // Actualizar estado a RECEIVED

@@ -4,6 +4,7 @@ import { StoresController } from './stores.controller';
 import { StoresService } from './stores.service';
 import { WalletsModule } from '../wallets/wallets.module';
 import { WebsocketsModule } from '../websockets/websockets.module';
+import { BlockchainModule } from '../blockchain/blockchain.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { WebsocketsModule } from '../websockets/websockets.module';
     }),
     WalletsModule,
     WebsocketsModule,
+    BlockchainModule,
   ],
   controllers: [StoresController],
   providers: [StoresService],

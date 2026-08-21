@@ -32,7 +32,9 @@ export class RedisIoAdapter extends IoAdapter {
     });
 
     this.adapterConstructor = createAdapter(pubClient, subClient);
-    this.logger.log(`RedisIoAdapter conectado exitosamente a Redis en ${host}:${port}`);
+    this.logger.log(
+      `RedisIoAdapter conectado exitosamente a Redis en ${host}:${port}`,
+    );
   }
 
   createIOServer(port: number, options?: ServerOptions): any {

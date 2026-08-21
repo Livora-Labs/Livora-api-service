@@ -17,7 +17,10 @@ export class InventoryController {
 
   @Get('inventory')
   @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
-  @ApiOperation({ summary: 'Consultar el inventario de materiales (Rol: CENTRO_ACOPIO / ALMACEN / ADMIN)' })
+  @ApiOperation({
+    summary:
+      'Consultar el inventario de materiales (Rol: CENTRO_ACOPIO / ALMACEN / ADMIN)',
+  })
   async getInventory(@CurrentUser() user: any) {
     const centerId = user.role === Role.ADMIN ? undefined : user.id;
     return this.inventoryService.getInventory(centerId);
@@ -25,7 +28,10 @@ export class InventoryController {
 
   @Post('inventory/movements')
   @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
-  @ApiOperation({ summary: 'Registrar movimiento de entrada/salida de inventario (Rol: CENTRO_ACOPIO / ALMACEN)' })
+  @ApiOperation({
+    summary:
+      'Registrar movimiento de entrada/salida de inventario (Rol: CENTRO_ACOPIO / ALMACEN)',
+  })
   async createMovement(
     @CurrentUser('id') centerId: string,
     @Body() dto: CreateMovementDto,

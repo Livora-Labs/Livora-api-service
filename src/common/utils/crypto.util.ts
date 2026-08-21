@@ -11,10 +11,7 @@ export class CryptoUtil {
    * @returns Formatted hex string: iv:authTag:encryptedData
    */
   static encrypt(text: string, secretKey: string): string {
-    const key = crypto
-      .createHash('sha256')
-      .update(String(secretKey))
-      .digest();
+    const key = crypto.createHash('sha256').update(String(secretKey)).digest();
     const iv = crypto.randomBytes(IV_LENGTH);
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
 
@@ -39,10 +36,7 @@ export class CryptoUtil {
     }
 
     const [ivHex, authTagHex, encryptedText] = parts;
-    const key = crypto
-      .createHash('sha256')
-      .update(String(secretKey))
-      .digest();
+    const key = crypto.createHash('sha256').update(String(secretKey)).digest();
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(authTagHex, 'hex');
 

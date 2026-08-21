@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
+import * as Sentry from '@sentry/nestjs';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -30,7 +31,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
       if (typeof exceptionResponse === 'string') {
         message = exceptionResponse;
-      } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
+      } else if (
+        typeof exceptionResponse === 'object' &&
+        exceptionResponse !== null
+      ) {
         const resObj = exceptionResponse as Record<string, any>;
 
         if (resObj.error && typeof resObj.error === 'string') {
@@ -50,9 +54,23 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         }
       }
     } else {
-      this.logger.error('Excepción no controlada capturada en GlobalExceptionFilter:', exception);
+      this.logger.error(
+        'Excepción no controlada capturada en GlobalExceptionFilter:',
+        exception,
+      );
       if (exception instanceof Error) {
-        details = { errorName: exception.name, detailMessage: exception.message };
+        details = {
+          errorName: exception.name,
+          detailMessage: exception.message,
+        };
+      }
+    }
+
+    if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
+      Sentry.captureException(exception);
+      if (process.env.NODE_ENV === 'production') {
+        details = undefined;
+        message = 'Ha ocurrido un error interno en el servidor';
       }
     }
 

@@ -19,7 +19,9 @@ export class SupabaseAuthGuard implements CanActivate {
     const authHeader = request.headers.authorization;
 
     if (!authHeader || typeof authHeader !== 'string') {
-      throw new UnauthorizedException('Token de autorización no encontrado en la cabecera');
+      throw new UnauthorizedException(
+        'Token de autorización no encontrado en la cabecera',
+      );
     }
 
     // Limpieza defensiva por si se envía "Bearer Bearer <token>" o "Bearer <token>"
@@ -41,7 +43,9 @@ export class SupabaseAuthGuard implements CanActivate {
 
     const user = await this.usersService.findById(data.user.id);
     if (!user) {
-      throw new UnauthorizedException('Usuario autenticado pero sin perfil local en la base de datos');
+      throw new UnauthorizedException(
+        'Usuario autenticado pero sin perfil local en la base de datos',
+      );
     }
 
     const { encryptedPrivateKey, ...safeUser } = user;
@@ -50,4 +54,3 @@ export class SupabaseAuthGuard implements CanActivate {
     return true;
   }
 }
-

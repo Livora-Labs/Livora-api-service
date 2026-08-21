@@ -8,7 +8,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { UpdateNotificationDto } from './dto/update-notification.dto';
@@ -24,7 +29,9 @@ export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Obtener notificaciones del usuario autenticado paginadas' })
+  @ApiOperation({
+    summary: 'Obtener notificaciones del usuario autenticado paginadas',
+  })
   @ApiResponse({ status: 200, description: 'Lista paginada de notificaciones' })
   async findAll(
     @CurrentUser('id') userId: string,
@@ -35,7 +42,10 @@ export class NotificationsController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Marcar notificación como leída/no leída' })
-  @ApiResponse({ status: 200, description: 'Notificación actualizada exitosamente' })
+  @ApiResponse({
+    status: 200,
+    description: 'Notificación actualizada exitosamente',
+  })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser('id') userId: string,

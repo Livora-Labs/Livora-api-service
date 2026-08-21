@@ -4,12 +4,15 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { RedemptionStatus, SettlementStatus, Role } from '@prisma/client';
+import { RedemptionStatus, SettlementStatus } from '@prisma/client';
+import { Keypair } from '@stellar/stellar-sdk';
 import { StoresService } from './stores.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { WebsocketsService } from '../websockets/websockets.service';
 import { ConfigService } from '@nestjs/config';
+import { BlockchainService } from '../blockchain/services/blockchain.service';
+import { CryptoUtil } from '../common/utils/crypto.util';
 
 describe('StoresService', () => {
   let service: StoresService;
@@ -18,6 +21,7 @@ describe('StoresService', () => {
   let websocketsMock: any;
   let configMock: any;
   let queueMock: any;
+  let blockchainMock: any;
 
   beforeEach(async () => {
     prismaMock = {
@@ -50,13 +54,19 @@ describe('StoresService', () => {
 
     configMock = {
       get: jest.fn().mockImplementation((key: string) => {
-        if (key === 'ECOTOKEN_CONTRACT_ADDRESS') return '0xECOTokenAddress';
+        if (key === 'ECOTOKEN_CONTRACT_ID') return 'CD7L2OEZL74GPHXQ32EEXI7Y7DPHF74GPHXQ32EEXI7Y7DPHF74GPHXQ';
+        if (key === 'WALLET_ENCRYPTION_KEY') return 'testSecretKey32CharacterLength!';
         return null;
       }),
     };
 
     queueMock = {
       add: jest.fn().mockResolvedValue({ id: 'job-redemption-123' }),
+    };
+
+    blockchainMock = {
+      getNonceOnChain: jest.fn(),
+      executeDelegatedTransfer: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -66,6 +76,7 @@ describe('StoresService', () => {
         { provide: WalletsService, useValue: walletsMock },
         { provide: WebsocketsService, useValue: websocketsMock },
         { provide: ConfigService, useValue: configMock },
+        { provide: BlockchainService, useValue: blockchainMock },
         { provide: 'BullQueue_blockchain-queue', useValue: queueMock },
       ],
     }).compile();
@@ -87,11 +98,16 @@ describe('StoresService', () => {
 
     it('should create store profile if none exists', async () => {
       prismaMock.storeProfile.findUnique.mockResolvedValue(null);
-      prismaMock.storeProfile.create.mockResolvedValue({ id: 'store-uuid', ...dto });
+      prismaMock.storeProfile.create.mockResolvedValue({
+        id: 'store-uuid',
+        ...dto,
+      });
 
       const result = await service.createProfile('user-uuid', dto);
 
-      expect(prismaMock.storeProfile.findUnique).toHaveBeenCalledWith({ where: { userId: 'user-uuid' } });
+      expect(prismaMock.storeProfile.findUnique).toHaveBeenCalledWith({
+        where: { userId: 'user-uuid' },
+      });
       expect(prismaMock.storeProfile.create).toHaveBeenCalledWith({
         data: {
           userId: 'user-uuid',
@@ -112,15 +128,21 @@ describe('StoresService', () => {
     });
 
     it('should throw ConflictException if profile already exists', async () => {
-      prismaMock.storeProfile.findUnique.mockResolvedValue({ id: 'store-uuid' });
+      prismaMock.storeProfile.findUnique.mockResolvedValue({
+        id: 'store-uuid',
+      });
 
-      await expect(service.createProfile('user-uuid', dto)).rejects.toThrow(ConflictException);
+      await expect(service.createProfile('user-uuid', dto)).rejects.toThrow(
+        ConflictException,
+      );
     });
   });
 
   describe('generateQrRedemption', () => {
     it('should create and return QR reference for redemption', async () => {
-      prismaMock.storeProfile.findUnique.mockResolvedValue({ id: 'store-uuid' });
+      prismaMock.storeProfile.findUnique.mockResolvedValue({
+        id: 'store-uuid',
+      });
       prismaMock.redemptionTransaction.create.mockResolvedValue({
         id: 'red-uuid',
         storeId: 'store-uuid',
@@ -129,9 +151,13 @@ describe('StoresService', () => {
         status: RedemptionStatus.PENDING,
       });
 
-      const result = await service.generateQrRedemption('user-uuid', { tokenAmount: 25.0 });
+      const result = await service.generateQrRedemption('user-uuid', {
+        tokenAmount: 25.0,
+      });
 
-      expect(prismaMock.storeProfile.findUnique).toHaveBeenCalledWith({ where: { userId: 'user-uuid' } });
+      expect(prismaMock.storeProfile.findUnique).toHaveBeenCalledWith({
+        where: { userId: 'user-uuid' },
+      });
       expect(result.tokenAmount).toBe(25.0);
       expect(result.status).toBe(RedemptionStatus.PENDING);
     });
@@ -139,7 +165,9 @@ describe('StoresService', () => {
     it('should throw NotFoundException if store profile does not exist', async () => {
       prismaMock.storeProfile.findUnique.mockResolvedValue(null);
 
-      await expect(service.generateQrRedemption('user-uuid', { tokenAmount: 25.0 })).rejects.toThrow(NotFoundException);
+      await expect(
+        service.generateQrRedemption('user-uuid', { tokenAmount: 25.0 }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -154,14 +182,19 @@ describe('StoresService', () => {
         id: 'store-uuid',
         user: {
           id: 'store-user-uuid',
-          walletAddress: '0xStoreWalletAddress',
+          walletAddress: 'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
         },
       },
     };
 
     it('should confirm redemption successfully if household user has enough balance', async () => {
-      prismaMock.redemptionTransaction.findUnique.mockResolvedValue(mockRedemption);
-      prismaMock.user.findUnique.mockResolvedValue({ id: 'household-uuid', walletAddress: '0xHouseholdWalletAddress' });
+      prismaMock.redemptionTransaction.findUnique.mockResolvedValue(
+        mockRedemption,
+      );
+      prismaMock.user.findUnique.mockResolvedValue({
+        id: 'household-uuid',
+        walletAddress: 'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
+      });
       walletsMock.getBalance.mockResolvedValue({ balance: '50.0' });
       prismaMock.redemptionTransaction.update.mockResolvedValue({
         ...mockRedemption,
@@ -169,7 +202,10 @@ describe('StoresService', () => {
         status: RedemptionStatus.COMPLETED,
       });
 
-      const result = await service.confirmRedemption('household-uuid', 'LIVORA-QR-xxx');
+      const result = await service.confirmRedemption(
+        'household-uuid',
+        'LIVORA-QR-xxx',
+      );
 
       expect(prismaMock.redemptionTransaction.findUnique).toHaveBeenCalledWith({
         where: { qrCodeRef: 'LIVORA-QR-xxx' },
@@ -186,23 +222,47 @@ describe('StoresService', () => {
         where: { id: 'red-uuid' },
         data: { userId: 'household-uuid', status: RedemptionStatus.COMPLETED },
       });
-      expect(websocketsMock.emitStoreNotification).toHaveBeenCalledWith('store-user-uuid', 'redemption:completed', expect.any(Object));
-      expect(queueMock.add).toHaveBeenCalledWith('redemption-transfer', expect.any(Object));
+      expect(websocketsMock.emitStoreNotification).toHaveBeenCalledWith(
+        'store-user-uuid',
+        'redemption:completed',
+        expect.any(Object),
+      );
+      expect(queueMock.add).toHaveBeenCalledWith(
+        'redemption-transfer',
+        {
+          redemptionId: 'red-uuid',
+          fromUserId: 'household-uuid',
+          toStoreUserId: 'store-user-uuid',
+          fromWallet: 'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
+          toWallet: 'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
+          tokenAmount: 15.5,
+        },
+        expect.any(Object),
+      );
       expect(result.status).toBe(RedemptionStatus.COMPLETED);
     });
 
     it('should throw BadRequestException if household user balance is insufficient', async () => {
-      prismaMock.redemptionTransaction.findUnique.mockResolvedValue(mockRedemption);
-      prismaMock.user.findUnique.mockResolvedValue({ id: 'household-uuid', walletAddress: '0xHouseholdWalletAddress' });
-      walletsMock.getBalance.mockResolvedValue({ balance: '5.0' }); // Less than 15.5
+      prismaMock.redemptionTransaction.findUnique.mockResolvedValue(
+        mockRedemption,
+      );
+      prismaMock.user.findUnique.mockResolvedValue({
+        id: 'household-uuid',
+        walletAddress: 'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
+      });
+      walletsMock.getBalance.mockResolvedValue({ balance: '5.0' });
 
-      await expect(service.confirmRedemption('household-uuid', 'LIVORA-QR-xxx')).rejects.toThrow(BadRequestException);
+      await expect(
+        service.confirmRedemption('household-uuid', 'LIVORA-QR-xxx'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
   describe('requestSettlement', () => {
     it('should create settlement request successfully', async () => {
-      prismaMock.storeProfile.findUnique.mockResolvedValue({ id: 'store-uuid' });
+      prismaMock.storeProfile.findUnique.mockResolvedValue({
+        id: 'store-uuid',
+      });
       prismaMock.settlementRequest.create.mockResolvedValue({
         id: 'settlement-uuid',
         storeId: 'store-uuid',
@@ -211,9 +271,13 @@ describe('StoresService', () => {
         status: SettlementStatus.PENDING,
       });
 
-      const result = await service.requestSettlement('user-uuid', { tokenAmount: 60.0 });
+      const result = await service.requestSettlement('user-uuid', {
+        tokenAmount: 60.0,
+      });
 
-      expect(prismaMock.storeProfile.findUnique).toHaveBeenCalledWith({ where: { userId: 'user-uuid' } });
+      expect(prismaMock.storeProfile.findUnique).toHaveBeenCalledWith({
+        where: { userId: 'user-uuid' },
+      });
       expect(result.fiatAmount).toBe(60.0);
       expect(result.status).toBe(SettlementStatus.PENDING);
     });
@@ -229,7 +293,7 @@ describe('StoresService', () => {
       store: {
         user: {
           id: 'store-user-uuid',
-          walletAddress: '0xStoreWalletAddress',
+          walletAddress: 'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
         },
       },
     };
@@ -242,7 +306,9 @@ describe('StoresService', () => {
         receiptUrl: 'https://comprobante.pdf',
       });
 
-      const result = await service.paySettlement('settlement-uuid', { receiptUrl: 'https://comprobante.pdf' });
+      const result = await service.paySettlement('settlement-uuid', {
+        receiptUrl: 'https://comprobante.pdf',
+      });
 
       expect(prismaMock.settlementRequest.findUnique).toHaveBeenCalledWith({
         where: { id: 'settlement-uuid' },
@@ -256,10 +322,21 @@ describe('StoresService', () => {
       });
       expect(prismaMock.settlementRequest.update).toHaveBeenCalledWith({
         where: { id: 'settlement-uuid' },
-        data: { status: SettlementStatus.PAID, receiptUrl: 'https://comprobante.pdf' },
+        data: {
+          status: SettlementStatus.PAID,
+          receiptUrl: 'https://comprobante.pdf',
+        },
       });
-      expect(websocketsMock.emitStoreNotification).toHaveBeenCalledWith('store-user-uuid', 'settlement:paid', expect.any(Object));
-      expect(queueMock.add).toHaveBeenCalledWith('settlement-transfer', expect.any(Object));
+      expect(websocketsMock.emitStoreNotification).toHaveBeenCalledWith(
+        'store-user-uuid',
+        'settlement:paid',
+        expect.any(Object),
+      );
+      expect(queueMock.add).toHaveBeenCalledWith(
+        'settlement-transfer',
+        expect.any(Object),
+        expect.any(Object),
+      );
       expect(result.status).toBe(SettlementStatus.PAID);
     });
   });

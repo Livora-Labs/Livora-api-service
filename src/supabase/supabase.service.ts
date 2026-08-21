@@ -8,7 +8,8 @@ export class SupabaseService {
 
   constructor(private readonly configService: ConfigService) {
     const supabaseUrl = this.configService.get<string>('SUPABASE_URL') || '';
-    const serviceRoleKey = this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY') || '';
+    const serviceRoleKey =
+      this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY') || '';
 
     this.supabaseClient = createClient(supabaseUrl, serviceRoleKey, {
       auth: {

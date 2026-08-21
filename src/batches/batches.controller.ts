@@ -11,7 +11,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { BatchesService } from './batches.service';
 import { UpdateBatchDto } from './dto/update-batch.dto';
@@ -35,11 +40,11 @@ export class BatchesController {
    */
   @Get()
   @Roles(Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN)
-  @ApiOperation({ summary: 'Listar historial de lotes paginado (Rol: RECOLECTOR / CENTRO_ACOPIO / ALMACEN)' })
-  async findAll(
-    @CurrentUser() user: any,
-    @Query() query: FindBatchesQueryDto,
-  ) {
+  @ApiOperation({
+    summary:
+      'Listar historial de lotes paginado (Rol: RECOLECTOR / CENTRO_ACOPIO / ALMACEN)',
+  })
+  async findAll(@CurrentUser() user: any, @Query() query: FindBatchesQueryDto) {
     return this.batchesService.findAll(user.id, user.role, query);
   }
 
@@ -49,7 +54,9 @@ export class BatchesController {
    */
   @Get('open')
   @Roles(Role.RECOLECTOR)
-  @ApiOperation({ summary: 'Obtener o crear lote abierto (OPEN) para el recolector' })
+  @ApiOperation({
+    summary: 'Obtener o crear lote abierto (OPEN) para el recolector',
+  })
   async getOpenBatch(@CurrentUser('id') collectorId: string) {
     return this.batchesService.getOpenBatch(collectorId);
   }
@@ -60,7 +67,10 @@ export class BatchesController {
    */
   @Patch(':id')
   @Roles(Role.RECOLECTOR)
-  @ApiOperation({ summary: 'Asignar Centro de Acopio destino al lote y ponerlo en tránsito (IN_TRANSIT)' })
+  @ApiOperation({
+    summary:
+      'Asignar Centro de Acopio destino al lote y ponerlo en tránsito (IN_TRANSIT)',
+  })
   async updateBatch(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser('id') collectorId: string,
@@ -76,8 +86,14 @@ export class BatchesController {
   @Post(':id/receive')
   @HttpCode(HttpStatus.ACCEPTED)
   @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
-  @ApiOperation({ summary: 'Recepción del lote en Centro de Acopio / Almacén (Dispara procesador Blockchain / BullMQ - HTTP 202)' })
-  @ApiResponse({ status: 202, description: 'Recepción aceptada y trabajo encolado en BullMQ' })
+  @ApiOperation({
+    summary:
+      'Recepción del lote en Centro de Acopio / Almacén (Dispara procesador Blockchain / BullMQ - HTTP 202)',
+  })
+  @ApiResponse({
+    status: 202,
+    description: 'Recepción aceptada y trabajo encolado en BullMQ',
+  })
   async receiveBatch(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser('id') centerId: string,
@@ -86,4 +102,3 @@ export class BatchesController {
     return this.batchesService.receiveBatch(id, centerId, dto);
   }
 }
-

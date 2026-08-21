@@ -8,7 +8,12 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { BatchStatus, ConsolidatedStatus, RequestStatus, Role } from '@prisma/client';
+import {
+  BatchStatus,
+  ConsolidatedStatus,
+  RequestStatus,
+  Role,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateBatchDto } from './dto/update-batch.dto';
 import { ReceiveBatchDto } from './dto/receive-batch.dto';
@@ -28,11 +33,7 @@ export class BatchesService {
    * GET /batches (Rol: RECOLECTOR / CENTRO_ACOPIO)
    * Devuelve el historial de lotes paginado con forzado de seguridad por rol.
    */
-  async findAll(
-    userId: string,
-    role: string,
-    query: FindBatchesQueryDto,
-  ) {
+  async findAll(userId: string, role: string, query: FindBatchesQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const skip = (page - 1) * limit;
@@ -40,7 +41,8 @@ export class BatchesService {
     const sanitizedSortBy = allowedSortFields.includes(query.sortBy || '')
       ? query.sortBy!
       : 'createdAt';
-    const sortOrder = (query.sortOrder || 'DESC').toLowerCase() as 'asc' | 'desc';
+    const sortOrder = (query.sortOrder || 'DESC').toLowerCase() as
+      'asc' | 'desc';
 
     const where: any = {};
 
@@ -150,18 +152,26 @@ export class BatchesService {
     }
 
     if (batch.collectorId !== collectorId) {
-      throw new ForbiddenException('No tienes permisos para modificar este lote');
+      throw new ForbiddenException(
+        'No tienes permisos para modificar este lote',
+      );
     }
 
     if (batch.status !== BatchStatus.OPEN) {
-      throw new BadRequestException('Solo se pueden actualizar lotes en estado OPEN');
+      throw new BadRequestException(
+        'Solo se pueden actualizar lotes en estado OPEN',
+      );
     }
 
     const destinationCenter = await this.prisma.user.findUnique({
       where: { id: dto.destinationCenterId },
     });
 
-    if (!destinationCenter || (destinationCenter.role !== Role.CENTRO_ACOPIO && destinationCenter.role !== Role.ALMACEN)) {
+    if (
+      !destinationCenter ||
+      (destinationCenter.role !== Role.CENTRO_ACOPIO &&
+        destinationCenter.role !== Role.ALMACEN)
+    ) {
       throw new BadRequestException(
         'El centro de acopio o almacén especificado no existe o no posee un rol autorizado',
       );
@@ -245,10 +255,11 @@ export class BatchesService {
 
     let hasDiscrepancy = false;
     let discrepancyNote: string | null = null;
-    const tolerance = 0.30; // Tolerancia del ±30%
+    const tolerance = 0.3; // Tolerancia del ±30%
 
     if (totalEstimatedKg > 0) {
-      const diffPercent = Math.abs(totalActualKg - totalEstimatedKg) / totalEstimatedKg;
+      const diffPercent =
+        Math.abs(totalActualKg - totalEstimatedKg) / totalEstimatedKg;
       if (diffPercent > tolerance) {
         hasDiscrepancy = true;
         discrepancyNote = `Discrepancia detectada: estimado total de ${totalEstimatedKg.toFixed(2)} kg vs pesado real de ${totalActualKg.toFixed(2)} kg (desviación del ${(diffPercent * 100).toFixed(1)}%, excede ±30% de tolerancia)`;
@@ -259,7 +270,9 @@ export class BatchesService {
     }
 
     if (hasDiscrepancy) {
-      this.logger.warn(`[ALERTA DE DESVÍO DE PESO] Lote ${id}: ${discrepancyNote}`);
+      this.logger.warn(
+        `[ALERTA DE DESVÍO DE PESO] Lote ${id}: ${discrepancyNote}`,
+      );
     }
 
     // Transacción Asíncrona:
@@ -293,7 +306,11 @@ export class BatchesService {
     const job = await this.blockchainQueue.add(
       'process-batch-blockchain',
       jobPayload,
-      { jobId: `batch-${updatedBatch.id}` },
+      {
+        jobId: `batch-${updatedBatch.id}`,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+      },
     );
 
     // c) Responde de inmediato al cliente con HTTP 202 Accepted
@@ -308,7 +325,10 @@ export class BatchesService {
    * POST /consolidated-batches (Rol: CENTRO_ACOPIO)
    * Consolida múltiples lotes en estado RECEIVED en un único ConsolidatedBatch usando Prisma $transaction.
    */
-  async createConsolidatedBatch(centerId: string, dto: CreateConsolidatedBatchDto) {
+  async createConsolidatedBatch(
+    centerId: string,
+    dto: CreateConsolidatedBatchDto,
+  ) {
     // 1. Obtener todos los lotes especificados
     const batches = await this.prisma.batch.findMany({
       where: {
@@ -317,7 +337,9 @@ export class BatchesService {
     });
 
     if (batches.length !== dto.batchIds.length) {
-      throw new NotFoundException('Uno o más lotes especificados no fueron encontrados');
+      throw new NotFoundException(
+        'Uno o más lotes especificados no fueron encontrados',
+      );
     }
 
     // 2. Verificar que todos los lotes pertenezcan a este Centro de Acopio y estén en estado RECEIVED

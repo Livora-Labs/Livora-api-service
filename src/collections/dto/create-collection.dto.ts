@@ -1,5 +1,13 @@
 import { Transform, Type } from 'class-transformer';
-import { IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateCollectionDto {
@@ -21,7 +29,10 @@ export class CreateCollectionDto {
   @IsObject({ message: 'itemsEstimated debe ser un objeto JSON válido' })
   itemsEstimated: Record<string, any>;
 
-  @ApiPropertyOptional({ example: 'Bolsa blanca afuera de la puerta', description: 'Notas opcionales para el recolector' })
+  @ApiPropertyOptional({
+    example: 'Bolsa blanca afuera de la puerta',
+    description: 'Notas opcionales para el recolector',
+  })
   @IsOptional()
   @IsString()
   description?: string;
@@ -42,9 +53,11 @@ export class CreateCollectionDto {
   @Max(180)
   longitude: number;
 
-  @ApiPropertyOptional({ example: 'https://...', description: 'URL de la foto opcional' })
+  @ApiPropertyOptional({
+    example: 'https://...',
+    description: 'URL de la foto opcional',
+  })
   @IsOptional()
   @IsString()
   photoUrl?: string;
 }
-

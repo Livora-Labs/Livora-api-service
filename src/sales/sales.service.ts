@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { IpfsService } from '../blockchain/services/ipfs.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -21,7 +26,9 @@ export class SalesService {
     });
 
     if (!buyer || buyer.role !== 'EMPRESA_B2B') {
-      throw new NotFoundException('La empresa compradora B2B no existe o no posee el rol EMPRESA_B2B');
+      throw new NotFoundException(
+        'La empresa compradora B2B no existe o no posee el rol EMPRESA_B2B',
+      );
     }
 
     const normMaterial = dto.materialType.toUpperCase().trim();
@@ -58,8 +65,8 @@ export class SalesService {
     if (totalOut + dto.weightKg > allowedLimit) {
       throw new BadRequestException(
         `La venta excede el límite contable de conservación de masa con merma del 5% para ${normMaterial}. ` +
-        `Total entradas: ${totalIn} kg (límite con merma: ${allowedLimit.toFixed(2)} kg), ` +
-        `Salidas históricas: ${totalOut} kg, Solicitado: ${dto.weightKg} kg.`
+          `Total entradas: ${totalIn} kg (límite con merma: ${allowedLimit.toFixed(2)} kg), ` +
+          `Salidas históricas: ${totalOut} kg, Solicitado: ${dto.weightKg} kg.`,
       );
     }
 
@@ -73,7 +80,7 @@ export class SalesService {
 
     if (!invItem || invItem.quantityKg < dto.weightKg) {
       throw new BadRequestException(
-        `Inventario insuficiente para ${normMaterial}. Disponible: ${invItem?.quantityKg || 0} kg, requerido: ${dto.weightKg} kg.`
+        `Inventario insuficiente para ${normMaterial}. Disponible: ${invItem?.quantityKg || 0} kg, requerido: ${dto.weightKg} kg.`,
       );
     }
 
@@ -141,7 +148,9 @@ export class SalesService {
     }
 
     if (certificate.buyerId !== buyerId) {
-      throw new ForbiddenException('No tienes permisos para ver este certificado');
+      throw new ForbiddenException(
+        'No tienes permisos para ver este certificado',
+      );
     }
 
     return certificate;
@@ -157,7 +166,9 @@ export class SalesService {
     });
 
     if (!buyer || buyer.role !== 'EMPRESA_B2B') {
-      throw new NotFoundException('La empresa compradora B2B especificada no existe');
+      throw new NotFoundException(
+        'La empresa compradora B2B especificada no existe',
+      );
     }
 
     // Subir metadatos de impacto ESG reales a Pinata IPFS

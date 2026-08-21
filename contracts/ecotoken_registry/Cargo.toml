@@ -3,29 +3,20 @@ name = "ecotoken_registry"
 version = "0.1.0"
 edition = "2021"
 authors = ["Livora Team"]
-description = "Arbitrum Stylus Smart Contract for EcoToken (ERC-20) and BatchRegistry traceability"
+description = "Stellar Soroban Smart Contract for EcoToken and BatchRegistry traceability"
 license = "MIT OR Apache-2.0"
+autobins = false
 
 [dependencies]
-stylus-sdk = "0.7.0"
-alloy-primitives = { version = "=0.8.14", features = ["tiny-keccak", "std"] }
-alloy-sol-types = "=0.8.14"
-mini-alloc = "0.4.2"
-ruint = "=1.12.3"
+soroban-sdk = "21.0.0"
 
-[build-dependencies]
-alloy-primitives = { version = "=0.8.14", features = ["tiny-keccak", "std"] }
-
-[features]
-default = []
-export-abi = ["stylus-sdk/export-abi"]
+[dev-dependencies]
+soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+ed25519-dalek = { version = "2.1.0", features = ["rand_core"] }
+stellar-strkey = "0.0.8"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
-
-[[bin]]
-name = "ecotoken_registry_abi"
-path = "src/main.rs"
+crate-type = ["cdylib"]
 
 [profile.release]
 codegen-units = 1
@@ -33,4 +24,4 @@ strip = true
 lto = true
 opt-level = "z"
 panic = "abort"
-overflow-checks = false
+overflow-checks = true

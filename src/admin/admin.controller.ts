@@ -32,7 +32,9 @@ export class AdminController {
   @ApiBearerAuth()
   @UseGuards(SupabaseAuthGuard, RolesGuard)
   @Roles(Role.RECOLECTOR)
-  @ApiOperation({ summary: 'Enviar solicitud de verificación KYC (Rol: RECOLECTOR)' })
+  @ApiOperation({
+    summary: 'Enviar solicitud de verificación KYC (Rol: RECOLECTOR)',
+  })
   async createKycApplication(
     @CurrentUser('id') userId: string,
     @Body() dto: CreateKycApplicationDto,
@@ -59,7 +61,9 @@ export class AdminController {
   @ApiBearerAuth()
   @UseGuards(SupabaseAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Actualizar estado de verificación KYC de usuario (Rol: ADMIN)' })
+  @ApiOperation({
+    summary: 'Actualizar estado de verificación KYC de usuario (Rol: ADMIN)',
+  })
   async updateUserKycStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateKycStatusDto,
@@ -71,7 +75,9 @@ export class AdminController {
   @ApiBearerAuth()
   @UseGuards(SupabaseAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Baneo o activación de estado de usuario (Rol: ADMIN)' })
+  @ApiOperation({
+    summary: 'Baneo o activación de estado de usuario (Rol: ADMIN)',
+  })
   async updateUserStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateUserStatusDto,
@@ -83,7 +89,9 @@ export class AdminController {
   @ApiBearerAuth()
   @UseGuards(SupabaseAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Obtener estado de salud del nodo Blockchain (Rol: ADMIN)' })
+  @ApiOperation({
+    summary: 'Obtener estado de salud del nodo Blockchain (Rol: ADMIN)',
+  })
   async getBlockchainHealth() {
     return this.adminService.getBlockchainHealth();
   }
@@ -92,7 +100,9 @@ export class AdminController {
   @ApiBearerAuth()
   @UseGuards(SupabaseAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Actualizar estado de un reclamo/queja (Rol: ADMIN)' })
+  @ApiOperation({
+    summary: 'Actualizar estado de un reclamo/queja (Rol: ADMIN)',
+  })
   async updateComplaintStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateComplaintStatusDto,

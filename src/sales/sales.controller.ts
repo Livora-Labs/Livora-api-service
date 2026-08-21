@@ -28,7 +28,10 @@ export class SalesController {
 
   @Post('sales')
   @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
-  @ApiOperation({ summary: 'Registrar venta de material consolidado a empresa B2B (Rol: CENTRO_ACOPIO / ALMACEN)' })
+  @ApiOperation({
+    summary:
+      'Registrar venta de material consolidado a empresa B2B (Rol: CENTRO_ACOPIO / ALMACEN)',
+  })
   async createSale(
     @CurrentUser('id') centerId: string,
     @Body() dto: CreateSaleDto,
@@ -38,7 +41,10 @@ export class SalesController {
 
   @Get('certificates')
   @Roles(Role.EMPRESA_B2B)
-  @ApiOperation({ summary: 'Listar certificados ESG emitidos para la empresa B2B (Rol: EMPRESA_B2B)' })
+  @ApiOperation({
+    summary:
+      'Listar certificados ESG emitidos para la empresa B2B (Rol: EMPRESA_B2B)',
+  })
   async getCertificates(
     @CurrentUser('id') buyerId: string,
     @Query() query: PaginationQueryDto,
@@ -48,7 +54,9 @@ export class SalesController {
 
   @Get('certificates/:id')
   @Roles(Role.EMPRESA_B2B)
-  @ApiOperation({ summary: 'Obtener detalle de certificado ESG por ID (Rol: EMPRESA_B2B)' })
+  @ApiOperation({
+    summary: 'Obtener detalle de certificado ESG por ID (Rol: EMPRESA_B2B)',
+  })
   async getCertificateById(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser('id') buyerId: string,
@@ -58,14 +66,20 @@ export class SalesController {
 
   @Post('certificates')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Emitir / Mintear certificado ESG simulado con IPFS hash (Rol: ADMIN)' })
+  @ApiOperation({
+    summary:
+      'Emitir / Mintear certificado ESG simulado con IPFS hash (Rol: ADMIN)',
+  })
   async createCertificate(@Body() dto: CreateCertificateDto) {
     return this.salesService.createCertificate(dto);
   }
 
   @Get('sales')
   @Roles(Role.EMPRESA_B2B, Role.CENTRO_ACOPIO, Role.ALMACEN)
-  @ApiOperation({ summary: 'Obtener historial de compras/ventas (Rol: B2B o Acopio / Almacén)' })
+  @ApiOperation({
+    summary:
+      'Obtener historial de compras/ventas (Rol: B2B o Acopio / Almacén)',
+  })
   async getSales(
     @CurrentUser('id') userId: string,
     @CurrentUser('role') role: string,

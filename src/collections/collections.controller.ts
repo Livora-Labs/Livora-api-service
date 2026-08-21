@@ -45,7 +45,9 @@ export class CollectionsController {
 
   @Get()
   @Roles(Role.HOGAR, Role.RECOLECTOR)
-  @ApiOperation({ summary: 'Listar solicitudes de recolección (Rol: HOGAR / RECOLECTOR)' })
+  @ApiOperation({
+    summary: 'Listar solicitudes de recolección (Rol: HOGAR / RECOLECTOR)',
+  })
   async findAll(
     @CurrentUser() user: any,
     @Query() query: FindCollectionsQueryDto,
@@ -55,7 +57,10 @@ export class CollectionsController {
 
   @Get(':id')
   @Roles(Role.HOGAR, Role.RECOLECTOR)
-  @ApiOperation({ summary: 'Obtener detalle de una solicitud de recolección por ID (Rol: HOGAR / RECOLECTOR)' })
+  @ApiOperation({
+    summary:
+      'Obtener detalle de una solicitud de recolección por ID (Rol: HOGAR / RECOLECTOR)',
+  })
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: any,
@@ -65,7 +70,9 @@ export class CollectionsController {
 
   @Patch(':id')
   @Roles(Role.HOGAR, Role.RECOLECTOR)
-  @ApiOperation({ summary: 'Actualizar estado de solicitud (ej. ACCEPTED o COLLECTED)' })
+  @ApiOperation({
+    summary: 'Actualizar estado de solicitud (ej. ACCEPTED o COLLECTED)',
+  })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: any,
@@ -76,7 +83,10 @@ export class CollectionsController {
 
   @Post(':id/verify')
   @Roles(Role.RECOLECTOR)
-  @ApiOperation({ summary: 'Verificar entrega física mediante PIN de 4 dígitos del Hogar (Rol: RECOLECTOR)' })
+  @ApiOperation({
+    summary:
+      'Verificar entrega física mediante PIN de 4 dígitos del Hogar (Rol: RECOLECTOR)',
+  })
   async verifyPin(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser('id') collectorId: string,
@@ -85,4 +95,3 @@ export class CollectionsController {
     return this.collectionsService.verifyPin(id, collectorId, dto);
   }
 }
-

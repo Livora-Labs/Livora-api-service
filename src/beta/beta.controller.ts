@@ -10,7 +10,9 @@ export class BetaController {
 
   @Post()
   @HttpCode(201)
-  @ApiOperation({ summary: 'Registro público en la lista de espera de la beta (landing)' })
+  @ApiOperation({
+    summary: 'Registro público en la lista de espera de la beta (landing)',
+  })
   async create(@Body() dto: CreateBetaSignupDto) {
     await this.betaService.register(dto.email);
     return { success: true };

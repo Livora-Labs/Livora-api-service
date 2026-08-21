@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -10,20 +11,24 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { WebsocketsService } from '../websockets/websockets.service';
+import { BlockchainService } from '../blockchain/services/blockchain.service';
 import { CreateStoreProfileDto } from './dto/create-store-profile.dto';
 import { CreateQrRedemptionDto } from './dto/create-qr-redemption.dto';
 import { CreateSettlementRequestDto } from './dto/create-settlement-request.dto';
 import { PaySettlementDto } from './dto/pay-settlement.dto';
-import { RedemptionStatus, SettlementStatus, Role } from '@prisma/client';
+import { RedemptionStatus, SettlementStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 
 @Injectable()
 export class StoresService {
+  private readonly logger = new Logger(StoresService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly walletsService: WalletsService,
     private readonly websocketsService: WebsocketsService,
     private readonly configService: ConfigService,
+    private readonly blockchainService: BlockchainService,
     @InjectQueue('blockchain-queue') private readonly blockchainQueue: Queue,
   ) {}
 
@@ -38,7 +43,9 @@ export class StoresService {
     });
 
     if (existingProfile) {
-      throw new ConflictException('El usuario ya tiene un perfil de tienda registrado');
+      throw new ConflictException(
+        'El usuario ya tiene un perfil de tienda registrado',
+      );
     }
 
     return this.prisma.storeProfile.create({
@@ -74,7 +81,9 @@ export class StoresService {
     });
 
     if (!storeProfile) {
-      throw new NotFoundException('Perfil de tienda no encontrado para este usuario');
+      throw new NotFoundException(
+        'Perfil de tienda no encontrado para este usuario',
+      );
     }
 
     const finalAmount = dto.tokenAmount ?? dto.amount;
@@ -142,7 +151,9 @@ export class StoresService {
     });
 
     if (!userWallet?.walletAddress) {
-      throw new BadRequestException('El usuario hogar no tiene una billetera configurada');
+      throw new BadRequestException(
+        'El usuario hogar no tiene una billetera configurada',
+      );
     }
 
     // Consulta rápida al balance de tokens
@@ -166,13 +177,17 @@ export class StoresService {
 
     // 4. Disparar notificación WebSocket a la sala privada de la tienda store:${storeUserId}
     const storeUserId = redemption.store.user.id;
-    this.websocketsService.emitStoreNotification(storeUserId, 'redemption:completed', {
-      redemptionId: updatedRedemption.id,
-      tokenAmount: updatedRedemption.tokenAmount,
-      status: updatedRedemption.status,
-      householdId: householdUserId,
-      qrCodeRef: updatedRedemption.qrCodeRef,
-    });
+    this.websocketsService.emitStoreNotification(
+      storeUserId,
+      'redemption:completed',
+      {
+        redemptionId: updatedRedemption.id,
+        tokenAmount: updatedRedemption.tokenAmount,
+        status: updatedRedemption.status,
+        householdId: householdUserId,
+        qrCodeRef: updatedRedemption.qrCodeRef,
+      },
+    );
 
     // 5. Encolar trabajo en BullMQ (blockchain-queue)
     await this.blockchainQueue.add('redemption-transfer', {
@@ -182,6 +197,9 @@ export class StoresService {
       fromWallet: userWallet.walletAddress,
       toWallet: redemption.store.user.walletAddress,
       tokenAmount: updatedRedemption.tokenAmount,
+    }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
     });
 
     return updatedRedemption;
@@ -198,7 +216,9 @@ export class StoresService {
     });
 
     if (!storeProfile) {
-      throw new NotFoundException('Perfil de tienda no encontrado para este usuario');
+      throw new NotFoundException(
+        'Perfil de tienda no encontrado para este usuario',
+      );
     }
 
     // Calcular el monto en Soles (fiatAmount) con tasa de cambio 1:1
@@ -259,19 +279,23 @@ export class StoresService {
 
     // 3. Notificar a la tienda vía WebSockets: settlement:paid
     const storeUserId = settlement.store.user.id;
-    this.websocketsService.emitStoreNotification(storeUserId, 'settlement:paid', {
-      settlementId: updatedSettlement.id,
-      tokenAmount: updatedSettlement.tokenAmount,
-      fiatAmount: updatedSettlement.fiatAmount,
-      status: updatedSettlement.status,
-      receiptUrl: updatedSettlement.receiptUrl,
-    });
+    this.websocketsService.emitStoreNotification(
+      storeUserId,
+      'settlement:paid',
+      {
+        settlementId: updatedSettlement.id,
+        tokenAmount: updatedSettlement.tokenAmount,
+        fiatAmount: updatedSettlement.fiatAmount,
+        status: updatedSettlement.status,
+        receiptUrl: updatedSettlement.receiptUrl,
+      },
+    );
 
     // 4. Encolar transferencia de tokens de la wallet de la tienda a la tesorería de Livora
     // Usamos el walletAddress de la tienda como origen, y la wallet del Relayer/Master como tesorería de fallback
     const treasuryWallet =
-      this.configService.get<string>('ECOTOKEN_CONTRACT_ADDRESS') ||
-      '0x0000000000000000000000000000000000000000';
+      this.configService.get<string>('ECOTOKEN_CONTRACT_ID') ||
+      'CD7L2OEZL74GPHXQ32EEXI7Y7DPHF74GPHXQ32EEXI7Y7DPHF74GPHXQ';
 
     await this.blockchainQueue.add('settlement-transfer', {
       settlementId: updatedSettlement.id,
@@ -279,6 +303,9 @@ export class StoresService {
       fromWallet: settlement.store.user.walletAddress,
       toWallet: treasuryWallet,
       tokenAmount: updatedSettlement.tokenAmount,
+    }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
     });
 
     return updatedSettlement;
@@ -292,7 +319,9 @@ export class StoresService {
       where: { userId },
     });
     if (!profile) {
-      throw new NotFoundException('Perfil de tienda no encontrado para este usuario');
+      throw new NotFoundException(
+        'Perfil de tienda no encontrado para este usuario',
+      );
     }
     return profile;
   }
