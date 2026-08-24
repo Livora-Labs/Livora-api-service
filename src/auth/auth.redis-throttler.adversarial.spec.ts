@@ -167,7 +167,7 @@ describe('Adversarial M3 Verification — Redis OTP State Lifecycle & Attacks', 
     service = module.get<AuthService>(AuthService);
   });
 
-  describe('Criterion 1: Registration Payload 600s TTL is NOT extended by resendOtp', () => {
+  describe('Criterion 1: Registration Payload 1800s TTL is NOT extended by resendOtp', () => {
     it('should maintain the original registration payload expiration across multiple resendOtp calls', async () => {
       // 1. Initial Registration at T=0
       await service.register(testRegisterDto);
@@ -189,9 +189,9 @@ describe('Adversarial M3 Verification — Redis OTP State Lifecycle & Attacks', 
       expect(entryAfterResend).toBeDefined();
       expect(entryAfterResend!.expiresAt).toBe(initialExpiresAt);
 
-      // Remaining TTL of payload should now be ~480s (600 - 120), NOT 600s
+      // Remaining TTL of payload should now be ~1680s (1800 - 120), NOT 1800s
       const remainingTtl = await mockRedisService.ttl(payloadKey);
-      expect(remainingTtl).toBe(480);
+      expect(remainingTtl).toBe(1680);
 
       // Simulate another 100 seconds elapsed (T=220)
       const nowAtT220 = Date.now() + 100 * 1000;
@@ -203,22 +203,22 @@ describe('Adversarial M3 Verification — Redis OTP State Lifecycle & Attacks', 
       // Verify again: payload entry expiresAt is NEVER modified or refreshed
       const entryAfterSecondResend = redisMemory.get(payloadKey);
       expect(entryAfterSecondResend!.expiresAt).toBe(initialExpiresAt);
-      expect(await mockRedisService.ttl(payloadKey)).toBe(380);
+      expect(await mockRedisService.ttl(payloadKey)).toBe(1580);
 
       jest.restoreAllMocks();
     });
   });
 
   describe('Criterion 2: New OTP code expiration is clamped to remaining TTL of registration payload', () => {
-    it('should clamp new OTP TTL to exactly remaining payload TTL, even if less than 600s or 60s', async () => {
+    it('should clamp new OTP TTL to exactly remaining payload TTL, even if less than 1800s or 60s', async () => {
       await service.register(testRegisterDto);
 
       const payloadKey = `auth:register:payload:${testEmail}`;
       const codeKey = `auth:otp:code:${testEmail}`;
 
-      // Simulate 550s elapsed (only 50s remaining on the 600s registration payload)
-      const nowAtT550 = Date.now() + 550 * 1000;
-      jest.spyOn(Date, 'now').mockReturnValue(nowAtT550);
+      // Simulate 1750s elapsed (only 50s remaining on the 1800s registration payload)
+      const nowAtT1750 = Date.now() + 1750 * 1000;
+      jest.spyOn(Date, 'now').mockReturnValue(nowAtT1750);
 
       await service.resendOtp({ email: testEmail });
 
@@ -230,14 +230,14 @@ describe('Adversarial M3 Verification — Redis OTP State Lifecycle & Attacks', 
       const codeRemainingTtl = await mockRedisService.ttl(codeKey);
       expect(codeRemainingTtl).toBe(50);
 
-      // Simulate 51s later (T=601) -> both payload and code expire simultaneously
-      const nowAtT601 = Date.now() + 51 * 1000;
-      jest.spyOn(Date, 'now').mockReturnValue(nowAtT601);
+      // Simulate 51s later (T=1801) -> both payload and code expire simultaneously
+      const nowAtT1801 = Date.now() + 1801 * 1000;
+      jest.spyOn(Date, 'now').mockReturnValue(nowAtT1801);
 
       expect(await mockRedisService.get(payloadKey)).toBeNull();
       expect(await mockRedisService.get(codeKey)).toBeNull();
 
-      // Calling verifyEmail at T=601 must fail due to expiration
+      // Calling verifyEmail at T=1801 must fail due to expiration
       await expect(
         service.verifyEmail({ email: testEmail, code: '123456' }),
       ).rejects.toThrow(BadRequestException);
@@ -248,9 +248,9 @@ describe('Adversarial M3 Verification — Redis OTP State Lifecycle & Attacks', 
     it('should reject resendOtp if payload TTL has already expired (TTL <= 0)', async () => {
       await service.register(testRegisterDto);
 
-      // Simulate 605s elapsed (registration expired)
-      const nowAtT605 = Date.now() + 605 * 1000;
-      jest.spyOn(Date, 'now').mockReturnValue(nowAtT605);
+      // Simulate 1805s elapsed (registration expired)
+      const nowAtT1805 = Date.now() + 1805 * 1000;
+      jest.spyOn(Date, 'now').mockReturnValue(nowAtT1805);
 
       await expect(service.resendOtp({ email: testEmail })).rejects.toThrow(
         new BadRequestException(

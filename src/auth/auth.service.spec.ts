@@ -150,11 +150,11 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
         email: 'eco.user@livora.io',
       });
 
-      // 1. Verify auth:register:payload:${email} stored with 600s TTL
+      // 1. Verify auth:register:payload:${email} stored with 1800s TTL
       expect(mockRedisService.set).toHaveBeenCalledWith(
         'auth:register:payload:eco.user@livora.io',
         JSON.stringify(mockRegisterDto),
-        600,
+        1800,
       );
 
       // 2. Verify auth:otp:code:${email} stored with 600s TTL (bcrypt hash)

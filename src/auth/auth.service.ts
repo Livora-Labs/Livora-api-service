@@ -61,8 +61,8 @@ export class AuthService {
     await this.redisService.del(`otp:attempts:${registerDto.email}`);
     await this.redisService.set(`otp:cooldown:${registerDto.email}`, '1', 60);
 
-    // 3. Guardar payload de registro con TTL inmutable de 10 minutos (600s)
-    await this.redisService.set(payloadKey, JSON.stringify(registerDto), 600);
+    // 3. Guardar payload de registro con TTL inmutable de 30 minutos (1800s)
+    await this.redisService.set(payloadKey, JSON.stringify(registerDto), 1800);
 
     // 4. Guardar hash de código OTP con TTL de 600s
     await this.redisService.set(codeKey, otpHash, 600);
@@ -120,7 +120,7 @@ export class AuthService {
       storedOtpHash = parsed.otpHash;
       otpExpiresAt = parsed.otpExpiresAt;
     } else {
-      storedOtpHash = await this.redisService.get(codeKey);
+      storedOtpHash = (await this.redisService.get(codeKey)) || '';
     }
 
     if (!storedOtpHash) {
@@ -380,7 +380,6 @@ export class AuthService {
     };
   }
 
-<<<<<<< HEAD
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
     const { email } = forgotPasswordDto;
 
