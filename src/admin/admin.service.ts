@@ -21,6 +21,28 @@ export class AdminService {
     });
   }
 
+  /**
+   * Estado KYC del propio recolector. Devuelve NOT_SUBMITTED si aún no envió nada,
+   * o el estado de su última solicitud (PENDING | APPROVED | REJECTED).
+   */
+  async getMyKycApplication(userId: string) {
+    const app = await this.prisma.kycApplication.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!app) {
+      return { status: 'NOT_SUBMITTED' };
+    }
+
+    return {
+      status: app.status,
+      documentUrl: app.documentUrl,
+      createdAt: app.createdAt,
+      updatedAt: app.updatedAt,
+    };
+  }
+
   async createB2bApplication(dto: CreateB2bApplicationDto) {
     return {
       status: 'RECEIVED',

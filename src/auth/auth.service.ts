@@ -12,6 +12,7 @@ import { RedisService } from '../redis/redis.service';
 import { MailService } from '../common/services/mail.service';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
+import { RefreshDto } from './dto/refresh.dto';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -36,13 +37,17 @@ export class AuthService {
     const code = crypto.randomInt(100000, 999999).toString();
     const otpHash = crypto.createHash('sha256').update(code).digest('hex');
 
-    // 3. Guardar en Redis con TTL de 10 minutos (600s)
+    // 3. Guardar en Redis. El OTP vence en 10 min (otpExpiresAt), pero el blob
+    //    vive 30 min para que "reenviar código" pueda rescatar aunque el OTP
+    //    haya expirado.
     const redisKey = `otp:register:${registerDto.email}`;
     const payload = {
       registerDto,
       otpHash,
+      otpExpiresAt: Date.now() + 10 * 60 * 1000,
     };
-    await this.redisService.set(redisKey, JSON.stringify(payload), 600);
+    await this.redisService.set(redisKey, JSON.stringify(payload), 1800);
+    await this.redisService.del(`otp:attempts:${registerDto.email}`);
 
     // 4. Configurar cooldown de reenvío de 60s
     const cooldownKey = `otp:cooldown:${registerDto.email}`;
@@ -67,14 +72,37 @@ export class AuthService {
       throw new BadRequestException('El código OTP ha expirado o no existe');
     }
 
-    const { registerDto, otpHash } = JSON.parse(rawData) as {
+    const { registerDto, otpHash, otpExpiresAt } = JSON.parse(rawData) as {
       registerDto: RegisterDto;
       otpHash: string;
+      otpExpiresAt?: number;
     };
 
-    // 2. Validar el OTP hasheado
+    // 2. Límite de intentos (5) contra fuerza bruta del OTP de 6 dígitos
+    const attemptsKey = `otp:attempts:${email}`;
+    const attempts = parseInt(
+      (await this.redisService.get(attemptsKey)) || '0',
+      10,
+    );
+    if (attempts >= 5) {
+      await this.redisService.del(redisKey);
+      await this.redisService.del(attemptsKey);
+      throw new BadRequestException(
+        'Demasiados intentos fallidos. Por favor regístrate de nuevo.',
+      );
+    }
+
+    // 3. Expiración del código (10 min), independiente del TTL del blob (30 min)
+    if (otpExpiresAt && Date.now() > otpExpiresAt) {
+      throw new BadRequestException(
+        'El código ha expirado. Solicita un reenvío.',
+      );
+    }
+
+    // 4. Validar el OTP hasheado
     const inputHash = crypto.createHash('sha256').update(code).digest('hex');
     if (inputHash !== otpHash) {
+      await this.redisService.set(attemptsKey, String(attempts + 1), 1800);
       throw new BadRequestException('El código de verificación es incorrecto');
     }
 
@@ -117,6 +145,7 @@ export class AuthService {
     // 6. Limpiar OTP en Redis
     await this.redisService.del(redisKey);
     await this.redisService.del(`otp:cooldown:${email}`);
+    await this.redisService.del(`otp:attempts:${email}`);
 
     return {
       accessToken: loginData.session.access_token,
@@ -159,12 +188,15 @@ export class AuthService {
     const code = crypto.randomInt(100000, 999999).toString();
     const otpHash = crypto.createHash('sha256').update(code).digest('hex');
 
-    // 4. Actualizar en Redis manteniendo la misma expiración de 10 min
+    // 4. Actualizar en Redis: nuevo OTP con vigencia de 10 min, blob 30 min,
+    //    y reiniciar el contador de intentos.
     const payload = {
       registerDto,
       otpHash,
+      otpExpiresAt: Date.now() + 10 * 60 * 1000,
     };
-    await this.redisService.set(redisKey, JSON.stringify(payload), 600);
+    await this.redisService.set(redisKey, JSON.stringify(payload), 1800);
+    await this.redisService.del(`otp:attempts:${email}`);
 
     // 5. Configurar cooldown de reenvío de 60s
     await this.redisService.set(cooldownKey, '1', 60);
@@ -205,6 +237,41 @@ export class AuthService {
         role: userProfile?.role,
         walletAddress: userProfile?.walletAddress,
       },
+    };
+  }
+
+  /**
+   * Canjea un refresh token por una nueva sesión (nuevo accessToken).
+   * La app usa esto para renovar la sesión sin pedir la contraseña de nuevo.
+   */
+  async refresh(refreshDto: RefreshDto) {
+    const supabaseClient = this.supabaseService.getClient();
+
+    const { data, error } = await supabaseClient.auth.refreshSession({
+      refresh_token: refreshDto.refreshToken,
+    });
+
+    if (error || !data.session) {
+      throw new UnauthorizedException('Refresh token inválido o expirado');
+    }
+
+    const userProfile = data.user
+      ? await this.usersService.findById(data.user.id)
+      : null;
+
+    return {
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      expiresIn: data.session.expires_in,
+      tokenType: data.session.token_type,
+      user: data.user
+        ? {
+            id: data.user.id,
+            email: data.user.email,
+            role: userProfile?.role,
+            walletAddress: userProfile?.walletAddress,
+          }
+        : null,
     };
   }
 }

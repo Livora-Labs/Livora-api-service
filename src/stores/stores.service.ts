@@ -86,7 +86,7 @@ export class StoresService {
       );
     }
 
-    const finalAmount = dto.tokenAmount ?? dto.amount;
+    const finalAmount = dto.tokenAmount;
     if (!finalAmount || finalAmount <= 0) {
       throw new BadRequestException('El monto debe ser un número positivo');
     }

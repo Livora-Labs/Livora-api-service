@@ -32,39 +32,59 @@ export class MailService {
    * Envía el código de verificación OTP.
    */
   async sendOtpEmail(toEmail: string, otp: string): Promise<void> {
-    const subject = 'Código de verificación Livora 🔑';
+    const subject = 'Tu código de verificación · Livora';
+    // El logo DEBE estar alojado en una URL pública HTTPS (los clientes de correo
+    // bloquean imágenes en base64). Configurable con EMAIL_LOGO_URL.
+    const logoUrl = this.configService.get<string>(
+      'EMAIL_LOGO_URL',
+      'https://52.200.2.107.sslip.io/assets/livora-logo.png',
+    );
+    const year = new Date().getFullYear();
     const htmlContent = `
       <!DOCTYPE html>
-      <html>
+      <html lang="es">
       <head>
         <meta charset="utf-8">
-        <title>Código OTP - Livora</title>
-        <style>
-          body { font-family: sans-serif; background-color: #121212; color: #E0E0E0; margin: 0; padding: 20px; }
-          .container { max-width: 600px; margin: 0 auto; background-color: #1E1E1E; border-radius: 12px; padding: 30px; border: 1px solid #2C2C2C; }
-          .header { text-align: center; border-bottom: 2px solid #2E7D32; padding-bottom: 15px; }
-          .logo { font-size: 24px; font-weight: bold; color: #81C784; text-decoration: none; }
-          .content { padding-top: 20px; line-height: 1.6; text-align: center; }
-          .otp-code { font-size: 32px; font-weight: bold; color: #81C784; letter-spacing: 4px; margin: 20px 0; background: #2C2C2C; padding: 15px; border-radius: 8px; display: inline-block; }
-          .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #757575; border-top: 1px solid #2C2C2C; padding-top: 15px; }
-        </style>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="color-scheme" content="dark light">
+        <title>Código de verificación · Livora</title>
       </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <a href="https://livora.org" class="logo">♻️ LIVORA</a>
-          </div>
-          <div class="content">
-            <h2>Código de Verificación</h2>
-            <p>Usa el siguiente código de verificación para completar tu registro en Livora. Este código expirará en 10 minutos.</p>
-            <div class="otp-code">${otp}</div>
-            <p>Si no solicitaste este código, puedes ignorar este correo de forma segura.</p>
-          </div>
-          <div class="footer">
-            <p>Este es un correo automático. Por favor no respondas a este mensaje.</p>
-            <p>&copy; ${new Date().getFullYear()} Livora. Todos los derechos reservados.</p>
-          </div>
-        </div>
+      <body style="margin:0;padding:0;background-color:#0e1512;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0e1512;padding:32px 16px;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#161f1b;border:1px solid #24312b;border-radius:16px;overflow:hidden;">
+                <tr>
+                  <td align="center" style="padding:28px 32px;background-color:#ffffff;">
+                    <img src="${logoUrl}" alt="Livora — Reciclaje verificado. Valor real." width="190" style="display:block;border:0;outline:none;text-decoration:none;height:auto;max-width:190px;">
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:36px 32px 6px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                    <h1 style="margin:0 0 12px;font-size:20px;font-weight:600;color:#eaf4f0;">Código de verificación</h1>
+                    <p style="margin:0 auto;max-width:340px;font-size:14px;line-height:1.6;color:#9bb0a6;">Usa este código para completar tu registro en Livora. Vence en <strong style="color:#cfe3d8;">10 minutos</strong>.</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:26px 32px;">
+                    <div style="display:inline-block;background-color:#0e1512;border:1px solid #2f7d54;border-radius:12px;padding:16px 26px;font-family:'Courier New',Courier,monospace;font-size:36px;font-weight:700;letter-spacing:10px;color:#5fce97;">${otp}</div>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:0 32px 34px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                    <p style="margin:0 auto;max-width:340px;font-size:12px;line-height:1.6;color:#6f8479;">Si no solicitaste este código, ignora este correo de forma segura.</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:20px 32px;background-color:#111a16;border-top:1px solid #24312b;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                    <p style="margin:0 0 4px;font-size:11px;color:#5b6f65;">Correo automático · no respondas a este mensaje.</p>
+                    <p style="margin:0;font-size:11px;color:#5b6f65;">© ${year} Livora · Reciclaje verificado</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
       </body>
       </html>
     `;

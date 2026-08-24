@@ -2,8 +2,10 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Patch,
   UseGuards,
 } from '@nestjs/common';
@@ -18,6 +20,23 @@ import { UsersService } from './users.service';
 @UseGuards(SupabaseAuthGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
+
+  @Get('me')
+  @ApiOperation({ summary: 'Perfil del usuario autenticado (rol y wallet)' })
+  @ApiResponse({ status: 200, description: 'Perfil del usuario' })
+  async getMe(@CurrentUser('id') userId: string) {
+    const u = await this.usersService.findById(userId);
+    if (!u) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+    return {
+      id: u.id,
+      email: u.email,
+      role: u.role,
+      walletAddress: u.walletAddress,
+      createdAt: u.createdAt,
+    };
+  }
 
   @Patch('fcm-token')
   @HttpCode(HttpStatus.OK)

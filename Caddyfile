@@ -21,6 +21,25 @@
 		header Content-Disposition "attachment; filename=livora.apk"
 		file_server
 	}
+	handle /assets/* {
+		root * /srv/public
+		file_server
+	}
+	handle /privacidad* {
+		root * /srv/public
+		rewrite * /privacidad.html
+		file_server
+	}
+	handle /eliminar-cuenta* {
+		root * /srv/public
+		rewrite * /eliminar-cuenta.html
+		file_server
+	}
+	handle /terminos* {
+		root * /srv/public
+		rewrite * /terminos.html
+		file_server
+	}
 	handle {
 		reverse_proxy api:3000
 	}
@@ -29,4 +48,9 @@
 # Se mantiene el acceso HTTP directo por IP (compatibilidad con el mobile actual)
 http://52.200.2.107 {
 	reverse_proxy api:3000
+}
+
+# ===== Stack Stellar (paralelo, aislado) =====
+stellar.52.200.2.107.sslip.io {
+	reverse_proxy stellar_api:3000
 }

@@ -28,7 +28,7 @@ export class WalletsController {
 
   @Get('me/balance')
   @ApiOperation({
-    summary: 'Consultar saldo de EcoTokens (ERC-20) en Arbitrum Sepolia',
+    summary: 'Consultar saldo de EcoTokens (SEP-41) en Stellar/Soroban',
   })
   @ApiResponse({ status: 200, description: 'Saldo devuelto exitosamente' })
   async getBalance(@CurrentUser('id') userId: string) {

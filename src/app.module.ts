@@ -21,6 +21,7 @@ import { BlockchainModule } from './blockchain/blockchain.module';
 import { StoresModule } from './stores/stores.module';
 import { B2bTransfersModule } from './b2b/b2b-transfers.module';
 import { BetaModule } from './beta/beta.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { MailService } from './common/services/mail.service';
@@ -62,6 +63,7 @@ import { HealthModule } from './health/health.module';
     StoresModule,
     B2bTransfersModule,
     BetaModule,
+    UploadsModule,
     ThrottlerModule.forRoot([{
       ttl: 60000,
       limit: 100,

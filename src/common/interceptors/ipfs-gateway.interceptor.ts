@@ -28,6 +28,12 @@ export class IpfsGatewayInterceptor implements NestInterceptor {
       return data;
     }
 
+    // Preservar objetos no-planos (Date, Buffer, etc.). Sin esto, al recorrer un
+    // Date con Object.entries() se reconstruye como {} y las fechas se pierden.
+    if (data instanceof Date || Buffer.isBuffer(data)) {
+      return data;
+    }
+
     if (Array.isArray(data)) {
       return data.map((item) => this.formatResponse(item));
     }

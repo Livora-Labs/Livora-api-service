@@ -42,6 +42,17 @@ export class AdminController {
     return this.adminService.createKycApplication(userId, dto);
   }
 
+  @Get('collectors/me/kyc-application')
+  @ApiBearerAuth()
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Role.RECOLECTOR)
+  @ApiOperation({
+    summary: 'Consultar mi estado de verificación KYC (Rol: RECOLECTOR)',
+  })
+  async getMyKycApplication(@CurrentUser('id') userId: string) {
+    return this.adminService.getMyKycApplication(userId);
+  }
+
   @Post('b2b/applications')
   @ApiOperation({ summary: 'Registrar solicitud de afiliación B2B (Público)' })
   async createB2bApplication(@Body() dto: CreateB2bApplicationDto) {
