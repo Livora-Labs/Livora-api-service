@@ -23,6 +23,7 @@ import { StoresModule } from './stores/stores.module';
 import { B2bTransfersModule } from './b2b/b2b-transfers.module';
 import { BetaModule } from './beta/beta.module';
 import { ComplaintsModule } from './complaints/complaints.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { MailService } from './common/services/mail.service';
@@ -65,6 +66,7 @@ import { HealthModule } from './health/health.module';
     B2bTransfersModule,
     BetaModule,
     ComplaintsModule,
+    UploadsModule,
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

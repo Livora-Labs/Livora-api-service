@@ -15,6 +15,7 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { RefreshDto } from './dto/refresh.dto';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcryptjs';
 
@@ -46,6 +47,20 @@ export class AuthService {
     const cooldownKey = `auth:otp:cooldown:${registerDto.email}`;
     const attemptsKey = `auth:otp:attempts:${registerDto.email}`;
 
+    // 3. Guardar en Redis. El OTP vence en 10 min (otpExpiresAt), pero el blob
+    //    vive 30 min para que "reenviar código" pueda rescatar aunque el OTP
+    //    haya expirado.
+    const redisKey = `otp:register:${registerDto.email}`;
+    const shaHash = crypto.createHash('sha256').update(code).digest('hex');
+    const payload = {
+      registerDto,
+      otpHash: shaHash,
+      otpExpiresAt: Date.now() + 10 * 60 * 1000,
+    };
+    await this.redisService.set(redisKey, JSON.stringify(payload), 1800);
+    await this.redisService.del(`otp:attempts:${registerDto.email}`);
+    await this.redisService.set(`otp:cooldown:${registerDto.email}`, '1', 60);
+
     // 3. Guardar payload de registro con TTL inmutable de 10 minutos (600s)
     await this.redisService.set(payloadKey, JSON.stringify(registerDto), 600);
 
@@ -71,31 +86,66 @@ export class AuthService {
     const { email, code } = verifyEmailDto;
     const payloadKey = `auth:register:payload:${email}`;
     const codeKey = `auth:otp:code:${email}`;
-    const cooldownKey = `auth:otp:cooldown:${email}`;
-    const attemptsKey = `auth:otp:attempts:${email}`;
+    const attemptsKeyLocal = `auth:otp:attempts:${email}`;
+    
+    const redisKey = `otp:register:${email}`;
+    const attemptsKeyColleague = `otp:attempts:${email}`;
 
-    // 1. Obtener payload temporal de registro desde Redis
-    const rawPayload = await this.redisService.get(payloadKey);
+    // 1. Obtener payload temporal de registro desde Redis (soportando ambas claves)
+    let rawPayload = await this.redisService.get(payloadKey);
+    let parsed: any = null;
+    let isColleagueKey = false;
+
+    if (rawPayload) {
+      parsed = JSON.parse(rawPayload);
+    } else {
+      rawPayload = await this.redisService.get(redisKey);
+      if (rawPayload) {
+        parsed = JSON.parse(rawPayload);
+        isColleagueKey = true;
+      }
+    }
+
     if (!rawPayload) {
       throw new BadRequestException('El código OTP ha expirado o no existe');
     }
 
-    const parsed = JSON.parse(rawPayload);
     const registerDto: RegisterDto = parsed.registerDto || parsed;
 
-    // 2. Obtener hash del código OTP desde Redis
-    const storedOtpHash = await this.redisService.get(codeKey);
+    // 2. Obtener hash del código OTP
+    let storedOtpHash = '';
+    let otpExpiresAt: number | undefined = undefined;
+
+    if (isColleagueKey) {
+      storedOtpHash = parsed.otpHash;
+      otpExpiresAt = parsed.otpExpiresAt;
+    } else {
+      storedOtpHash = await this.redisService.get(codeKey);
+    }
+
     if (!storedOtpHash) {
       throw new BadRequestException('El código OTP ha expirado o no existe');
     }
 
     // 3. Validar límite de 5 intentos fallidos
+    const attemptsKey = isColleagueKey ? attemptsKeyColleague : attemptsKeyLocal;
     const attemptsRaw = await this.redisService.get(attemptsKey);
     const attempts = attemptsRaw ? parseInt(attemptsRaw, 10) : 0;
     if (attempts >= 5) {
+      if (isColleagueKey) {
+        await this.redisService.del(redisKey);
+        await this.redisService.del(attemptsKey);
+      } else {
+        await this.redisService.del(codeKey);
+      }
       throw new BadRequestException(
         'Demasiados intentos fallidos. El código OTP ha sido bloqueado.',
       );
+    }
+
+    // 3.5 Expiración del código
+    if (isColleagueKey && otpExpiresAt && Date.now() > otpExpiresAt) {
+      throw new BadRequestException('El código ha expirado. Solicita un reenvío.');
     }
 
     // 4. Validar el OTP hasheado (bcrypt compare o fallback sha256)
@@ -105,21 +155,31 @@ export class AuthService {
     } catch {
       isValid = false;
     }
-    if (
-      !isValid &&
-      storedOtpHash === crypto.createHash('sha256').update(code).digest('hex')
-    ) {
+    const shaHash = crypto.createHash('sha256').update(code).digest('hex');
+    if (!isValid && storedOtpHash === shaHash) {
+      isValid = true;
+    }
+    if (!isValid && shaHash === storedOtpHash) {
       isValid = true;
     }
 
     if (!isValid) {
       const newAttempts = await this.redisService.incr(attemptsKey);
-      const remainingTtl = await this.redisService.ttl(payloadKey);
-      if (remainingTtl > 0) {
-        await this.redisService.expire(attemptsKey, remainingTtl);
+      if (isColleagueKey) {
+        await this.redisService.expire(attemptsKey, 1800);
+      } else {
+        const remainingTtl = await this.redisService.ttl(payloadKey);
+        if (remainingTtl > 0) {
+          await this.redisService.expire(attemptsKey, remainingTtl);
+        }
       }
+
       if (newAttempts >= 5) {
-        await this.redisService.del(codeKey);
+        if (isColleagueKey) {
+          await this.redisService.del(redisKey);
+        } else {
+          await this.redisService.del(codeKey);
+        }
         throw new BadRequestException(
           'Demasiados intentos fallidos. El código OTP ha sido bloqueado.',
         );
@@ -194,8 +254,12 @@ export class AuthService {
     // 8. Limpiar todas las claves asociadas en Redis
     await this.redisService.del(payloadKey);
     await this.redisService.del(codeKey);
-    await this.redisService.del(attemptsKey);
-    await this.redisService.del(cooldownKey);
+    await this.redisService.del(attemptsKeyLocal);
+    await this.redisService.del(`auth:otp:cooldown:${email}`);
+
+    await this.redisService.del(redisKey);
+    await this.redisService.del(attemptsKeyColleague);
+    await this.redisService.del(`otp:cooldown:${email}`);
 
     return {
       accessToken: loginData.session.access_token,
@@ -217,42 +281,67 @@ export class AuthService {
 
   async resendOtp(resendOtpDto: ResendOtpDto) {
     const { email } = resendOtpDto;
-    const payloadKey = `auth:register:payload:${email}`;
-    const codeKey = `auth:otp:code:${email}`;
-    const cooldownKey = `auth:otp:cooldown:${email}`;
-    const attemptsKey = `auth:otp:attempts:${email}`;
+    const payloadKeyLocal = `auth:register:payload:${email}`;
+    const payloadKeyColleague = `otp:register:${email}`;
 
-    // 1. Validar cooldown de 60s
-    const hasCooldown = await this.redisService.get(cooldownKey);
+    // 1. Validar cooldown de 60s (en ambas claves)
+    const cooldownKeyLocal = `auth:otp:cooldown:${email}`;
+    const cooldownKeyColleague = `otp:cooldown:${email}`;
+    const hasCooldown = (await this.redisService.get(cooldownKeyLocal)) || (await this.redisService.get(cooldownKeyColleague));
     if (hasCooldown) {
       throw new BadRequestException(
         'Debes esperar 60 segundos antes de reenviar otro código',
       );
     }
 
-    // 2. Obtener registro temporal desde Redis y validar TTL
-    const remainingTtl = await this.redisService.ttl(payloadKey);
-    const rawPayload = await this.redisService.get(payloadKey);
+    // 2. Obtener registro temporal y validar TTL
+    let rawPayload = await this.redisService.get(payloadKeyLocal);
+    let parsed: any = null;
+    let isColleagueKey = false;
+    let remainingTtl = 0;
+
+    if (rawPayload) {
+      parsed = JSON.parse(rawPayload);
+      remainingTtl = await this.redisService.ttl(payloadKeyLocal);
+    } else {
+      rawPayload = await this.redisService.get(payloadKeyColleague);
+      if (rawPayload) {
+        parsed = JSON.parse(rawPayload);
+        isColleagueKey = true;
+        remainingTtl = await this.redisService.ttl(payloadKeyColleague);
+      }
+    }
+
     if (!rawPayload || remainingTtl <= 0) {
       throw new BadRequestException(
         'El registro temporal no existe o ha expirado. Por favor regístrate de nuevo.',
       );
     }
 
-    // 3. Generar nuevo OTP y hash con bcrypt
+    const registerDto: RegisterDto = parsed.registerDto || parsed;
+
+    // 3. Generar nuevo OTP
     const code = crypto.randomInt(100000, 999999).toString();
-    const otpHash = await bcrypt.hash(code, 10);
+    const bcryptOtpHash = await bcrypt.hash(code, 10);
+    const shaOtpHash = crypto.createHash('sha256').update(code).digest('hex');
 
-    // 4. Guardar nuevo hash en Redis con TTL clampado al TTL restante del payload (sin reiniciar payload)
-    await this.redisService.set(codeKey, otpHash, remainingTtl);
+    // 4. Actualizar en Redis para ambos esquemas de claves
+    // Local:
+    await this.redisService.set(`auth:otp:code:${email}`, bcryptOtpHash, remainingTtl);
+    await this.redisService.del(`auth:otp:attempts:${email}`);
+    await this.redisService.set(cooldownKeyLocal, '1', 60);
 
-    // 5. Reiniciar intentos fallidos para el nuevo código
-    await this.redisService.del(attemptsKey);
+    // Colleague:
+    const colleaguePayload = {
+      registerDto,
+      otpHash: shaOtpHash,
+      otpExpiresAt: Date.now() + 10 * 60 * 1000,
+    };
+    await this.redisService.set(payloadKeyColleague, JSON.stringify(colleaguePayload), 1800);
+    await this.redisService.del(`otp:attempts:${email}`);
+    await this.redisService.set(cooldownKeyColleague, '1', 60);
 
-    // 6. Configurar cooldown de reenvío de 60s
-    await this.redisService.set(cooldownKey, '1', 60);
-
-    // 7. Enviar nuevo correo
+    // 5. Enviar nuevo correo
     await this.mailService.sendOtpEmail(email, code);
 
     return {
@@ -291,6 +380,7 @@ export class AuthService {
     };
   }
 
+<<<<<<< HEAD
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
     const { email } = forgotPasswordDto;
 
@@ -358,6 +448,41 @@ export class AuthService {
 
     return {
       message: 'Contraseña restablecida exitosamente',
+    };
+  }
+
+  /**
+   * Canjea un refresh token por una nueva sesión (nuevo accessToken).
+   * La app usa esto para renovar la sesión sin pedir la contraseña de nuevo.
+   */
+  async refresh(refreshDto: RefreshDto) {
+    const supabaseClient = this.supabaseService.getClient();
+
+    const { data, error } = await supabaseClient.auth.refreshSession({
+      refresh_token: refreshDto.refreshToken,
+    });
+
+    if (error || !data.session) {
+      throw new UnauthorizedException('Refresh token inválido o expirado');
+    }
+
+    const userProfile = data.user
+      ? await this.usersService.findById(data.user.id)
+      : null;
+
+    return {
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      expiresIn: data.session.expires_in,
+      tokenType: data.session.token_type,
+      user: data.user
+        ? {
+            id: data.user.id,
+            email: data.user.email,
+            role: userProfile?.role,
+            walletAddress: userProfile?.walletAddress,
+          }
+        : null,
     };
   }
 }

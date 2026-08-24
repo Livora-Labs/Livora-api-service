@@ -80,7 +80,7 @@ async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle('Livora API')
     .setDescription(
-      'API Gateway y Backend de la plataforma de reciclaje trazable Livora en Arbitrum Sepolia',
+      'API Gateway y Backend de la plataforma de reciclaje trazable Livora en Stellar/Soroban (Testnet)',
     )
     .setVersion('1.0')
     .addBearerAuth()

@@ -76,8 +76,9 @@ export class CollectionsService {
       },
     });
 
-    // Emitir en tiempo real que se ha creado la solicitud para que los recolectores la vean
-    this.websocketsService.emitCollectionCreated(newRequest);
+    // Emitir en tiempo real a los recolectores. SIN el PIN de verificación:
+    // el PIN es un secreto que solo el hogar debe conocer y mostrar en persona.
+    this.websocketsService.emitCollectionCreated(this.stripPin(newRequest));
 
     // Buscar todos los recolectores con token FCM para enviar la notificación
     this.prisma.user
@@ -153,7 +154,6 @@ export class CollectionsService {
             "itemsEstimated", 
             "photoUrl", 
             description, 
-            "verificationPin", 
             latitude, 
             longitude, 
             "householdId", 
@@ -183,7 +183,7 @@ export class CollectionsService {
       }
 
       // Si el recolector no provee lat/lng, retornar todas las solicitudes PENDING con paginación
-      return this.prisma.collectionRequest.findMany({
+      const pending = await this.prisma.collectionRequest.findMany({
         where: { status: RequestStatus.PENDING },
         skip,
         take: limit,
@@ -194,6 +194,7 @@ export class CollectionsService {
           },
         },
       });
+      return pending.map((r) => this.stripPin(r));
     }
 
     throw new ForbiddenException(
@@ -202,9 +203,20 @@ export class CollectionsService {
   }
 
   /**
+   * Quita el PIN de verificación de una solicitud. El PIN solo debe verlo el
+   * hogar dueño; jamás los recolectores (ni en listados, ni en eventos, ni en detalle).
+   */
+  private stripPin<T extends Record<string, any>>(row: T): T {
+    if (!row || typeof row !== 'object') return row;
+    const clone: any = { ...row };
+    delete clone.verificationPin;
+    return clone;
+  }
+
+  /**
    * Obtener detalle de una solicitud por ID
    * - HOGAR: Solo puede ver sus propias solicitudes (householdId === userId)
-   * - RECOLECTOR: Puede ver cualquier solicitud
+   * - RECOLECTOR: Puede ver cualquier solicitud (sin el PIN)
    */
   async findOne(id: string, userId: string, role: string) {
     const collectionRequest = await this.prisma.collectionRequest.findUnique({
@@ -230,6 +242,10 @@ export class CollectionsService {
       );
     }
 
+    // El PIN de verificación solo lo puede ver el hogar dueño de la solicitud.
+    if (role !== Role.HOGAR) {
+      return this.stripPin(collectionRequest);
+    }
     return collectionRequest;
   }
 

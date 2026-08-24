@@ -30,3 +30,5 @@ Thumbs.db
 .env.production
 *.pem
 *.apk
+.env.stellar*
+docker-compose.stellar.yml

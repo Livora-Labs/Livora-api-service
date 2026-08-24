@@ -15,6 +15,7 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { RefreshDto } from './dto/refresh.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -98,5 +99,19 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Contraseña actualizada correctamente' })
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetPassword(resetPasswordDto);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('refresh')
+  @ApiOperation({
+    summary: 'Renovar la sesión con el refresh token (nuevo accessToken)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Nueva sesión emitida con accessToken/refreshToken',
+  })
+  async refresh(@Body() refreshDto: RefreshDto) {
+    return this.authService.refresh(refreshDto);
   }
 }

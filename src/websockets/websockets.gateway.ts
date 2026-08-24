@@ -6,18 +6,8 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import * as jwt from 'jsonwebtoken';
-
-export interface SupabaseJwtPayload {
-  sub: string;
-  role?: string;
-  user_metadata?: {
-    role?: string;
-  };
-  email?: string;
-  [key: string]: any;
-}
+import { SupabaseService } from '../supabase/supabase.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @WebSocketGateway({
   cors: {
@@ -33,7 +23,10 @@ export class WebsocketsGateway
 
   private readonly logger = new Logger(WebsocketsGateway.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async handleConnection(client: Socket) {
     try {
@@ -43,81 +36,59 @@ export class WebsocketsGateway
 
       if (!token) {
         this.logger.warn(
-          `Conexión rechazada (Socket ID ${client.id}): Token JWT no proporcionado.`,
+          `Conexión rechazada (Socket ${client.id}): token JWT no proporcionado.`,
         );
         client.disconnect();
         return;
       }
 
-      const jwtSecret = this.configService.get<string>('SUPABASE_JWT_SECRET');
-      if (!jwtSecret) {
-        this.logger.error(
-          'SUPABASE_JWT_SECRET no configurado en variables de entorno.',
-        );
-        client.disconnect();
-        return;
-      }
+      // Validación REMOTA contra Supabase (soporta tokens ES256 asimétricos con
+      // `kid`, que es lo que Supabase emite hoy). Es el mismo método que usa el
+      // guard HTTP; `jwt.verify` con secreto HS256 fallaba siempre con ES256.
+      const { data, error } = await this.supabaseService
+        .getClient()
+        .auth.getUser(token);
 
-      let decoded: SupabaseJwtPayload;
-      try {
-        decoded = jwt.verify(token, jwtSecret) as SupabaseJwtPayload;
-      } catch (verifyError: any) {
+      if (error || !data.user) {
         this.logger.warn(
-          `Conexión de WebSocket rechazada (Socket ID ${client.id}): JWT verify falló (${verifyError.message})`,
+          `Conexión rechazada (Socket ${client.id}): token inválido (${error?.message || 'sin usuario'}).`,
         );
         client.disconnect();
         return;
       }
 
-      const userId = decoded?.sub;
-      const role = decoded?.role || decoded?.user_metadata?.role;
+      const userId = data.user.id;
 
-      if (!userId) {
-        this.logger.warn(
-          `Conexión rechazada (Socket ID ${client.id}): Payload no contiene 'sub'.`,
-        );
-        client.disconnect();
-        return;
-      }
+      // El rol de la app (HOGAR/RECOLECTOR/...) vive en PostgreSQL, NO en el JWT
+      // de Supabase. Se consulta la BD como fuente de verdad para las salas.
+      const dbUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
+      const role = dbUser?.role || null;
 
-      client.data.user = {
-        sub: userId,
-        role: role,
-      };
+      client.data.user = { sub: userId, role };
 
-      // Todos los usuarios se unen a su sala privada
-      const userRoom = `user:${userId}`;
-      await client.join(userRoom);
-      this.logger.log(
-        `Cliente ${client.id} unido a sala de usuario: ${userRoom}`,
-      );
+      // Todos entran a su sala privada
+      await client.join(`user:${userId}`);
 
       if (role === 'CENTRO_ACOPIO' || role === 'ALMACEN') {
-        const centerRoom = `center:${userId}`;
-        await client.join(centerRoom);
-        this.logger.log(
-          `Cliente ${client.id} (${role}) unido a sala privada: ${centerRoom}`,
-        );
+        await client.join(`center:${userId}`);
       } else if (role === 'RECOLECTOR') {
-        const collectorRoom = 'collectors:active';
-        await client.join(collectorRoom);
-        this.logger.log(
-          `Cliente ${client.id} (RECOLECTOR) unido a sala general: ${collectorRoom}`,
-        );
+        await client.join('collectors:active');
       } else if (role === 'TIENDA') {
-        const storeRoom = `store:${userId}`;
-        await client.join(storeRoom);
-        this.logger.log(
-          `Cliente ${client.id} (TIENDA) unido a sala privada: ${storeRoom}`,
-        );
+        await client.join(`store:${userId}`);
       }
 
+      // Ack de confirmación con el rol y las salas asignadas
+      client.emit('connected', { userId, role });
+
       this.logger.log(
-        `Cliente autenticado y conectado: Socket ${client.id} | User: ${userId} | Role: ${role || 'N/A'}`,
+        `Cliente conectado: Socket ${client.id} | User ${userId} | Role ${role || 'N/A'}`,
       );
-    } catch (error) {
+    } catch (err: any) {
       this.logger.error(
-        `Falló autenticación JWT en Socket ${client.id}: ${error.message}`,
+        `Falló autenticación en Socket ${client.id}: ${err.message}`,
       );
       client.disconnect();
     }
