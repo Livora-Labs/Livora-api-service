@@ -8,6 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { B2bTransfersService } from './b2b-transfers.service';
 import { CreateB2bTransferDto } from './dto/create-b2b-transfer.dto';
@@ -23,6 +24,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 export class B2bTransfersController {
   constructor(private readonly b2bTransfersService: B2bTransfersService) {}
 
+  @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post()
   @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
   @ApiOperation({
@@ -46,6 +48,7 @@ export class B2bTransfersController {
     return this.b2bTransfersService.getIncomingTransfers(buyerId);
   }
 
+  @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Patch(':id/receive')
   @Roles(Role.EMPRESA_B2B)
   @ApiOperation({

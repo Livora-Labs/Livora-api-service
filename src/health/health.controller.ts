@@ -14,7 +14,9 @@ export class HealthController {
   ) {}
 
   @Get()
-  @ApiOperation({ summary: 'Verificar estado de salud de los servicios integrados' })
+  @ApiOperation({
+    summary: 'Verificar estado de salud de los servicios integrados',
+  })
   @ApiResponse({ status: 200, description: 'Servicios en óptimas condiciones' })
   @ApiResponse({ status: 500, description: 'Uno o más servicios caídos' })
   async check() {

@@ -17,14 +17,23 @@ export class CreateCollectionDto {
   })
   @IsNotEmpty({ message: 'itemsEstimated es requerido' })
   @Transform(({ value }) => {
-    if (typeof value === 'string') {
+    let unwrapped = value;
+    if (
+      value &&
+      typeof value === 'object' &&
+      'value' in value &&
+      typeof value.value === 'string'
+    ) {
+      unwrapped = value.value;
+    }
+    if (typeof unwrapped === 'string') {
       try {
-        return JSON.parse(value);
+        return JSON.parse(unwrapped);
       } catch {
-        return value;
+        return unwrapped;
       }
     }
-    return value;
+    return unwrapped;
   })
   @IsObject({ message: 'itemsEstimated debe ser un objeto JSON válido' })
   itemsEstimated: Record<string, any>;
@@ -34,11 +43,26 @@ export class CreateCollectionDto {
     description: 'Notas opcionales para el recolector',
   })
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value && typeof value === 'object' && 'value' in value) {
+      return value.value;
+    }
+    return value;
+  })
   @IsString()
   description?: string;
 
   @ApiProperty({ example: 4.6097, description: 'Latitud GPS' })
   @IsNotEmpty({ message: 'latitude es requerida' })
+  @Transform(({ value }) => {
+    if (value && typeof value === 'object' && 'value' in value) {
+      return Number(value.value);
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+      return Number(value);
+    }
+    return value;
+  })
   @Type(() => Number)
   @IsNumber({}, { message: 'latitude debe ser un número' })
   @Min(-90)
@@ -47,6 +71,15 @@ export class CreateCollectionDto {
 
   @ApiProperty({ example: -74.0817, description: 'Longitud GPS' })
   @IsNotEmpty({ message: 'longitude es requerida' })
+  @Transform(({ value }) => {
+    if (value && typeof value === 'object' && 'value' in value) {
+      return Number(value.value);
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+      return Number(value);
+    }
+    return value;
+  })
   @Type(() => Number)
   @IsNumber({}, { message: 'longitude debe ser un número' })
   @Min(-180)
@@ -58,6 +91,30 @@ export class CreateCollectionDto {
     description: 'URL de la foto opcional',
   })
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value && typeof value === 'object' && 'value' in value) {
+      return value.value;
+    }
+    return value;
+  })
   @IsString()
   photoUrl?: string;
+
+  @ApiPropertyOptional({
+    description: 'Archivo binario de foto adjunto (multipart)',
+  })
+  @IsOptional()
+  file?: any;
+
+  @ApiPropertyOptional({
+    description: 'Archivo de foto adjunto alternativo (multipart)',
+  })
+  @IsOptional()
+  photo?: any;
+
+  @ApiPropertyOptional({
+    description: 'Archivo de imagen adjunto alternativo (multipart)',
+  })
+  @IsOptional()
+  image?: any;
 }

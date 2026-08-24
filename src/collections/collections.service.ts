@@ -31,7 +31,9 @@ export class CollectionsService {
   async create(
     userId: string,
     dto: CreateCollectionDto,
-    file?: Express.Multer.File,
+    file?:
+      | { originalname: string; buffer: Buffer; mimetype: string }
+      | Express.Multer.File,
   ) {
     // 1. Verificar si el hogar ya tiene una solicitud activa (PENDING o ACCEPTED)
     const activeRequest = await this.prisma.collectionRequest.findFirst({
@@ -78,22 +80,27 @@ export class CollectionsService {
     this.websocketsService.emitCollectionCreated(newRequest);
 
     // Buscar todos los recolectores con token FCM para enviar la notificación
-    this.prisma.user.findMany({
-      where: {
-        role: Role.RECOLECTOR,
-        fcmToken: { not: null },
-      },
-      select: { id: true },
-    }).then((collectors) => {
-      for (const col of collectors) {
-        this.notificationsService.sendPushNotification(
-          col.id,
-          '♻️ Nueva solicitud de reciclaje',
-          'Hay una nueva solicitud de recogida de materiales lista en tu zona.',
-          { requestId: newRequest.id },
-        ).catch(() => {});
-      }
-    }).catch(() => {});
+    this.prisma.user
+      .findMany({
+        where: {
+          role: Role.RECOLECTOR,
+          fcmToken: { not: null },
+        },
+        select: { id: true },
+      })
+      .then((collectors) => {
+        for (const col of collectors) {
+          this.notificationsService
+            .sendPushNotification(
+              col.id,
+              '♻️ Nueva solicitud de reciclaje',
+              'Hay una nueva solicitud de recogida de materiales lista en tu zona.',
+              { requestId: newRequest.id },
+            )
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
 
     return newRequest;
   }
@@ -261,12 +268,14 @@ export class CollectionsService {
           },
         });
 
-        this.notificationsService.sendPushNotification(
-          collectionRequest.householdId,
-          '♻️ Tu solicitud ha sido aceptada',
-          'Un recolector está en camino a tu ubicación para recoger los materiales.',
-          { requestId: id },
-        ).catch(() => {});
+        this.notificationsService
+          .sendPushNotification(
+            collectionRequest.householdId,
+            '♻️ Tu solicitud ha sido aceptada',
+            'Un recolector está en camino a tu ubicación para recoger los materiales.',
+            { requestId: id },
+          )
+          .catch(() => {});
 
         return updated;
       }
@@ -368,8 +377,10 @@ export class CollectionsService {
    * Helper para subida de imágenes a Pinata IPFS (antes Supabase)
    */
   private async uploadPhoto(
-    file: Express.Multer.File,
-    userId: string,
+    file:
+      | { originalname: string; buffer: Buffer; mimetype: string }
+      | Express.Multer.File,
+    _userId: string,
   ): Promise<string> {
     try {
       // Sube la foto del material a Pinata IPFS

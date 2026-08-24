@@ -54,8 +54,10 @@ describe('StoresService', () => {
 
     configMock = {
       get: jest.fn().mockImplementation((key: string) => {
-        if (key === 'ECOTOKEN_CONTRACT_ID') return 'CD7L2OEZL74GPHXQ32EEXI7Y7DPHF74GPHXQ32EEXI7Y7DPHF74GPHXQ';
-        if (key === 'WALLET_ENCRYPTION_KEY') return 'testSecretKey32CharacterLength!';
+        if (key === 'ECOTOKEN_CONTRACT_ID')
+          return 'CD7L2OEZL74GPHXQ32EEXI7Y7DPHF74GPHXQ32EEXI7Y7DPHF74GPHXQ';
+        if (key === 'WALLET_ENCRYPTION_KEY')
+          return 'testSecretKey32CharacterLength!';
         return null;
       }),
     };
@@ -182,7 +184,8 @@ describe('StoresService', () => {
         id: 'store-uuid',
         user: {
           id: 'store-user-uuid',
-          walletAddress: 'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
+          walletAddress:
+            'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
         },
       },
     };
@@ -193,18 +196,21 @@ describe('StoresService', () => {
       );
       prismaMock.user.findUnique.mockResolvedValue({
         id: 'household-uuid',
-        walletAddress: 'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
+        walletAddress:
+          'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
       });
       walletsMock.getBalance.mockResolvedValue({ balance: '50.0' });
       prismaMock.redemptionTransaction.update.mockResolvedValue({
         ...mockRedemption,
         userId: 'household-uuid',
         status: RedemptionStatus.COMPLETED,
+        tokenAmount: 15.5,
       });
 
       const result = await service.confirmRedemption(
         'household-uuid',
         'LIVORA-QR-xxx',
+        { termsAccepted: true },
       );
 
       expect(prismaMock.redemptionTransaction.findUnique).toHaveBeenCalledWith({
@@ -220,7 +226,7 @@ describe('StoresService', () => {
       expect(walletsMock.getBalance).toHaveBeenCalledWith('household-uuid');
       expect(prismaMock.redemptionTransaction.update).toHaveBeenCalledWith({
         where: { id: 'red-uuid' },
-        data: { userId: 'household-uuid', status: RedemptionStatus.COMPLETED },
+        data: { userId: 'household-uuid', status: RedemptionStatus.COMPLETED, tokenAmount: 15.5 },
       });
       expect(websocketsMock.emitStoreNotification).toHaveBeenCalledWith(
         'store-user-uuid',
@@ -233,7 +239,8 @@ describe('StoresService', () => {
           redemptionId: 'red-uuid',
           fromUserId: 'household-uuid',
           toStoreUserId: 'store-user-uuid',
-          fromWallet: 'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
+          fromWallet:
+            'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
           toWallet: 'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
           tokenAmount: 15.5,
         },
@@ -242,18 +249,66 @@ describe('StoresService', () => {
       expect(result.status).toBe(RedemptionStatus.COMPLETED);
     });
 
+    it('should throw BadRequestException if terms are not accepted', async () => {
+      await expect(
+        service.confirmRedemption('household-uuid', 'LIVORA-QR-xxx', {
+          termsAccepted: false,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should apply optional donation and insurance charges successfully', async () => {
+      prismaMock.redemptionTransaction.findUnique.mockResolvedValue(
+        mockRedemption,
+      );
+      prismaMock.user.findUnique.mockResolvedValue({
+        id: 'household-uuid',
+        walletAddress:
+          'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
+      });
+      walletsMock.getBalance.mockResolvedValue({ balance: '50.0' });
+      prismaMock.redemptionTransaction.update.mockResolvedValue({
+        ...mockRedemption,
+        userId: 'household-uuid',
+        tokenAmount: 17.0, // 15.5 base + 1.0 donation + 0.5 insurance
+        status: RedemptionStatus.COMPLETED,
+      });
+
+      const result = await service.confirmRedemption(
+        'household-uuid',
+        'LIVORA-QR-xxx',
+        { termsAccepted: true, donationOptIn: true, insuranceOptIn: true },
+      );
+
+      expect(prismaMock.redemptionTransaction.update).toHaveBeenCalledWith({
+        where: { id: 'red-uuid' },
+        data: { userId: 'household-uuid', status: RedemptionStatus.COMPLETED, tokenAmount: 17.0 },
+      });
+      expect(queueMock.add).toHaveBeenCalledWith(
+        'redemption-transfer',
+        expect.objectContaining({
+          tokenAmount: 17.0,
+        }),
+        expect.any(Object),
+      );
+      expect(result.tokenAmount).toBe(17.0);
+    });
+
     it('should throw BadRequestException if household user balance is insufficient', async () => {
       prismaMock.redemptionTransaction.findUnique.mockResolvedValue(
         mockRedemption,
       );
       prismaMock.user.findUnique.mockResolvedValue({
         id: 'household-uuid',
-        walletAddress: 'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
+        walletAddress:
+          'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
       });
       walletsMock.getBalance.mockResolvedValue({ balance: '5.0' });
 
       await expect(
-        service.confirmRedemption('household-uuid', 'LIVORA-QR-xxx'),
+        service.confirmRedemption('household-uuid', 'LIVORA-QR-xxx', {
+          termsAccepted: true,
+        }),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -293,7 +348,8 @@ describe('StoresService', () => {
       store: {
         user: {
           id: 'store-user-uuid',
-          walletAddress: 'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
+          walletAddress:
+            'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
         },
       },
     };

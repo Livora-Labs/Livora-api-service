@@ -1,6 +1,12 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import CircuitBreaker from 'opossum';
 import {
   Keypair,
   rpc as StellarRpc,
@@ -9,6 +15,7 @@ import {
   scValToNative,
   Account,
   TransactionBuilder,
+  FeeBumpTransaction,
   Operation,
   Address,
 } from '@stellar/stellar-sdk';
@@ -18,20 +25,112 @@ import {
   DEFAULT_MATERIAL_RATE,
 } from '../blockchain.constants';
 
+export const STELLAR_CIRCUIT_BREAKER_OPTIONS: CircuitBreaker.Options = {
+  timeout: 10000, // 10,000 ms: Max execution time before timing out
+  errorThresholdPercentage: 50, // 50%: Trip breaker if half of requests in window fail
+  resetTimeout: 10000, // 10,000 ms: Wait before transitioning from OPEN to HALF_OPEN
+  rollingCountTimeout: 10000, // 10,000 ms: Statistical monitoring window
+  rollingCountBuckets: 10, // 10 buckets for sliding window
+  volumeThreshold: 3, // Minimum 3 requests in window before tripping
+};
+
 @Injectable()
-export class BlockchainService implements OnModuleInit {
+export class BlockchainService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BlockchainService.name);
   private rpcServer: StellarRpc.Server;
   private workerKeypair: Keypair;
   private contractId: string;
   private networkPassphrase: string;
   private redisClient: Redis;
+  private rpcBreaker: CircuitBreaker;
 
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
     this.initStellar();
+    this.initCircuitBreaker();
     this.initRedis();
+  }
+
+  async onModuleDestroy() {
+    if (this.redisClient) {
+      try {
+        await this.redisClient.quit();
+      } catch {
+        this.redisClient.disconnect();
+      }
+    }
+    if (this.rpcBreaker) {
+      this.rpcBreaker.shutdown();
+    }
+  }
+
+  private initCircuitBreaker() {
+    const options: CircuitBreaker.Options = {
+      timeout: this.configService.get<number>(
+        'STELLAR_CB_TIMEOUT',
+        STELLAR_CIRCUIT_BREAKER_OPTIONS.timeout as number,
+      ),
+      errorThresholdPercentage: this.configService.get<number>(
+        'STELLAR_CB_ERROR_THRESHOLD',
+        STELLAR_CIRCUIT_BREAKER_OPTIONS.errorThresholdPercentage as number,
+      ),
+      resetTimeout: this.configService.get<number>(
+        'STELLAR_CB_RESET_TIMEOUT',
+        STELLAR_CIRCUIT_BREAKER_OPTIONS.resetTimeout as number,
+      ),
+      volumeThreshold: this.configService.get<number>(
+        'STELLAR_CB_VOLUME_THRESHOLD',
+        STELLAR_CIRCUIT_BREAKER_OPTIONS.volumeThreshold as number,
+      ),
+      rollingCountTimeout: STELLAR_CIRCUIT_BREAKER_OPTIONS.rollingCountTimeout,
+      rollingCountBuckets: STELLAR_CIRCUIT_BREAKER_OPTIONS.rollingCountBuckets,
+    };
+
+    this.rpcBreaker = new CircuitBreaker(
+      async <T>(action: () => Promise<T>): Promise<T> => {
+        return await action();
+      },
+      options,
+    );
+
+    this.rpcBreaker.on('open', () => {
+      this.logger.error(
+        '⚠️ Stellar RPC Circuit Breaker OPEN! External RPC requests blocked.',
+      );
+    });
+
+    this.rpcBreaker.on('halfOpen', () => {
+      this.logger.warn(
+        '🟡 Stellar RPC Circuit Breaker HALF_OPEN. Testing RPC node health...',
+      );
+    });
+
+    this.rpcBreaker.on('close', () => {
+      this.logger.log(
+        '🟢 Stellar RPC Circuit Breaker CLOSED. Normal RPC operations resumed.',
+      );
+    });
+
+    this.rpcBreaker.on('fallback', (result: any, err: any) => {
+      this.logger.warn(
+        `Stellar RPC Circuit Breaker fallback triggered: ${err?.message || err}`,
+      );
+    });
+  }
+
+  /**
+   * Wrapper for all outbound Stellar RPC requests protected by Opossum Circuit Breaker.
+   */
+  async executeRpc<T>(action: () => Promise<T>): Promise<T> {
+    if (!this.rpcBreaker) {
+      return await action();
+    }
+    return (await this.rpcBreaker.fire(action)) as T;
+  }
+
+  getCircuitBreaker(): CircuitBreaker {
+    return this.rpcBreaker;
   }
 
   private initRedis() {
@@ -59,7 +158,8 @@ export class BlockchainService implements OnModuleInit {
       'Test SDF Network ; September 2015',
     );
     const workerSecretKey = this.configService.get<string>('WORKER_SECRET_KEY');
-    this.contractId = this.configService.get<string>('ECOTOKEN_CONTRACT_ID') || '';
+    this.contractId =
+      this.configService.get<string>('ECOTOKEN_CONTRACT_ID') || '';
 
     this.logger.log(`Inicializando BlockchainService con RPC: ${rpcUrl}`);
 
@@ -86,15 +186,10 @@ export class BlockchainService implements OnModuleInit {
   }
 
   private async getSourceAccount(publicKey: string): Promise<Account> {
-    try {
-      const accountInfo = await this.rpcServer.getAccount(publicKey);
-      return new Account(publicKey, accountInfo.sequenceNumber());
-    } catch (err: any) {
-      this.logger.warn(
-        `No se pudo cargar la cuenta ${publicKey} desde RPC (puede que no esté fondeada). Usando secuencia 0 para simulación.`,
-      );
-      return new Account(publicKey, '0');
-    }
+    const accountInfo = await this.executeRpc(() =>
+      this.rpcServer.getAccount(publicKey),
+    );
+    return new Account(publicKey, accountInfo.sequenceNumber());
   }
 
   private async invokeReadFunction(
@@ -107,7 +202,9 @@ export class BlockchainService implements OnModuleInit {
     }
 
     try {
-      const sourceAccount = await this.getSourceAccount(this.workerKeypair.publicKey());
+      const sourceAccount = await this.getSourceAccount(
+        this.workerKeypair.publicKey(),
+      );
       const tx = new TransactionBuilder(sourceAccount, {
         fee: '1000',
         networkPassphrase: this.networkPassphrase,
@@ -122,7 +219,9 @@ export class BlockchainService implements OnModuleInit {
         .setTimeout(30)
         .build();
 
-      const simRes = await this.rpcServer.simulateTransaction(tx);
+      const simRes = await this.executeRpc(() =>
+        this.rpcServer.simulateTransaction(tx),
+      );
       if (StellarRpc.Api.isSimulationSuccess(simRes) && simRes.result) {
         return scValToNative(simRes.result.retval);
       } else {
@@ -133,13 +232,17 @@ export class BlockchainService implements OnModuleInit {
         );
       }
     } catch (error: any) {
-      this.logger.error(`Error en invokeReadFunction [${method}]: ${error.message}`);
+      this.logger.error(
+        `Error en invokeReadFunction [${method}]: ${error.message}`,
+      );
       throw error;
     }
   }
 
   private async sendTransaction(tx: any): Promise<any> {
-    const simRes = await this.rpcServer.simulateTransaction(tx);
+    const simRes = await this.executeRpc(() =>
+      this.rpcServer.simulateTransaction(tx),
+    );
     if (!StellarRpc.Api.isSimulationSuccess(simRes)) {
       throw new Error(
         `La simulación de la transacción falló: ${JSON.stringify(
@@ -151,7 +254,9 @@ export class BlockchainService implements OnModuleInit {
     const assembledTx = StellarRpc.assembleTransaction(tx, simRes).build();
     assembledTx.sign(this.workerKeypair);
 
-    const response = await this.rpcServer.sendTransaction(assembledTx);
+    const response = await this.executeRpc(() =>
+      this.rpcServer.sendTransaction(assembledTx),
+    );
     if (response.status === 'ERROR') {
       throw new Error(
         `Fallo al enviar la transacción: ${JSON.stringify(response.errorResult || response)}`,
@@ -165,7 +270,9 @@ export class BlockchainService implements OnModuleInit {
 
     while (txStatus === 'PENDING' && Date.now() - startTime < timeout) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
-      getTxResponse = await this.rpcServer.getTransaction(response.hash);
+      getTxResponse = await this.executeRpc(() =>
+        this.rpcServer.getTransaction(response.hash),
+      );
       txStatus = getTxResponse.status;
     }
 
@@ -192,8 +299,10 @@ export class BlockchainService implements OnModuleInit {
       const balanceDecimal = Number(balanceStroops || 0) / 10000000;
       return balanceDecimal.toFixed(2);
     } catch (error: any) {
-      this.logger.error(`Error al obtener balance para ${walletAddress}: ${error.message}`);
-      return '0.00';
+      this.logger.error(
+        `Error al obtener balance para ${walletAddress}: ${error.message}`,
+      );
+      throw error;
     }
   }
 
@@ -245,15 +354,10 @@ export class BlockchainService implements OnModuleInit {
   }
 
   async getNonceOnChain(owner: string): Promise<bigint> {
-    try {
-      const result = await this.invokeReadFunction('nonces', [
-        Address.fromString(owner).toScVal(),
-      ]);
-      return BigInt(result || 0);
-    } catch (error: any) {
-      this.logger.error(`Error al obtener nonce para ${owner}: ${error.message}`);
-      return 0n;
-    }
+    const result = await this.invokeReadFunction('nonces', [
+      Address.fromString(owner).toScVal(),
+    ]);
+    return BigInt(result || 0);
   }
 
   async registerBatchWeighed(
@@ -273,7 +377,9 @@ export class BlockchainService implements OnModuleInit {
     const uuid32 = Buffer.alloc(32);
     uuid16.copy(uuid32);
 
-    const sourceAccount = await this.getSourceAccount(this.workerKeypair.publicKey());
+    const sourceAccount = await this.getSourceAccount(
+      this.workerKeypair.publicKey(),
+    );
 
     const householdsScVal = xdr.ScVal.scvVec(
       households.map((h) => Address.fromString(h).toScVal()),
@@ -325,7 +431,9 @@ export class BlockchainService implements OnModuleInit {
       `Ejecutando transferencia delegada en Soroban. From: ${from}, To: ${to}, Amount: ${amount}, Nonce: ${nonce}`,
     );
 
-    const sourceAccount = await this.getSourceAccount(this.workerKeypair.publicKey());
+    const sourceAccount = await this.getSourceAccount(
+      this.workerKeypair.publicKey(),
+    );
 
     const amountBig = BigInt(Math.round(parseFloat(amount) * 10000000));
 
@@ -355,13 +463,200 @@ export class BlockchainService implements OnModuleInit {
     return receipt;
   }
 
+  /**
+   * Subsidized transfer using Stellar SDK FeeBumpTransaction (SEP-0015 / CAP-0015).
+   * Decouples the inner transaction (originating from user with base fee) from the outer
+   * fee bump transaction (originating and funded by Relayer Worker keypair), eliminating sequence collisions.
+   */
+  async executeSubsidizedTransfer(
+    userSecretKey: string,
+    toAddress: string,
+    amount: number,
+  ): Promise<{ hash: string; status: number; ledger?: number }> {
+    this.logger.log(
+      `Ejecutando transferencia subsidiada con FeeBumpTransaction hacia ${toAddress}, monto: ${amount} ECO`,
+    );
+
+    const userKeypair = Keypair.fromSecret(userSecretKey);
+    const amountBig = BigInt(Math.round(amount * 10000000));
+
+    // 1. Fetch User source account (for sequence number) via Circuit Breaker
+    const userAccountInfo = await this.executeRpc(() =>
+      this.rpcServer.getAccount(userKeypair.publicKey()),
+    );
+    const userAccount = new Account(
+      userKeypair.publicKey(),
+      userAccountInfo.sequenceNumber(),
+    );
+
+    // 2. Build Inner Transaction
+    const innerTxBuilder = new TransactionBuilder(userAccount, {
+      fee: '100', // Base fee (subsidized later by Relayer)
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: this.contractId,
+          function: 'transfer',
+          args: [
+            Address.fromString(userKeypair.publicKey()).toScVal(),
+            Address.fromString(toAddress).toScVal(),
+            nativeToScVal(amountBig, { type: 'i128' }),
+          ],
+        }),
+      )
+      .setTimeout(30);
+
+    const innerTx = innerTxBuilder.build();
+
+    // 3. Simulate and assemble inner transaction with Soroban footprints
+    const simRes = await this.executeRpc(() =>
+      this.rpcServer.simulateTransaction(innerTx),
+    );
+    if (!StellarRpc.Api.isSimulationSuccess(simRes)) {
+      throw new Error(
+        `Simulation failed: ${JSON.stringify((simRes as any).error || simRes)}`,
+      );
+    }
+
+    const assembledInnerTx = StellarRpc.assembleTransaction(
+      innerTx,
+      simRes,
+    ).build();
+    assembledInnerTx.sign(userKeypair);
+
+    // 4. Wrap with FeeBumpTransaction paying gas from Relayer worker account
+    const feeBumpTx: FeeBumpTransaction =
+      TransactionBuilder.buildFeeBumpTransaction(
+        this.workerKeypair.publicKey(),
+        '10000', // Max subsidized fee in stroops
+        assembledInnerTx,
+        this.networkPassphrase,
+      );
+
+    // 5. Relayer signs the FeeBumpTransaction
+    feeBumpTx.sign(this.workerKeypair);
+
+    // 6. Submit FeeBumpTransaction via Circuit Breaker
+    const response = await this.executeRpc(() =>
+      this.rpcServer.sendTransaction(feeBumpTx),
+    );
+    if (response.status === 'ERROR') {
+      throw new Error(
+        `Transaction submission error: ${JSON.stringify(
+          response.errorResult || response,
+        )}`,
+      );
+    }
+
+    // 7. Poll status until SUCCESS
+    let txStatus: string = response.status;
+    let getTxResponse = response as any;
+    const startTime = Date.now();
+    const timeout = 30000;
+
+    while (txStatus === 'PENDING' && Date.now() - startTime < timeout) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      getTxResponse = await this.executeRpc(() =>
+        this.rpcServer.getTransaction(response.hash),
+      );
+      txStatus = getTxResponse.status;
+    }
+
+    if (txStatus === 'SUCCESS') {
+      return {
+        hash: response.hash,
+        status: 1,
+        ledger: getTxResponse.ledger,
+      };
+    } else {
+      throw new Error(
+        `Transaction failed with status ${txStatus}: ${JSON.stringify(
+          getTxResponse,
+        )}`,
+      );
+    }
+  }
+
+  /**
+   * Generalized FeeBump submission for any pre-built assembled inner transaction.
+   */
+  async executeFeeBumpTransaction(
+    innerTx: any,
+    innerSigner?: Keypair,
+  ): Promise<{ hash: string; status: number; ledger?: number }> {
+    const simRes = await this.executeRpc(() =>
+      this.rpcServer.simulateTransaction(innerTx),
+    );
+    if (!StellarRpc.Api.isSimulationSuccess(simRes)) {
+      throw new Error(
+        `Simulation failed: ${JSON.stringify((simRes as any).error || simRes)}`,
+      );
+    }
+
+    const assembledInnerTx = StellarRpc.assembleTransaction(
+      innerTx,
+      simRes,
+    ).build();
+    if (innerSigner) {
+      assembledInnerTx.sign(innerSigner);
+    }
+
+    const feeBumpTx: FeeBumpTransaction =
+      TransactionBuilder.buildFeeBumpTransaction(
+        this.workerKeypair.publicKey(),
+        '10000',
+        assembledInnerTx,
+        this.networkPassphrase,
+      );
+    feeBumpTx.sign(this.workerKeypair);
+
+    const response = await this.executeRpc(() =>
+      this.rpcServer.sendTransaction(feeBumpTx),
+    );
+    if (response.status === 'ERROR') {
+      throw new Error(
+        `Transaction submission error: ${JSON.stringify(
+          response.errorResult || response,
+        )}`,
+      );
+    }
+
+    let txStatus: string = response.status;
+    let getTxResponse = response as any;
+    const startTime = Date.now();
+    const timeout = 30000;
+
+    while (txStatus === 'PENDING' && Date.now() - startTime < timeout) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      getTxResponse = await this.executeRpc(() =>
+        this.rpcServer.getTransaction(response.hash),
+      );
+      txStatus = getTxResponse.status;
+    }
+
+    if (txStatus === 'SUCCESS') {
+      return {
+        hash: response.hash,
+        status: 1,
+        ledger: getTxResponse.ledger,
+      };
+    } else {
+      throw new Error(
+        `Transaction failed with status ${txStatus}: ${JSON.stringify(
+          getTxResponse,
+        )}`,
+      );
+    }
+  }
+
   getWorkerAddress(): string {
     return this.workerKeypair ? this.workerKeypair.publicKey() : '';
   }
 
   async checkConnection(): Promise<boolean> {
     try {
-      const state = await this.rpcServer.getHealth();
+      const state = await this.executeRpc(() => this.rpcServer.getHealth());
       return state.status === 'healthy';
     } catch {
       return false;

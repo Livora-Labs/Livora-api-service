@@ -13,6 +13,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { WalletsService } from './wallets.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
@@ -35,6 +36,7 @@ export class WalletsController {
     return this.walletsService.getBalance(userId);
   }
 
+  @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('transactions')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({

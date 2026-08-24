@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { SalesService } from './sales.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -26,6 +27,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
+  @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('sales')
   @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
   @ApiOperation({
@@ -64,6 +66,7 @@ export class SalesController {
     return this.salesService.getCertificateById(id, buyerId);
   }
 
+  @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('certificates')
   @Roles(Role.ADMIN)
   @ApiOperation({

@@ -26,8 +26,9 @@ export class SupabaseAuthGuard implements CanActivate {
 
     // Limpieza defensiva por si se envía "Bearer Bearer <token>" o "Bearer <token>"
     let token = authHeader.trim();
-    while (token.toLowerCase().startsWith('bearer ')) {
-      token = token.replace(/^bearer\s+/i, '').trim();
+    while (/^bearer(\s+|$)/i.test(token)) {
+      token = token.replace(/^bearer(\s+|$)/i, '').trim();
+      if (!token) break;
     }
 
     if (!token) {
@@ -46,6 +47,10 @@ export class SupabaseAuthGuard implements CanActivate {
       throw new UnauthorizedException(
         'Usuario autenticado pero sin perfil local en la base de datos',
       );
+    }
+
+    if (user.deletedAt !== null || user.isActive === false) {
+      throw new UnauthorizedException('Cuenta desactivada o eliminada');
     }
 
     const { encryptedPrivateKey, ...safeUser } = user;

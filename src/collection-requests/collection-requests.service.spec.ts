@@ -31,7 +31,10 @@ describe('CollectionsService - verifyPin', () => {
         { provide: SupabaseService, useValue: {} },
         { provide: IpfsService, useValue: {} },
         { provide: WebsocketsService, useValue: {} },
-        { provide: NotificationsService, useValue: { sendPushNotification: jest.fn() } },
+        {
+          provide: NotificationsService,
+          useValue: { sendPushNotification: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -52,14 +55,18 @@ describe('CollectionsService - verifyPin', () => {
     };
     const mockBatch = { id: 'batch-1' };
 
-    mockPrismaService.collectionRequest.findUnique.mockResolvedValue(mockRequest);
+    mockPrismaService.collectionRequest.findUnique.mockResolvedValue(
+      mockRequest,
+    );
     mockPrismaService.batch.findFirst.mockResolvedValue(mockBatch);
     mockPrismaService.collectionRequest.update.mockResolvedValue({
       ...mockRequest,
       status: RequestStatus.COMPLETED,
     });
 
-    const result = await service.verifyPin('req-1', 'collector-1', { pin: '1234' });
+    const result = await service.verifyPin('req-1', 'collector-1', {
+      pin: '1234',
+    });
 
     expect(prisma.collectionRequest.findUnique).toHaveBeenCalledWith({
       where: { id: 'req-1' },
@@ -79,10 +86,13 @@ describe('CollectionsService - verifyPin', () => {
       verificationPin: '1234',
     };
 
-    mockPrismaService.collectionRequest.findUnique.mockResolvedValue(mockRequest);
+    mockPrismaService.collectionRequest.findUnique.mockResolvedValue(
+      mockRequest,
+    );
 
-    await expect(service.verifyPin('req-1', 'collector-1', { pin: '9999' }))
-      .rejects.toThrow(BadRequestException);
+    await expect(
+      service.verifyPin('req-1', 'collector-1', { pin: '9999' }),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('should reject verification of a non-ACCEPTED request', async () => {
@@ -93,9 +103,12 @@ describe('CollectionsService - verifyPin', () => {
       verificationPin: '1234',
     };
 
-    mockPrismaService.collectionRequest.findUnique.mockResolvedValue(mockRequest);
+    mockPrismaService.collectionRequest.findUnique.mockResolvedValue(
+      mockRequest,
+    );
 
-    await expect(service.verifyPin('req-1', 'collector-1', { pin: '1234' }))
-      .rejects.toThrow(BadRequestException);
+    await expect(
+      service.verifyPin('req-1', 'collector-1', { pin: '1234' }),
+    ).rejects.toThrow(BadRequestException);
   });
 });

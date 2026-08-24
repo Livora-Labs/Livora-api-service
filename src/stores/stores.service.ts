@@ -16,6 +16,7 @@ import { CreateStoreProfileDto } from './dto/create-store-profile.dto';
 import { CreateQrRedemptionDto } from './dto/create-qr-redemption.dto';
 import { CreateSettlementRequestDto } from './dto/create-settlement-request.dto';
 import { PaySettlementDto } from './dto/pay-settlement.dto';
+import { ConfirmRedemptionDto } from './dto/confirm-redemption.dto';
 import { RedemptionStatus, SettlementStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 
@@ -116,7 +117,17 @@ export class StoresService {
    * Valida saldo de tokens on-chain del usuario hogar, vincula el userId, marca COMPLETED,
    * notifica a la tienda vía WebSockets y encola la transferencia on-chain.
    */
-  async confirmRedemption(householdUserId: string, qrCodeRef: string) {
+  async confirmRedemption(
+    householdUserId: string,
+    qrCodeRef: string,
+    dto: ConfirmRedemptionDto,
+  ) {
+    if (!dto || dto.termsAccepted !== true) {
+      throw new BadRequestException(
+        'Debe aceptar los Términos y Condiciones de Uso para completar el pago.',
+      );
+    }
+
     // 1. Buscar la transacción de canje
     const redemption = await this.prisma.redemptionTransaction.findUnique({
       where: { qrCodeRef },
@@ -144,6 +155,16 @@ export class StoresService {
       );
     }
 
+    // Calcular cargos adicionales
+    let extraAmount = 0;
+    if (dto.donationOptIn === true) {
+      extraAmount += 1.0;
+    }
+    if (dto.insuranceOptIn === true) {
+      extraAmount += 0.5;
+    }
+    const finalAmount = redemption.tokenAmount + extraAmount;
+
     // 2. Verificar el saldo del Hogar
     const userWallet = await this.prisma.user.findUnique({
       where: { id: householdUserId },
@@ -160,9 +181,9 @@ export class StoresService {
     const balanceResult = await this.walletsService.getBalance(householdUserId);
     const balance = parseFloat(balanceResult.balance || '0');
 
-    if (balance < redemption.tokenAmount) {
+    if (balance < finalAmount) {
       throw new BadRequestException(
-        `Saldo de EcoTokens insuficiente para realizar el canje. Requerido: ${redemption.tokenAmount}, Disponible: ${balance}`,
+        `Saldo de EcoTokens insuficiente para realizar el canje. Requerido: ${finalAmount}, Disponible: ${balance}`,
       );
     }
 
@@ -172,6 +193,7 @@ export class StoresService {
       data: {
         userId: householdUserId,
         status: RedemptionStatus.COMPLETED,
+        tokenAmount: finalAmount,
       },
     });
 
@@ -190,17 +212,21 @@ export class StoresService {
     );
 
     // 5. Encolar trabajo en BullMQ (blockchain-queue)
-    await this.blockchainQueue.add('redemption-transfer', {
-      redemptionId: updatedRedemption.id,
-      fromUserId: householdUserId,
-      toStoreUserId: storeUserId,
-      fromWallet: userWallet.walletAddress,
-      toWallet: redemption.store.user.walletAddress,
-      tokenAmount: updatedRedemption.tokenAmount,
-    }, {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 5000 },
-    });
+    await this.blockchainQueue.add(
+      'redemption-transfer',
+      {
+        redemptionId: updatedRedemption.id,
+        fromUserId: householdUserId,
+        toStoreUserId: storeUserId,
+        fromWallet: userWallet.walletAddress,
+        toWallet: redemption.store.user.walletAddress,
+        tokenAmount: updatedRedemption.tokenAmount,
+      },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+      },
+    );
 
     return updatedRedemption;
   }
@@ -297,16 +323,20 @@ export class StoresService {
       this.configService.get<string>('ECOTOKEN_CONTRACT_ID') ||
       'CD7L2OEZL74GPHXQ32EEXI7Y7DPHF74GPHXQ32EEXI7Y7DPHF74GPHXQ';
 
-    await this.blockchainQueue.add('settlement-transfer', {
-      settlementId: updatedSettlement.id,
-      fromStoreUserId: storeUserId,
-      fromWallet: settlement.store.user.walletAddress,
-      toWallet: treasuryWallet,
-      tokenAmount: updatedSettlement.tokenAmount,
-    }, {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 5000 },
-    });
+    await this.blockchainQueue.add(
+      'settlement-transfer',
+      {
+        settlementId: updatedSettlement.id,
+        fromStoreUserId: storeUserId,
+        fromWallet: settlement.store.user.walletAddress,
+        toWallet: treasuryWallet,
+        tokenAmount: updatedSettlement.tokenAmount,
+      },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+      },
+    );
 
     return updatedSettlement;
   }

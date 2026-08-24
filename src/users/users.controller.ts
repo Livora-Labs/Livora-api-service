@@ -7,7 +7,12 @@ import {
   Patch,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UsersService } from './users.service';
@@ -33,10 +38,16 @@ export class UsersController {
 
   @Delete('me')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Eliminación segura de cuenta (GDPR compliance)' })
-  @ApiResponse({ status: 200, description: 'Cuenta anonimizada y eliminada con éxito' })
+  @ApiOperation({
+    summary:
+      'Eliminación segura de cuenta y anonimización ARCO (Ley 29733 / GDPR)',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Cuenta anonimizada y eliminada con éxito conforme a la Ley 29733',
+  })
   async deleteAccount(@CurrentUser('id') userId: string) {
-    await this.usersService.deleteAccountGDPR(userId);
-    return { success: true, message: 'Cuenta eliminada y anonimizada de acuerdo con regulaciones GDPR' };
+    return this.usersService.cancelAccountARCO(userId);
   }
 }

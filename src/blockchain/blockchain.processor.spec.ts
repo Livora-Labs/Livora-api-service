@@ -57,15 +57,19 @@ describe('BlockchainProcessor', () => {
         {
           provide: NotificationsService,
           useValue: {
-            sendPushNotification: jest.fn(),
+            sendPushNotification: jest
+              .fn()
+              .mockResolvedValue({ success: true }),
           },
         },
         {
           provide: ConfigService,
           useValue: {
             get: jest.fn().mockImplementation((key: string) => {
-              if (key === 'WALLET_ENCRYPTION_KEY') return 'livora_wallet_aes256_secret!';
-              if (key === 'ECOTOKEN_CONTRACT_ID') return 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4';
+              if (key === 'WALLET_ENCRYPTION_KEY')
+                return 'livora_wallet_aes256_secret!';
+              if (key === 'ECOTOKEN_CONTRACT_ID')
+                return 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4';
               return null;
             }),
           },
@@ -100,14 +104,19 @@ describe('BlockchainProcessor', () => {
       } as unknown as Job<any>;
 
       const secret = Keypair.random().secret();
-      const encryptedKey = CryptoUtil.encrypt(secret, 'livora_wallet_aes256_secret!');
+      const encryptedKey = CryptoUtil.encrypt(
+        secret,
+        'livora_wallet_aes256_secret!',
+      );
 
       prisma.user.findUnique.mockResolvedValue({
         encryptedPrivateKey: encryptedKey,
       } as any);
 
       blockchainService.getNonceOnChain.mockResolvedValue(5n);
-      blockchainService.executeDelegatedTransfer.mockResolvedValue({ hash: 'stellar_tx_hash_123' } as any);
+      blockchainService.executeDelegatedTransfer.mockResolvedValue({
+        hash: 'stellar_tx_hash_123',
+      } as any);
 
       const result = await processor.process(job);
 
@@ -116,7 +125,9 @@ describe('BlockchainProcessor', () => {
         select: { encryptedPrivateKey: true },
       });
 
-      expect(blockchainService.getNonceOnChain).toHaveBeenCalledWith(jobData.fromWallet);
+      expect(blockchainService.getNonceOnChain).toHaveBeenCalledWith(
+        jobData.fromWallet,
+      );
 
       expect(blockchainService.executeDelegatedTransfer).toHaveBeenCalledWith(
         jobData.fromWallet,
@@ -146,11 +157,12 @@ describe('BlockchainProcessor', () => {
         success: true,
         redemptionId: jobData.redemptionId,
         txHash: 'stellar_tx_hash_123',
-        explorerUrl: 'https://stellar.expert/explorer/testnet/tx/stellar_tx_hash_123',
+        explorerUrl:
+          'https://stellar.expert/explorer/testnet/tx/stellar_tx_hash_123',
       });
     });
 
-    it('should fallback to mock txHash if executeDelegatedTransfer throws', async () => {
+    it('should propagate error and reject without saving mock txHash if executeDelegatedTransfer throws', async () => {
       const jobData = {
         redemptionId: 'redemption-456',
         fromUserId: 'user-2',
@@ -167,36 +179,32 @@ describe('BlockchainProcessor', () => {
       } as unknown as Job<any>;
 
       const secret = Keypair.random().secret();
-      const encryptedKey = CryptoUtil.encrypt(secret, 'livora_wallet_aes256_secret!');
+      const encryptedKey = CryptoUtil.encrypt(
+        secret,
+        'livora_wallet_aes256_secret!',
+      );
 
       prisma.user.findUnique.mockResolvedValue({
         encryptedPrivateKey: encryptedKey,
       } as any);
 
       blockchainService.getNonceOnChain.mockResolvedValue(1n);
-      blockchainService.executeDelegatedTransfer.mockRejectedValue(new Error('Transaction failed'));
-
-      const result = await processor.process(job);
-
-      expect(blockchainService.executeDelegatedTransfer).toHaveBeenCalled();
-      
-      expect(prisma.redemptionTransaction.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: jobData.redemptionId },
-          data: {
-            txHash: expect.stringMatching(/^mockredempt[0-9a-f]+$/),
-          },
-        }),
+      blockchainService.executeDelegatedTransfer.mockRejectedValue(
+        new Error('Transaction failed'),
       );
 
-      expect(result.success).toBe(true);
-      expect(result.txHash).toMatch(/^mockredempt[0-9a-f]+$/);
+      await expect(processor.process(job)).rejects.toThrow(
+        'Transaction failed',
+      );
+
+      expect(blockchainService.executeDelegatedTransfer).toHaveBeenCalled();
+      expect(prisma.redemptionTransaction.update).not.toHaveBeenCalled();
     });
 
-    it('should handle missing nonce gracefully (default to 0n)', async () => {
+    it('should throw error if user has no encrypted private key', async () => {
       const jobData = {
         redemptionId: 'redemption-789',
-        fromUserId: 'user-3',
+        fromUserId: 'user-no-key',
         toStoreUserId: 'store-3',
         fromWallet,
         toWallet,
@@ -209,26 +217,201 @@ describe('BlockchainProcessor', () => {
         id: 'job-3',
       } as unknown as Job<any>;
 
+      prisma.user.findUnique.mockResolvedValue({
+        encryptedPrivateKey: null,
+      } as any);
+
+      await expect(processor.process(job)).rejects.toThrow(
+        'El usuario user-no-key no posee una clave privada registrada',
+      );
+      expect(blockchainService.executeDelegatedTransfer).not.toHaveBeenCalled();
+      expect(prisma.redemptionTransaction.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('processBatchBlockchain', () => {
+    it('should process batch and update DB when on-chain call succeeds', async () => {
+      const jobData = {
+        batchId: 'batch-001',
+        collectorId: 'collector-1',
+        centerId: 'center-1',
+        materialsActual: { PET: 10, CARTON: 5 },
+        householdIds: ['hh-1'],
+      };
+
+      const job = {
+        name: 'process-batch-blockchain',
+        data: jobData,
+        id: 'batch-job-1',
+      } as unknown as Job<any>;
+
+      ipfsService.uploadBatchMetadata = jest
+        .fn()
+        .mockResolvedValue('QmTestCid123');
+      ipfsService.getGatewayUrl = jest
+        .fn()
+        .mockReturnValue('https://ipfs.io/ipfs/QmTestCid123');
+
+      blockchainService.getWorkerAddress = jest
+        .fn()
+        .mockReturnValue(Keypair.random().publicKey());
+      blockchainService.registerBatchWeighed = jest.fn().mockResolvedValue({
+        hash: 'batch_tx_hash_abc',
+      });
+
+      prisma.user.findUnique = jest.fn().mockResolvedValue({
+        walletAddress: Keypair.random().publicKey(),
+      } as any);
+      prisma.user.findMany = jest
+        .fn()
+        .mockResolvedValue([
+          { id: 'hh-1', walletAddress: Keypair.random().publicKey() },
+        ] as any);
+      prisma.$transaction = jest.fn().mockImplementation(async (callback) =>
+        callback({
+          batch: { update: jest.fn() },
+          inventoryItem: {
+            findFirst: jest.fn().mockResolvedValue(null),
+            create: jest.fn(),
+          },
+          inventoryMovement: { create: jest.fn() },
+        }),
+      );
+      websocketsService.emitBatchCompleted = jest.fn();
+
+      const result = await processor.process(job);
+
+      expect(result.success).toBe(true);
+      expect(result.txHash).toBe('batch_tx_hash_abc');
+      expect(blockchainService.registerBatchWeighed).toHaveBeenCalled();
+    });
+
+    it('should throw error without mock fallback if registerBatchWeighed fails', async () => {
+      const jobData = {
+        batchId: 'batch-002',
+        collectorId: 'collector-1',
+        centerId: 'center-1',
+        materialsActual: { PET: 10 },
+        householdIds: [],
+      };
+
+      const job = {
+        name: 'process-batch-blockchain',
+        data: jobData,
+        id: 'batch-job-2',
+      } as unknown as Job<any>;
+
+      ipfsService.uploadBatchMetadata = jest
+        .fn()
+        .mockResolvedValue('QmTestCid456');
+      blockchainService.getWorkerAddress = jest
+        .fn()
+        .mockReturnValue(Keypair.random().publicKey());
+      blockchainService.registerBatchWeighed = jest
+        .fn()
+        .mockRejectedValue(new Error('RPC node connection failed'));
+
+      prisma.user.findUnique = jest.fn().mockResolvedValue({
+        walletAddress: Keypair.random().publicKey(),
+      } as any);
+
+      await expect(processor.process(job)).rejects.toThrow(
+        'RPC node connection failed',
+      );
+    });
+  });
+
+  describe('processSettlementTransfer', () => {
+    it('should process settlement using subsidized transfer when user has private key', async () => {
+      const jobData = {
+        settlementId: 'settle-001',
+        fromStoreUserId: 'store-user-1',
+        fromWallet,
+        toWallet,
+        tokenAmount: 50,
+      };
+
+      const job = {
+        name: 'settlement-transfer',
+        data: jobData,
+        id: 'settle-job-1',
+      } as unknown as Job<any>;
+
       const secret = Keypair.random().secret();
-      const encryptedKey = CryptoUtil.encrypt(secret, 'livora_wallet_aes256_secret!');
+      const encryptedKey = CryptoUtil.encrypt(
+        secret,
+        'livora_wallet_aes256_secret!',
+      );
 
       prisma.user.findUnique.mockResolvedValue({
         encryptedPrivateKey: encryptedKey,
       } as any);
 
-      blockchainService.getNonceOnChain.mockRejectedValue(new Error('Network error'));
-      blockchainService.executeDelegatedTransfer.mockResolvedValue({ hash: 'stellar_tx_hash_789' } as any);
+      blockchainService.executeSubsidizedTransfer = jest
+        .fn()
+        .mockResolvedValue({
+          hash: 'settle_tx_hash_999',
+        });
 
-      await processor.process(job);
+      const result = await processor.process(job);
 
-      expect(blockchainService.executeDelegatedTransfer).toHaveBeenCalledWith(
-        jobData.fromWallet,
-        jobData.toWallet,
-        '2',
-        0,
-        expect.any(Buffer),
-        expect.any(Buffer),
+      expect(result.success).toBe(true);
+      expect(result.txHash).toBe('settle_tx_hash_999');
+      expect(blockchainService.executeSubsidizedTransfer).toHaveBeenCalledWith(
+        secret,
+        toWallet,
+        50,
       );
+    });
+
+    it('should throw error when settlement transfer fails', async () => {
+      const jobData = {
+        settlementId: 'settle-002',
+        fromStoreUserId: 'store-user-2',
+        fromWallet,
+        toWallet,
+        tokenAmount: 20,
+      };
+
+      const job = {
+        name: 'settlement-transfer',
+        data: jobData,
+        id: 'settle-job-2',
+      } as unknown as Job<any>;
+
+      const secret = Keypair.random().secret();
+      const encryptedKey = CryptoUtil.encrypt(
+        secret,
+        'livora_wallet_aes256_secret!',
+      );
+
+      prisma.user.findUnique.mockResolvedValue({
+        encryptedPrivateKey: encryptedKey,
+      } as any);
+
+      blockchainService.executeSubsidizedTransfer = jest
+        .fn()
+        .mockRejectedValue(new Error('Subsidized settlement failed'));
+
+      await expect(processor.process(job)).rejects.toThrow(
+        'Subsidized settlement failed',
+      );
+    });
+  });
+
+  describe('Worker events', () => {
+    it('should log worker lifecycle events without throwing', () => {
+      const job = {
+        id: 'job-evt-1',
+        name: 'test-job',
+        attemptsMade: 1,
+        opts: { attempts: 3 },
+      } as any;
+      expect(() => processor.onCompleted(job)).not.toThrow();
+      expect(() =>
+        processor.onFailed(job, new Error('Test fail')),
+      ).not.toThrow();
+      expect(() => processor.onError(new Error('Worker error'))).not.toThrow();
     });
   });
 });

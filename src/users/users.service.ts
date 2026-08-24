@@ -1,16 +1,26 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { SupabaseService } from '../supabase/supabase.service';
 import { RegisterDto } from '../auth/dto/register.dto';
 import { CryptoUtil } from '../common/utils/crypto.util';
 import { Keypair } from '@stellar/stellar-sdk';
-import { User } from '@prisma/client';
+import { User, ConsentAudit } from '@prisma/client';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly supabaseService: SupabaseService,
   ) {}
 
   async findByEmail(email: string): Promise<User | null> {
@@ -73,16 +83,101 @@ export class UsersService {
     });
   }
 
-  async deleteAccountGDPR(id: string): Promise<User> {
+  async cancelAccountARCO(
+    id: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user || user.deletedAt !== null || !user.isActive) {
+      throw new NotFoundException('Usuario no encontrado o ya cancelado');
+    }
+
+    const originalEmail = user.email;
     const anonymousEmail = `deleted_${id.substring(0, 8)}_${Date.now()}@deleted.livora.org`;
-    return this.prisma.user.update({
-      where: { id },
-      data: {
-        email: anonymousEmail,
-        encryptedPrivateKey: null,
-        fcmToken: null,
-        receptionPin: null,
-      },
+
+    // Transacción atómica multitable en PostgreSQL para anonimización irreversible
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Anonimizar usuario, destruir custodia de clave privada Web3 y marcar soft-delete
+      await tx.user.update({
+        where: { id },
+        data: {
+          email: anonymousEmail,
+          encryptedPrivateKey: null, // Destrucción irreversible de la clave privada
+          fcmToken: null,
+          receptionPin: null,
+          isActive: false,
+          deletedAt: new Date(),
+        },
+      });
+
+      // 2. Anonimizar perfil de tienda si existe
+      await tx.storeProfile.updateMany({
+        where: { userId: id },
+        data: {
+          businessName: 'Tienda Anonimizada (ARCO)',
+          ruc: '00000000000',
+          address: 'Dirección Anonimizada',
+          bankAccount: 'ANONIMIZADO',
+          logoUrl: null,
+        },
+      });
+
+      // 3. Purgar documentos KYC y marcar como rechazado
+      await tx.kycApplication.updateMany({
+        where: { userId: id },
+        data: {
+          documentUrl: null,
+          status: 'REJECTED',
+        },
+      });
+
+      // 4. Anonimizar reclamos / quejas
+      await tx.complaint.updateMany({
+        where: { userId: id },
+        data: {
+          subject: 'Queja Anonimizada',
+          description:
+            'Contenido suprimido por solicitud de cancelación ARCO (Ley 29733)',
+        },
+      });
+
+      // 5. Eliminar notificaciones privadas del usuario
+      await tx.notification.deleteMany({
+        where: { userId: id },
+      });
+
+      // 6. Eliminar datos en lista de espera beta si existen
+      await tx.betaSignup.deleteMany({
+        where: { email: originalEmail },
+      });
+    });
+
+    // 7. Eliminar identidad en Supabase Auth admin API (defensivo)
+    try {
+      const supabaseClient = this.supabaseService.getClient();
+      await supabaseClient.auth.admin.deleteUser(id);
+    } catch (error: any) {
+      this.logger.warn(
+        `Error al eliminar usuario en Supabase Auth durante ARCO: ${error?.message || error}`,
+      );
+    }
+
+    return {
+      success: true,
+      message:
+        'Cuenta cancelada y datos personales anonimizados irreversiblemente conforme a la Ley 29733',
+    };
+  }
+
+  async deleteAccountGDPR(
+    id: string,
+  ): Promise<{ success: boolean; message: string }> {
+    return this.cancelAccountARCO(id);
+  }
+
+  async getConsentAudits(userId: string): Promise<ConsentAudit[]> {
+    return this.prisma.consentAudit.findMany({
+      where: { userId },
+      orderBy: { consentedAt: 'desc' },
     });
   }
 }

@@ -7,11 +7,10 @@ import {
   Patch,
   Post,
   Query,
-  UploadedFile,
+  Req,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import type { FastifyRequest } from 'fastify';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { CollectionsService } from './collections.service';
@@ -24,6 +23,12 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
+export interface AuthenticatedUser {
+  id: string;
+  role: Role;
+  email?: string;
+}
+
 @ApiTags('Collections')
 @ApiBearerAuth()
 @Controller('collection-requests')
@@ -34,13 +39,103 @@ export class CollectionsController {
   @Post()
   @Roles(Role.HOGAR)
   @ApiOperation({ summary: 'Crear solicitud de recolección (Rol: HOGAR)' })
-  @UseInterceptors(FileInterceptor('photo'))
   async create(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateCollectionDto,
-    @UploadedFile() file?: Express.Multer.File,
+    @Req() req?: FastifyRequest,
   ) {
-    return this.collectionsService.create(user.id, dto, file);
+    let file:
+      | {
+          originalname: string;
+          mimetype: string;
+          buffer: Buffer;
+          size?: number;
+        }
+      | undefined;
+    let payloadDto = dto || ({} as CreateCollectionDto);
+
+    const reqWithFile = req as unknown as {
+      incomingFile?: {
+        originalname: string;
+        mimetype: string;
+        buffer: Buffer;
+        size?: number;
+      };
+      rawFile?: {
+        originalname: string;
+        mimetype: string;
+        buffer: Buffer;
+        size?: number;
+      };
+      file?:
+        | (() => Promise<{
+            filename: string;
+            mimetype: string;
+            toBuffer: () => Promise<Buffer>;
+            fields?: Record<string, { value?: string }>;
+          }>)
+        | {
+            originalname: string;
+            mimetype: string;
+            buffer: Buffer;
+            size?: number;
+          };
+      isMultipart?: () => boolean;
+    };
+
+    if (reqWithFile?.incomingFile) {
+      file = reqWithFile.incomingFile;
+    } else if (reqWithFile?.rawFile) {
+      file = reqWithFile.rawFile;
+    } else if (reqWithFile?.file && typeof reqWithFile.file !== 'function') {
+      file = reqWithFile.file;
+    } else if (
+      reqWithFile &&
+      typeof reqWithFile.isMultipart === 'function' &&
+      reqWithFile.isMultipart() &&
+      typeof reqWithFile.file === 'function'
+    ) {
+      const part = await reqWithFile.file();
+      if (part) {
+        const buffer = await part.toBuffer();
+        file = {
+          originalname: part.filename,
+          mimetype: part.mimetype,
+          buffer,
+          size: buffer.length,
+        };
+
+        const fields = part.fields;
+        if (fields) {
+          let itemsEstimatedParsed: Record<string, any> =
+            payloadDto?.itemsEstimated || {};
+          if (fields.itemsEstimated?.value) {
+            try {
+              const parsed = JSON.parse(fields.itemsEstimated.value);
+              if (typeof parsed === 'object' && parsed !== null) {
+                itemsEstimatedParsed = parsed;
+              }
+            } catch {
+              // Fallback
+            }
+          }
+
+          payloadDto = {
+            itemsEstimated: itemsEstimatedParsed,
+            description: fields.description?.value ?? payloadDto?.description,
+            latitude: fields.latitude?.value
+              ? Number(fields.latitude.value)
+              : payloadDto?.latitude,
+            longitude: fields.longitude?.value
+              ? Number(fields.longitude.value)
+              : payloadDto?.longitude,
+            photoUrl: fields.photoUrl?.value ?? payloadDto?.photoUrl,
+          };
+        }
+      }
+    }
+
+    return this.collectionsService.create(user.id, payloadDto, file);
   }
 
   @Get()
@@ -49,7 +144,7 @@ export class CollectionsController {
     summary: 'Listar solicitudes de recolección (Rol: HOGAR / RECOLECTOR)',
   })
   async findAll(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
     @Query() query: FindCollectionsQueryDto,
   ) {
     return this.collectionsService.findAll(user, query);
@@ -63,7 +158,7 @@ export class CollectionsController {
   })
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.collectionsService.findOne(id, user.id, user.role);
   }
@@ -75,7 +170,7 @@ export class CollectionsController {
   })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpdateCollectionStatusDto,
   ) {
     return this.collectionsService.updateStatus(id, user.id, user.role, dto);

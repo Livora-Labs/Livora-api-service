@@ -1,34 +1,24 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import {
-  Keypair,
-  rpc as StellarRpc,
-  Account,
-  TransactionBuilder,
-  Operation,
-  Address,
-  nativeToScVal,
-} from '@stellar/stellar-sdk';
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { BlockchainService } from '../blockchain/services/blockchain.service';
+import { CryptoUtil } from '../common/utils/crypto.util';
 
 @Injectable()
 export class WalletsService {
   private readonly logger = new Logger(WalletsService.name);
-  private rpcServer: StellarRpc.Server;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly blockchainService: BlockchainService,
-  ) {
-    const rpcUrl = this.configService.get<string>(
-      'STELLAR_RPC_URL',
-      'https://soroban-testnet.stellar.org',
-    );
-    this.rpcServer = new StellarRpc.Server(rpcUrl);
-  }
+  ) {}
 
   /**
    * GET /wallets/me/balance
@@ -58,7 +48,9 @@ export class WalletsService {
     const contractId = this.configService.get<string>('ECOTOKEN_CONTRACT_ID');
     if (contractId && contractId !== 'C...') {
       try {
-        const onChainBalanceStr = await this.blockchainService.getBalance(user.walletAddress);
+        const onChainBalanceStr = await this.blockchainService.getBalance(
+          user.walletAddress,
+        );
         const onChainBalance = parseFloat(onChainBalanceStr);
         const finalBalance = Math.max(0, onChainBalance - totalSpent);
         return { balance: finalBalance.toFixed(2) };
@@ -135,7 +127,8 @@ export class WalletsService {
 
   /**
    * POST /wallets/transactions
-   * El backend actúa como Relayer (Gas Subsidiado) pagando la comisión de red con la Billetera Maestra.
+   * El backend actúa como Relayer (Gas Subsidiado) construyendo una FeeBumpTransaction
+   * firmada por el usuario en la transacción interna y subsidiada por la wallet relayer en la externa.
    */
   async sendTransaction(userId: string, dto: CreateTransactionDto) {
     const user = await this.prisma.user.findUnique({
@@ -146,77 +139,34 @@ export class WalletsService {
       throw new NotFoundException('Usuario no encontrado');
     }
 
-    const workerSecretKey = this.configService.get<string>('WORKER_SECRET_KEY');
-    const contractId = this.configService.get<string>('ECOTOKEN_CONTRACT_ID');
-
-    let txHash: string;
-
-    if (
-      workerSecretKey &&
-      workerSecretKey !== 'S...' &&
-      contractId &&
-      contractId !== 'C...'
-    ) {
-      try {
-        const workerKeypair = Keypair.fromSecret(workerSecretKey);
-        const amountBig = BigInt(Math.round(dto.amount * 10000000));
-
-        const accountInfo = await this.rpcServer.getAccount(workerKeypair.publicKey());
-        const sourceAccount = new Account(workerKeypair.publicKey(), accountInfo.sequenceNumber());
-
-        const tx = new TransactionBuilder(sourceAccount, {
-          fee: '1000',
-          networkPassphrase: this.configService.get<string>(
-            'STELLAR_NETWORK_PASSPHRASE',
-            'Test SDF Network ; September 2015',
-          ),
-        })
-          .addOperation(
-            Operation.invokeContractFunction({
-              contract: contractId,
-              function: 'transfer',
-              args: [
-                Address.fromString(workerKeypair.publicKey()).toScVal(),
-                Address.fromString(dto.toAddress).toScVal(),
-                nativeToScVal(amountBig, { type: 'i128' }),
-              ],
-            }),
-          )
-          .setTimeout(30)
-          .build();
-
-        const simRes = await this.rpcServer.simulateTransaction(tx);
-        if (!StellarRpc.Api.isSimulationSuccess(simRes)) {
-          throw new Error(`Simulation failed: ${JSON.stringify(simRes.error || simRes)}`);
-        }
-
-        const assembledTx = StellarRpc.assembleTransaction(tx, simRes).build();
-        assembledTx.sign(workerKeypair);
-
-        const response = await this.rpcServer.sendTransaction(assembledTx);
-        if (response.status === 'ERROR') {
-          throw new Error(`Transaction failed: ${JSON.stringify(response.errorResult || response)}`);
-        }
-        txHash = response.hash;
-        this.logger.log(
-          `Transacción de Relayer enviada on-chain. Tx Hash: ${txHash}`,
-        );
-      } catch (err: any) {
-        this.logger.error(
-          `Fallo en envío de transacción on-chain por Relayer: ${err.message}`,
-        );
-        txHash = `relayer${Date.now().toString(16)}${Math.random().toString(16).substring(2, 10)}`;
-      }
-    } else {
-      this.logger.warn(
-        'Relayer ejecutando transacción en modo simulado / entorno local.',
+    if (!user.encryptedPrivateKey) {
+      throw new BadRequestException(
+        'El usuario no posee una clave privada registrada para firmar la transacción',
       );
-      txHash = `relayer${Date.now().toString(16)}${Math.random().toString(16).substring(2, 10)}`;
     }
+
+    const encryptionKey =
+      this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
+      'livora_wallet_aes256_secret!';
+    const userSecretKey = CryptoUtil.decrypt(
+      user.encryptedPrivateKey,
+      encryptionKey,
+    );
+    if (!userSecretKey) {
+      throw new BadRequestException(
+        'No se pudo descifrar la clave privada del usuario',
+      );
+    }
+
+    const receipt = await this.blockchainService.executeSubsidizedTransfer(
+      userSecretKey,
+      dto.toAddress,
+      dto.amount,
+    );
 
     return {
       status: 'PROCESSING',
-      transactionId: txHash,
+      transactionId: receipt.hash,
       message:
         'Transacción subsidiada por el Relayer y enviada a la red Stellar Testnet',
       fromUser: user.email,

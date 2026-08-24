@@ -17,6 +17,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { BatchesService } from './batches.service';
 import { UpdateBatchDto } from './dto/update-batch.dto';
@@ -83,6 +84,7 @@ export class BatchesController {
    * POST /batches/:id/receive (Rol: CENTRO_ACOPIO / ALMACEN)
    * Endpoint crítico de pesaje industrial y patrón HTTP 202.
    */
+  @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post(':id/receive')
   @HttpCode(HttpStatus.ACCEPTED)
   @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)

@@ -13,7 +13,7 @@ const prisma = new PrismaClient({ adapter });
 
 async function run() {
   console.log('Iniciando migración de billeteras a Stellar...');
-  
+
   const users = await prisma.user.findMany();
   console.log(`Encontrados ${users.length} usuarios.`);
 

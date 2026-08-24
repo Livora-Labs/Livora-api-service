@@ -86,7 +86,11 @@ export class IpfsService {
    * @param file Archivo recibido en la petición Express/Multer
    * @returns ipfs_cid (string de 46 caracteres) o fallback en desarrollo/error
    */
-  async uploadFile(file: Express.Multer.File): Promise<string> {
+  async uploadFile(
+    file:
+      | { originalname: string; buffer: Buffer; mimetype: string }
+      | Express.Multer.File,
+  ): Promise<string> {
     const apiKey = this.configService.get<string>('PINATA_API_KEY');
     const secretKey = this.configService.get<string>('PINATA_SECRET_KEY');
 

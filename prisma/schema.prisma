@@ -26,6 +26,8 @@ model User {
   encryptedPrivateKey String?
   receptionPin        String?
   fcmToken            String?
+  isActive            Boolean  @default(true)
+  deletedAt           DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -47,6 +49,7 @@ model User {
 
   storeProfile        StoreProfile?
   redemptions         RedemptionTransaction[] @relation("HouseholdRedemptions")
+  consentAudits       ConsentAudit[]
 
   @@map("users")
 }
@@ -240,16 +243,35 @@ enum ComplaintStatus {
 }
 
 model Complaint {
-  id          String          @id @default(uuid()) @db.Uuid
-  subject     String
-  description String
-  status      ComplaintStatus @default(OPEN)
-  userId      String          @db.Uuid
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id                 String          @id @default(uuid()) @db.Uuid
+  correlativeNumber  String          @unique
+  documentType       String
+  documentNumber     String
+  fullName           String
+  address            String
+  phone              String
+  email              String
+  isMinor            Boolean         @default(false)
+  representativeName String?
+  representativeDoc  String?
+  goodType           String
+  goodDescription    String
+  amount             Float?
+  claimType          String
+  claimDetail        String
+  consumerRequest    String
+  status             ComplaintStatus @default(OPEN)
+  userId             String?         @db.Uuid
+  subject            String?
+  description        String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
+  @@index([correlativeNumber])
+  @@index([email])
+  @@index([userId])
   @@map("complaints")
 }
 
@@ -344,3 +366,23 @@ model BetaSignup {
 
   @@map("beta_signups")
 }
+
+model ConsentAudit {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @db.Uuid
+  ipAddress         String
+  userAgent         String
+  termsVersion      String
+  privacyVersion    String   @default("1.0.0")
+  marketingAccepted Boolean  @default(false)
+  documentHash      String
+  consentedAt       DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([documentHash])
+  @@map("consent_audits")
+}
+

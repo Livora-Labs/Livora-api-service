@@ -26,16 +26,21 @@ export class NotificationsService {
 
     if (projectId && clientEmail && privateKey) {
       try {
-        this.firebaseApp = initializeApp({
-          credential: cert({
-            projectId,
-            clientEmail,
-            privateKey: privateKey.replace(/\\n/g, '\n'),
-          }),
-        }, 'livora-fcm');
+        this.firebaseApp = initializeApp(
+          {
+            credential: cert({
+              projectId,
+              clientEmail,
+              privateKey: privateKey.replace(/\\n/g, '\n'),
+            }),
+          },
+          'livora-fcm',
+        );
         this.logger.log('Firebase Admin SDK inicializado para FCM');
       } catch (err: any) {
-        this.logger.error(`Error inicializando Firebase Admin SDK: ${err.message}`);
+        this.logger.error(
+          `Error inicializando Firebase Admin SDK: ${err.message}`,
+        );
       }
     } else {
       this.logger.warn(
@@ -113,7 +118,9 @@ export class NotificationsService {
         },
       });
     } catch (err: any) {
-      this.logger.error(`Error guardando notificación en la base de datos: ${err.message}`);
+      this.logger.error(
+        `Error guardando notificación en la base de datos: ${err.message}`,
+      );
     }
 
     const user = await this.prisma.user.findUnique({
@@ -122,12 +129,16 @@ export class NotificationsService {
     });
 
     if (!user?.fcmToken) {
-      this.logger.log(`[FCM Simulación] El usuario ${userId} no tiene FCM Token. Notificación: "${title}" - "${body}"`);
+      this.logger.log(
+        `[FCM Simulación] El usuario ${userId} no tiene FCM Token. Notificación: "${title}" - "${body}"`,
+      );
       return;
     }
 
     if (!this.firebaseApp) {
-      this.logger.log(`[FCM Simulación] Para token ${user.fcmToken} | Título: "${title}" | Mensaje: "${body}"`);
+      this.logger.log(
+        `[FCM Simulación] Para token ${user.fcmToken} | Título: "${title}" | Mensaje: "${body}"`,
+      );
       return;
     }
 
@@ -137,9 +148,13 @@ export class NotificationsService {
         notification: { title, body },
         data,
       });
-      this.logger.log(`Notificación Push FCM enviada con éxito al usuario ${userId}`);
+      this.logger.log(
+        `Notificación Push FCM enviada con éxito al usuario ${userId}`,
+      );
     } catch (err: any) {
-      this.logger.error(`Error enviando notificación Push a ${userId}: ${err.message}`);
+      this.logger.error(
+        `Error enviando notificación Push a ${userId}: ${err.message}`,
+      );
     }
   }
 }

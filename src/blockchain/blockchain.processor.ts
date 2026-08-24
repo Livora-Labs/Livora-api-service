@@ -1,8 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { BatchStatus } from '@prisma/client';
-import { Keypair, StrKey, xdr, nativeToScVal, Address } from '@stellar/stellar-sdk';
+import {
+  Keypair,
+  StrKey,
+  xdr,
+  nativeToScVal,
+  Address,
+} from '@stellar/stellar-sdk';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebsocketsService } from '../websockets/websockets.service';
@@ -30,6 +36,27 @@ export class BlockchainProcessor extends WorkerHost {
     private readonly configService: ConfigService,
   ) {
     super();
+  }
+
+  @OnWorkerEvent('completed')
+  onCompleted(job: Job) {
+    this.logger.log(`Job #${job.id} (${job.name}) completado exitosamente.`);
+  }
+
+  @OnWorkerEvent('failed')
+  onFailed(job: Job, error: Error) {
+    this.logger.error(
+      `Job #${job.id} (${job.name}) falló en el intento ${job.attemptsMade}/${job.opts?.attempts || 3}: ${error.message}`,
+      error.stack,
+    );
+  }
+
+  @OnWorkerEvent('error')
+  onError(error: Error) {
+    this.logger.error(
+      `Error en worker de blockchain-queue: ${error.message}`,
+      error.stack,
+    );
   }
 
   /**
@@ -121,17 +148,22 @@ export class BlockchainProcessor extends WorkerHost {
       this.logger.log(
         `[Paso D] Enviando transacción on-chain al contrato inteligente...`,
       );
-      const receipt =
-        await this.blockchainService.registerBatchWeighed(
-          batchId,
-          ipfsCid,
-          collectorWallet,
-          householdWallets,
-          materialCodes,
-          weightsGrams,
-        );
+      const receipt = await this.blockchainService.registerBatchWeighed(
+        batchId,
+        ipfsCid,
+        collectorWallet,
+        householdWallets,
+        materialCodes,
+        weightsGrams,
+      );
 
-      const txHash = receipt?.hash || `0xmock${Date.now().toString(16)}`;
+      if (!receipt?.hash) {
+        throw new Error(
+          `No se obtuvo un hash de transacción válido para el lote ${batchId}`,
+        );
+      }
+
+      const txHash = receipt.hash;
 
       // -------------------------------------------------------------------
       // PASO E: Actualizar estado del lote a RECEIVED en PostgreSQL y cargar inventario
@@ -207,22 +239,26 @@ export class BlockchainProcessor extends WorkerHost {
       });
 
       // Notificar al recolector mediante push FCM
-      this.notificationsService.sendPushNotification(
-        collectorId,
-        '♻️ Lote Procesado y Pesado',
-        'Tu lote ha sido recibido y pesado por el Centro de Acopio. Tus EcoTokens han sido acuñados en Stellar.',
-        { batchId, txHash },
-      ).catch(() => {});
+      this.notificationsService
+        .sendPushNotification(
+          collectorId,
+          '♻️ Lote Procesado y Pesado',
+          'Tu lote ha sido recibido y pesado por el Centro de Acopio. Tus EcoTokens han sido acuñados en Stellar.',
+          { batchId, txHash },
+        )
+        .catch(() => {});
 
       // Notificar a todos los hogares participantes mediante push FCM
       if (Array.isArray(validHouseholdIds)) {
         for (const hhId of validHouseholdIds) {
-          this.notificationsService.sendPushNotification(
-            hhId,
-            '♻️ EcoTokens Acuñados',
-            'El material de tu entrega ha sido pesado y procesado. ¡Has recibido tus EcoTokens!',
-            { batchId, txHash },
-          ).catch(() => {});
+          this.notificationsService
+            .sendPushNotification(
+              hhId,
+              '♻️ EcoTokens Acuñados',
+              'El material de tu entrega ha sido pesado y procesado. ¡Has recibido tus EcoTokens!',
+              { batchId, txHash },
+            )
+            .catch(() => {});
         }
       }
 
@@ -271,16 +307,15 @@ export class BlockchainProcessor extends WorkerHost {
       `[redemption-transfer] De: ${fromWallet || 'N/A'} (User: ${fromUserId}) -> A: ${toWallet || 'N/A'} (Store User: ${toStoreUserId}), Monto: ${tokenAmount} EcoTokens`,
     );
 
-    let txHash: string;
-    let explorerUrl: string;
-
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: fromUserId },
         select: { encryptedPrivateKey: true },
       });
       if (!user || !user.encryptedPrivateKey) {
-        throw new Error(`El usuario ${fromUserId} no posee una clave privada registrada`);
+        throw new Error(
+          `El usuario ${fromUserId} no posee una clave privada registrada`,
+        );
       }
 
       const secretKey =
@@ -290,17 +325,16 @@ export class BlockchainProcessor extends WorkerHost {
         user.encryptedPrivateKey,
         secretKey,
       );
-
-      let nonceVal = 0n;
-      try {
-        nonceVal = await this.blockchainService.getNonceOnChain(fromWallet);
-      } catch (err: any) {
-        this.logger.warn(
-          `Fallo al obtener nonce on-chain para ${fromWallet}, usando fallback 0: ${err.message}`,
+      if (!decryptedSecret) {
+        throw new Error(
+          `No se pudo descifrar la clave privada del usuario ${fromUserId}`,
         );
       }
+
+      const nonceVal = await this.blockchainService.getNonceOnChain(fromWallet);
       const amountBig = BigInt(Math.round(tokenAmount * 10000000));
-      const contractId = this.configService.get<string>('ECOTOKEN_CONTRACT_ID') || '';
+      const contractId =
+        this.configService.get<string>('ECOTOKEN_CONTRACT_ID') || '';
 
       const fromScVal = Address.fromString(fromWallet).toScVal();
       const toScVal = Address.fromString(toWallet).toScVal();
@@ -334,17 +368,15 @@ export class BlockchainProcessor extends WorkerHost {
         signature,
       );
 
-      txHash = receipt.hash;
-      explorerUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
-    } catch (err: any) {
-      this.logger.error(
-        `Error enviando transacción de firma delegada para canje ${redemptionId}: ${err.message}`,
-      );
-      txHash = `mockredempt${Date.now().toString(16)}${Math.random().toString(16).substring(2, 10)}`;
-      explorerUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
-    }
+      if (!receipt?.hash) {
+        throw new Error(
+          `No se obtuvo un hash de transacción válido para el canje ${redemptionId}`,
+        );
+      }
 
-    try {
+      const txHash = receipt.hash;
+      const explorerUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
+
       await this.prisma.redemptionTransaction.update({
         where: { id: redemptionId },
         data: { txHash },
@@ -362,21 +394,23 @@ export class BlockchainProcessor extends WorkerHost {
           tokenAmount,
         },
       );
-    } catch (dbError: any) {
-      this.logger.error(
-        `Error actualizando txHash del canje ${redemptionId}: ${dbError.message}`,
-      );
-    }
 
-    this.logger.log(
-      `[redemption-transfer] ✅ Transacción de canje confirmada en Stellar Testnet. Tx Hash: ${txHash}`,
-    );
-    return {
-      success: true,
-      redemptionId,
-      txHash,
-      explorerUrl,
-    };
+      this.logger.log(
+        `[redemption-transfer] ✅ Transacción de canje confirmada en Stellar Testnet. Tx Hash: ${txHash}`,
+      );
+      return {
+        success: true,
+        redemptionId,
+        txHash,
+        explorerUrl,
+      };
+    } catch (err: any) {
+      this.logger.error(
+        `Error fatal procesando canje ${redemptionId}: ${err.message}`,
+        err.stack,
+      );
+      throw err;
+    }
   }
 
   private async processSettlementTransfer(job: Job<any>): Promise<any> {
@@ -389,21 +423,77 @@ export class BlockchainProcessor extends WorkerHost {
       `[settlement-transfer] De: ${fromWallet || 'N/A'} (Store User: ${fromStoreUserId}) -> A la tesorería: ${toWallet || 'N/A'}, Monto: ${tokenAmount} EcoTokens`,
     );
 
-    // Simular retraso de red de blockchain
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      let txHash: string;
 
-    const txHash = `settle${Date.now().toString(16)}${Math.random().toString(16).substring(2, 10)}`;
-    const explorerUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
+      const user = fromStoreUserId
+        ? await this.prisma.user.findUnique({
+            where: { id: fromStoreUserId },
+            select: { encryptedPrivateKey: true },
+          })
+        : null;
 
-    this.logger.log(
-      `[settlement-transfer] ✅ Transacción de liquidación confirmada en Stellar Testnet. Tx Hash: ${txHash}`,
-    );
-    return {
-      success: true,
-      settlementId,
-      txHash,
-      explorerUrl,
-    };
+      if (user?.encryptedPrivateKey) {
+        const secretKey =
+          this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
+          'livora_wallet_aes256_secret!';
+        const decryptedSecret = CryptoUtil.decrypt(
+          user.encryptedPrivateKey,
+          secretKey,
+        );
+        if (!decryptedSecret) {
+          throw new Error(
+            `No se pudo descifrar la clave privada del usuario de tienda ${fromStoreUserId}`,
+          );
+        }
+
+        const receipt = await this.blockchainService.executeSubsidizedTransfer(
+          decryptedSecret,
+          toWallet,
+          Number(tokenAmount),
+        );
+        if (!receipt?.hash) {
+          throw new Error(
+            `No se obtuvo hash de transacción para la liquidación ${settlementId}`,
+          );
+        }
+        txHash = receipt.hash;
+      } else {
+        const nonceVal =
+          await this.blockchainService.getNonceOnChain(fromWallet);
+        const receipt = await this.blockchainService.executeDelegatedTransfer(
+          fromWallet,
+          toWallet,
+          tokenAmount.toString(),
+          Number(nonceVal),
+          Buffer.alloc(32),
+          Buffer.alloc(64),
+        );
+        if (!receipt?.hash) {
+          throw new Error(
+            `No se obtuvo hash de transacción para la liquidación ${settlementId}`,
+          );
+        }
+        txHash = receipt.hash;
+      }
+
+      const explorerUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
+      this.logger.log(
+        `[settlement-transfer] ✅ Transacción de liquidación confirmada en Stellar Testnet. Tx Hash: ${txHash}`,
+      );
+      return {
+        success: true,
+        settlementId,
+        txHash,
+        explorerUrl,
+      };
+    } catch (err: any) {
+      this.logger.error(
+        `Error fatal procesando liquidación ${settlementId}: ${err.message}`,
+        err.stack,
+      );
+      throw err;
+    }
   }
 
   /**
@@ -468,10 +558,9 @@ export class BlockchainProcessor extends WorkerHost {
     householdIds: string[],
   ): Promise<{ collectorWallet: string; householdWallets: string[] }> {
     const workerAddress = this.blockchainService.getWorkerAddress();
-    const fallbackAddress =
-      StrKey.isValidEd25519PublicKey(workerAddress)
-        ? workerAddress
-        : '';
+    const fallbackAddress = StrKey.isValidEd25519PublicKey(workerAddress)
+      ? workerAddress
+      : '';
 
     // 1. Resolver billetera del Recolector
     let collectorWallet = fallbackAddress;

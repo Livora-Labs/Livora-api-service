@@ -8,5 +8,7 @@ if (sentryDsn) {
   });
   console.log('Sentry inicializado con éxito desde instrument.ts');
 } else {
-  console.warn('Sentry DSN no configurado en instrument.ts. Monitoreo de errores desactivado.');
+  console.warn(
+    'Sentry DSN no configurado en instrument.ts. Monitoreo de errores desactivado.',
+  );
 }

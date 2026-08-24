@@ -14,7 +14,9 @@ export class AppController {
   }
 
   @Get('debug-sentry')
-  @ApiOperation({ summary: 'Endpoint de diagnóstico para probar captura de errores en Sentry' })
+  @ApiOperation({
+    summary: 'Endpoint de diagnóstico para probar captura de errores en Sentry',
+  })
   debugSentry() {
     if (process.env.NODE_ENV === 'production') {
       throw new NotFoundException('Cannot GET /debug-sentry');

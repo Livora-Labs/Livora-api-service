@@ -10,6 +10,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -20,6 +21,7 @@ import { CreateStoreProfileDto } from './dto/create-store-profile.dto';
 import { CreateQrRedemptionDto } from './dto/create-qr-redemption.dto';
 import { CreateSettlementRequestDto } from './dto/create-settlement-request.dto';
 import { PaySettlementDto } from './dto/pay-settlement.dto';
+import { ConfirmRedemptionDto } from './dto/confirm-redemption.dto';
 
 @ApiTags('Stores')
 @ApiBearerAuth()
@@ -47,6 +49,7 @@ export class StoresController {
     return this.storesService.getProfile(userId);
   }
 
+  @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('redemptions/qr')
   @Roles(Role.TIENDA)
   @ApiOperation({
@@ -68,6 +71,7 @@ export class StoresController {
     return this.storesService.getRedemptionDetails(qrCodeRef);
   }
 
+  @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('redemptions/confirm/:qrCodeRef')
   @Roles(Role.HOGAR, Role.RECOLECTOR)
   @ApiOperation({
@@ -76,10 +80,12 @@ export class StoresController {
   async confirmRedemption(
     @CurrentUser('id') buyerUserId: string,
     @Param('qrCodeRef') qrCodeRef: string,
+    @Body() dto: ConfirmRedemptionDto,
   ) {
-    return this.storesService.confirmRedemption(buyerUserId, qrCodeRef);
+    return this.storesService.confirmRedemption(buyerUserId, qrCodeRef, dto);
   }
 
+  @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('settlements')
   @Roles(Role.TIENDA)
   @ApiOperation({
@@ -93,6 +99,7 @@ export class StoresController {
     return this.storesService.requestSettlement(user.id, dto);
   }
 
+  @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Patch('settlements/:id/pay')
   @Roles(Role.ADMIN)
   @ApiOperation({
