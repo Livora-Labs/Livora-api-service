@@ -110,7 +110,7 @@ export class AdminService {
   async getBlockchainHealth() {
     return {
       status: 'healthy',
-      network: 'Arbitrum Sepolia',
+      network: 'Stellar Testnet',
       latency: '45ms',
       blockNumber: 1289450,
       timestamp: new Date().toISOString(),

@@ -189,14 +189,32 @@ export class AuthService {
 
     // 5. Crear usuario en Supabase Auth
     const supabaseClient = this.supabaseService.getClient();
-    const { data: authData, error: authError } =
+    let { data: authData, error: authError } =
       await supabaseClient.auth.admin.createUser({
         email: registerDto.email,
         password: registerDto.password,
         email_confirm: true,
       });
 
-    if (authError || !authData.user) {
+    // Si Supabase indica que el correo ya existe, puede ser un usuario huérfano
+    // de un registro previo incompleto (OTP verificado pero DB falló). Lo eliminamos
+    // de Supabase Auth y reintentamos la creación para completar el flujo.
+    if (authError && authError.message?.toLowerCase().includes('already been registered')) {
+      const { data: existingList } = await supabaseClient.auth.admin.listUsers({ perPage: 1000 });
+      const orphan = existingList?.users?.find((u: any) => u.email === registerDto.email);
+      if (orphan) {
+        await supabaseClient.auth.admin.deleteUser(orphan.id);
+        const retry = await supabaseClient.auth.admin.createUser({
+          email: registerDto.email,
+          password: registerDto.password,
+          email_confirm: true,
+        });
+        authData = retry.data;
+        authError = retry.error;
+      }
+    }
+
+    if (authError || !authData?.user) {
       throw new BadRequestException(
         authError?.message || 'Error al registrar usuario en Supabase Auth',
       );

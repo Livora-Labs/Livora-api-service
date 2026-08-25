@@ -30,6 +30,12 @@ model User {
   deletedAt           DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+  name                String?
+  phone               String?
+  address             String?
+  latitude            Float?
+  longitude           Float?
+  marketingAccepted   Boolean  @default(false)
 
   householdRequests CollectionRequest[] @relation("HouseholdRequests")
   collectorRequests CollectionRequest[] @relation("CollectorRequests")

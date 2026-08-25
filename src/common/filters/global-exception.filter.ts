@@ -93,12 +93,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
             errorCode = 'validation_error';
           }
           invalidParams = resObj.message.map((msg: unknown) => {
-            if (typeof msg === 'string') {
-              const firstSpace = msg.indexOf(' ');
-              const name =
-                firstSpace > 0 ? msg.substring(0, firstSpace) : 'field';
-              return { name, reason: msg };
-            }
+            // class-validator emite ValidationError objects con { property, constraints }
             if (typeof msg === 'object' && msg !== null) {
               const msgObj = msg as Record<string, unknown>;
               const name =
@@ -108,12 +103,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
                 (typeof msgObj.field === 'string' ? msgObj.field : undefined) ||
                 (typeof msgObj.name === 'string' ? msgObj.name : undefined) ||
                 'field';
-              let reason = 'Invalid value';
+              let reason = 'Valor inválido';
               if (
                 msgObj.constraints &&
                 typeof msgObj.constraints === 'object' &&
                 msgObj.constraints !== null
               ) {
+                // Tomar solo el primer mensaje de constraint para no duplicar
                 const constraintValues = Object.values(
                   msgObj.constraints as Record<string, string>,
                 );
@@ -125,10 +121,19 @@ export class GlobalExceptionFilter implements ExceptionFilter {
               }
               return { name, reason };
             }
+            // Fallback: string plano — no parsear la primera palabra (rompe con idiomas)
+            if (typeof msg === 'string') {
+              return { name: 'field', reason: msg };
+            }
             return { name: 'field', reason: String(msg) };
           });
         } else if (typeof resObj.message === 'string') {
-          detail = resObj.message;
+          // Humanizar mensajes internos de Fastify (ej. "Cannot GET /ruta")
+          if (/^Cannot (GET|POST|PATCH|PUT|DELETE|HEAD)/i.test(resObj.message)) {
+            detail = 'El recurso solicitado no existe';
+          } else {
+            detail = resObj.message;
+          }
         } else if (typeof resObj.detail === 'string') {
           detail = resObj.detail;
         }

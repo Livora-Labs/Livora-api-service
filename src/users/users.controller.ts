@@ -18,6 +18,8 @@ import {
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UsersService } from './users.service';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -27,20 +29,61 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get('me')
-  @ApiOperation({ summary: 'Perfil del usuario autenticado (rol y wallet)' })
+  @ApiOperation({ summary: 'Perfil completo del usuario autenticado' })
   @ApiResponse({ status: 200, description: 'Perfil del usuario' })
   async getMe(@CurrentUser('id') userId: string) {
     const u = await this.usersService.findById(userId);
     if (!u) {
       throw new NotFoundException('Usuario no encontrado');
     }
+    const audits = await this.usersService.getConsentAudits(userId);
+    const lastAudit = audits[0] || null;
+
     return {
       id: u.id,
       email: u.email,
       role: u.role,
       walletAddress: u.walletAddress,
       createdAt: u.createdAt,
+      name: u.name,
+      phone: u.phone,
+      address: u.address,
+      latitude: u.latitude,
+      longitude: u.longitude,
+      marketingAccepted: u.marketingAccepted,
+      termsVersion: lastAudit?.termsVersion || '2.0.0',
+      privacyVersion: lastAudit?.privacyVersion || '2.0.0',
     };
+  }
+
+  @Get('me/dashboard')
+  @ApiOperation({ summary: 'Métricas, wallet y solicitud activa para el inicio' })
+  @ApiResponse({ status: 200, description: 'Datos consolidados para el dashboard' })
+  async getDashboard(@CurrentUser('id') userId: string) {
+    return this.usersService.getDashboard(userId);
+  }
+
+  @Patch('me')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Actualizar campos del perfil del usuario' })
+  @ApiResponse({ status: 200, description: 'Perfil actualizado con éxito' })
+  async updateProfile(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpdateUserDto,
+  ) {
+    await this.usersService.update(userId, dto);
+    return { success: true, message: 'Perfil actualizado con éxito' };
+  }
+
+  @Patch('me/password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cambiar contraseña con validación de complejidad' })
+  @ApiResponse({ status: 200, description: 'Contraseña cambiada con éxito' })
+  async changePassword(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.usersService.changePassword(userId, dto.newPassword);
   }
 
   @Patch('fcm-token')

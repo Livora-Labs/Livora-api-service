@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,8 +11,10 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { RegisterDto } from '../auth/dto/register.dto';
 import { CryptoUtil } from '../common/utils/crypto.util';
 import { Keypair } from '@stellar/stellar-sdk';
-import { User, ConsentAudit } from '@prisma/client';
+import { User, ConsentAudit, RequestStatus, Role } from '@prisma/client';
 import * as crypto from 'crypto';
+import { WalletsService } from '../wallets/wallets.service';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
@@ -21,6 +24,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly supabaseService: SupabaseService,
+    private readonly walletsService: WalletsService,
   ) {}
 
   async findByEmail(email: string): Promise<User | null> {
@@ -68,6 +72,7 @@ export class UsersService {
         role: registerDto.role,
         walletAddress,
         encryptedPrivateKey,
+        marketingAccepted: registerDto.marketingAccepted ?? false,
       },
     });
 
@@ -106,6 +111,12 @@ export class UsersService {
           receptionPin: null,
           isActive: false,
           deletedAt: new Date(),
+          name: null,
+          phone: null,
+          address: null,
+          latitude: null,
+          longitude: null,
+          marketingAccepted: false,
         },
       });
 
@@ -179,5 +190,130 @@ export class UsersService {
       where: { userId },
       orderBy: { consentedAt: 'desc' },
     });
+  }
+
+  async update(id: string, dto: UpdateUserDto) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user || !user.isActive || user.deletedAt) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        name: dto.name !== undefined ? dto.name : undefined,
+        phone: dto.phone !== undefined ? dto.phone : undefined,
+        address: dto.address !== undefined ? dto.address : undefined,
+        latitude: dto.latitude !== undefined ? dto.latitude : undefined,
+        longitude: dto.longitude !== undefined ? dto.longitude : undefined,
+        marketingAccepted: dto.marketingAccepted !== undefined ? dto.marketingAccepted : undefined,
+      },
+    });
+  }
+
+  async changePassword(id: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user || !user.isActive || user.deletedAt) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+    const supabaseClient = this.supabaseService.getClient();
+    const { error } = await supabaseClient.auth.admin.updateUserById(id, {
+      password: newPassword,
+    });
+    if (error) {
+      throw new BadRequestException(
+        error.message || 'Error al actualizar la contraseña en Supabase',
+      );
+    }
+    return { success: true, message: 'Contraseña actualizada con éxito' };
+  }
+
+  async getDashboard(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.isActive || user.deletedAt) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    // 1. Solicitud activa
+    const activeRequest = await this.prisma.collectionRequest.findFirst({
+      where: {
+        householdId: userId,
+        status: { in: [RequestStatus.PENDING, RequestStatus.ACCEPTED] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    let mappedActiveRequest: any = null;
+    if (activeRequest) {
+      const items = (activeRequest.itemsEstimated as Record<string, number>) || {};
+      const estimatedKg = Object.values(items).reduce((sum, val) => sum + val, 0);
+      mappedActiveRequest = {
+        id: activeRequest.id,
+        pin: activeRequest.verificationPin,
+        status: activeRequest.status,
+        estimatedKg: Number(estimatedKg.toFixed(2)),
+        createdAt: activeRequest.createdAt,
+      };
+    }
+
+    // 2. Calcular las métricas ESG reales
+    const completedRequests = await this.prisma.collectionRequest.findMany({
+      where: {
+        householdId: userId,
+        status: RequestStatus.COMPLETED,
+        batchId: { not: null },
+      },
+      include: {
+        batch: true,
+      },
+    });
+
+    let totalKgRecycled = 0;
+    let co2SavedKg = 0;
+    const totalCollections = completedRequests.length;
+
+    const EMISSION_FACTORS: Record<string, number> = {
+      PET: 3.0,
+      CARTON: 1.5,
+      CARTÓN: 1.5,
+      VIDRIO: 0.8,
+      PLASTICO: 2.5,
+      PLÁSTICO: 2.5,
+      ALUMINIO: 9.0,
+      HDPE: 2.5,
+    };
+
+    for (const r of completedRequests) {
+      if (r.batch?.status === 'RECEIVED') {
+        const mats = (r.batch.materialsActual as Record<string, number>) || {};
+        const siblings = await this.prisma.collectionRequest.count({
+          where: { batchId: r.batchId },
+        });
+        const divisor = siblings || 1;
+
+        for (const [mat, wt] of Object.entries(mats)) {
+          const userWt = wt / divisor;
+          totalKgRecycled += userWt;
+          const factor = EMISSION_FACTORS[mat.toUpperCase()] || 2.0;
+          co2SavedKg += userWt * factor;
+        }
+      }
+    }
+
+    // 3. Balance de la Wallet
+    const balanceRes = await this.walletsService.getBalance(userId);
+
+    return {
+      activeRequest: mappedActiveRequest,
+      esgMetrics: {
+        totalKgRecycled: Number(totalKgRecycled.toFixed(2)),
+        co2SavedKg: Number(co2SavedKg.toFixed(2)),
+        totalCollections,
+      },
+      wallet: {
+        publicKey: user.walletAddress || '',
+        network: this.configService.get<string>('STELLAR_NETWORK_PASSPHRASE') || 'Testnet',
+        balance: balanceRes.balance,
+      },
+    };
   }
 }

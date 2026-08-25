@@ -1,19 +1,20 @@
 import {
-  Body,
   Controller,
   Post,
-  UploadedFile,
+  Req,
+  Body,
   UseGuards,
-  UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiConsumes,
   ApiOperation,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { FastifyRequest } from 'fastify';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { UploadsService } from './uploads.service';
 
@@ -30,17 +31,34 @@ export class UploadsController {
       'Subir un archivo (foto de recolección, documento KYC o recibo). Devuelve la URL pública.',
   })
   @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+        purpose: {
+          type: 'string',
+          enum: ['collection', 'kyc', 'receipt'],
+          default: 'collection',
+        },
+      },
+      required: ['file'],
+    },
+  })
   @ApiResponse({
     status: 201,
     description: '{ url, purpose, mimeType, size }',
   })
-  @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
-  )
   async upload(
-    @UploadedFile() file: Express.Multer.File,
+    @Req() req: FastifyRequest & { incomingFile?: Express.Multer.File },
     @Body('purpose') purpose?: string,
   ) {
+    const file = req.incomingFile;
+    if (!file) {
+      throw new BadRequestException(
+        'No se recibió ningún archivo. Envía la imagen en el campo "file" como multipart/form-data.',
+      );
+    }
     return this.uploadsService.upload(file, purpose);
   }
 }

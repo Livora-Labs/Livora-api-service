@@ -31,8 +31,8 @@ export class StoresController {
   constructor(private readonly storesService: StoresService) {}
 
   @Post('profile')
-  @Roles(Role.TIENDA)
-  @ApiOperation({ summary: 'Crear perfil de tienda (Rol: TIENDA)' })
+  @Roles(Role.TIENDA, Role.ALMACEN)
+  @ApiOperation({ summary: 'Crear perfil de tienda (Rol: TIENDA / ALMACEN)' })
   async createProfile(
     @CurrentUser() user: any,
     @Body() dto: CreateStoreProfileDto,
@@ -40,10 +40,20 @@ export class StoresController {
     return this.storesService.createProfile(user.id, dto);
   }
 
+  @Patch('profile')
+  @Roles(Role.TIENDA, Role.ALMACEN)
+  @ApiOperation({ summary: 'Actualizar perfil de tienda (Rol: TIENDA / ALMACEN)' })
+  async updateProfile(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CreateStoreProfileDto,
+  ) {
+    return this.storesService.updateProfile(userId, dto);
+  }
+
   @Get('profile')
-  @Roles(Role.TIENDA)
+  @Roles(Role.TIENDA, Role.ALMACEN)
   @ApiOperation({
-    summary: 'Obtener perfil de tienda del usuario autenticado (Rol: TIENDA)',
+    summary: 'Obtener perfil de tienda del usuario autenticado (Rol: TIENDA / ALMACEN)',
   })
   async getProfile(@CurrentUser('id') userId: string) {
     return this.storesService.getProfile(userId);
@@ -51,9 +61,9 @@ export class StoresController {
 
   @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('redemptions/qr')
-  @Roles(Role.TIENDA)
+  @Roles(Role.TIENDA, Role.ALMACEN)
   @ApiOperation({
-    summary: 'Generar código QR para canje de EcoTokens (Rol: TIENDA)',
+    summary: 'Generar código QR para canje de EcoTokens (Rol: TIENDA / ALMACEN)',
   })
   async generateQrRedemption(
     @CurrentUser() user: any,
@@ -87,10 +97,10 @@ export class StoresController {
 
   @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('settlements')
-  @Roles(Role.TIENDA)
+  @Roles(Role.TIENDA, Role.ALMACEN)
   @ApiOperation({
     summary:
-      'Solicitar liquidación de EcoTokens acumulados a FIAT (Rol: TIENDA)',
+      'Solicitar liquidación de EcoTokens acumulados a FIAT (Rol: TIENDA / ALMACEN)',
   })
   async requestSettlement(
     @CurrentUser() user: any,
@@ -113,18 +123,18 @@ export class StoresController {
   }
 
   @Get('redemptions')
-  @Roles(Role.TIENDA)
+  @Roles(Role.TIENDA, Role.ALMACEN)
   @ApiOperation({
-    summary: 'Obtener historial de canjes de la tienda (Rol: TIENDA)',
+    summary: 'Obtener historial de canjes de la tienda (Rol: TIENDA / ALMACEN)',
   })
   async getRedemptions(@CurrentUser('id') userId: string) {
     return this.storesService.getRedemptions(userId);
   }
 
   @Get('settlements/history')
-  @Roles(Role.TIENDA)
+  @Roles(Role.TIENDA, Role.ALMACEN)
   @ApiOperation({
-    summary: 'Obtener historial de liquidaciones de la tienda (Rol: TIENDA)',
+    summary: 'Obtener historial de liquidaciones de la tienda (Rol: TIENDA / ALMACEN)',
   })
   async getSettlements(@CurrentUser('id') userId: string) {
     return this.storesService.getSettlements(userId);

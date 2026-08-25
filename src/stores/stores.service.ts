@@ -356,6 +356,39 @@ export class StoresService {
     return profile;
   }
 
+  /**
+   * Crea o actualiza el perfil de tienda
+   */
+  async updateProfile(userId: string, dto: CreateStoreProfileDto) {
+    const profile = await this.prisma.storeProfile.findUnique({
+      where: { userId },
+    });
+
+    if (!profile) {
+      return this.prisma.storeProfile.create({
+        data: {
+          userId,
+          businessName: dto.businessName,
+          ruc: dto.ruc,
+          address: dto.address,
+          bankAccount: dto.bankAccount,
+          logoUrl: dto.logoUrl,
+        },
+      });
+    }
+
+    return this.prisma.storeProfile.update({
+      where: { id: profile.id },
+      data: {
+        businessName: dto.businessName,
+        ruc: dto.ruc,
+        address: dto.address,
+        bankAccount: dto.bankAccount,
+        logoUrl: dto.logoUrl,
+      },
+    });
+  }
+
   async getRedemptions(userId: string) {
     const storeProfile = await this.prisma.storeProfile.findUnique({
       where: { userId },
