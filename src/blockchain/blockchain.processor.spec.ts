@@ -12,12 +12,12 @@ import { CryptoUtil } from '../common/utils/crypto.util';
 
 describe('BlockchainProcessor', () => {
   let processor: BlockchainProcessor;
-  let prisma: jest.Mocked<PrismaService>;
-  let websocketsService: jest.Mocked<WebsocketsService>;
-  let ipfsService: jest.Mocked<IpfsService>;
-  let blockchainService: jest.Mocked<BlockchainService>;
-  let notificationsService: jest.Mocked<NotificationsService>;
-  let configService: jest.Mocked<ConfigService>;
+  let prisma: any;
+  let websocketsService: any;
+  let ipfsService: any;
+  let blockchainService: any;
+  let notificationsService: any;
+  let configService: any;
 
   const fromWallet = Keypair.random().publicKey();
   const toWallet = Keypair.random().publicKey();

@@ -1,7 +1,9 @@
 # AUDITORÍA DE ARQUITECTURA Y ESTADO ACTUAL (AS-IS): BACKEND LIVORA (NESTJS + STELLAR)
 
+> 📘 **Documento Oficial arc42:** Para consultar la especificación canónica y completa de arquitectura del sistema en sus 12 secciones oficiales bajo el estándar arc42, consulte el archivo [`docs/arc42-architecture-report.md`](arc42-architecture-report.md).
+
 **Rol:** Principal Backend Architect & Staff Engineer  
-**Fecha:** 2026-08-24  
+**Fecha:** 2026-08-24 (Actualizado: 2026-08-29)  
 **Proyecto:** Livora API Service (Migración EVM -> Stellar/Soroban)  
 
 ---

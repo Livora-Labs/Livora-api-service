@@ -13,8 +13,8 @@
 Esta especificación documenta los tres módulos transversales finales que cierran el flujo funcional y financiero de la plataforma de reciclaje trazable Livora:
 
 1. **Módulo de Billeteras y Saldos (`WalletsModule`):** 
-   - Proporciona a los usuarios autenticados la lectura en tiempo real de sus saldos de EcoTokens (ERC-20) alojados en la red Arbitrum Sepolia.
-   - Implementa el patrón **Gas-Subsidized Relayer**, donde el backend actúa como pagador de comisiones de red utilizando la Billetera Maestra (`MASTER_WALLET_PRIVATE_KEY` / `WORKER_PRIVATE_KEY`), abstrayendo al usuario final de los costos de gas en ETH.
+   - Proporciona a los usuarios autenticados la lectura en tiempo real de sus saldos de EcoTokens (SEP-41) alojados en la red Stellar Testnet mediante Soroban RPC.
+   - Implementa el patrón **Fee-Subsidized Relayer**, donde el backend actúa como pagador de comisiones de red utilizando la clave secreta del Worker (`WORKER_SECRET_KEY`), abstrayendo al usuario final de los costos de tarifas en XLM.
 
 2. **Módulo de Notificaciones (`NotificationsModule`):**
    - Proporciona persistencia y gestión de alertas y mensajes del sistema (información, éxito y advertencias) vinculados a cada usuario.

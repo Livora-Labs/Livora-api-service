@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { Role } from '@prisma/client';
 import { IpfsService } from '../blockchain/services/ipfs.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { CreateCertificateDto } from '../certificates/dto/create-certificate.dto';
@@ -120,34 +121,38 @@ export class SalesService {
   }
 
   /**
-   * GET /certificates (Rol: EMPRESA_B2B)
+   * GET /certificates (Rol: EMPRESA_B2B / ADMIN)
    */
-  async getCertificates(buyerId: string, query: PaginationQueryDto) {
+  async getCertificates(userId: string, role: string, query: PaginationQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const skip = (page - 1) * limit;
 
+    const where = role === Role.ADMIN ? {} : { buyerId: userId };
+
     return this.prisma.certificate.findMany({
-      where: { buyerId },
+      where,
       skip,
       take: limit,
       orderBy: { createdAt: 'desc' },
+      include: { buyer: { select: { id: true, email: true, name: true } } },
     });
   }
 
   /**
-   * GET /certificates/:id (Rol: EMPRESA_B2B)
+   * GET /certificates/:id (Rol: EMPRESA_B2B / ADMIN)
    */
-  async getCertificateById(id: string, buyerId: string) {
+  async getCertificateById(id: string, userId: string, role: string) {
     const certificate = await this.prisma.certificate.findUnique({
       where: { id },
+      include: { buyer: { select: { id: true, email: true, name: true } } },
     });
 
     if (!certificate) {
       throw new NotFoundException('Certificado no encontrado');
     }
 
-    if (certificate.buyerId !== buyerId) {
+    if (role !== Role.ADMIN && certificate.buyerId !== userId) {
       throw new ForbiddenException(
         'No tienes permisos para ver este certificado',
       );

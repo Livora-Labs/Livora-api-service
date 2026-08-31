@@ -56,6 +56,8 @@ export class BatchesService {
     } else if (role === Role.CENTRO_ACOPIO || role === Role.ALMACEN) {
       // Forzar por seguridad que solo consulte los lotes destinados a su centro de acopio o almacén
       where.destinationCenterId = userId;
+    } else if (role === Role.ADMIN) {
+      // Admin tiene visibilidad global de todos los lotes
     } else {
       throw new ForbiddenException('Rol no autorizado para listar lotes');
     }

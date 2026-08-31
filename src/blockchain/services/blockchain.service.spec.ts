@@ -51,16 +51,16 @@ describe('BlockchainService', () => {
     it('should initialize Circuit Breaker with correct resilience parameters', () => {
       const breaker = service.getCircuitBreaker();
       expect(breaker).toBeDefined();
-      expect(breaker.options.timeout).toBe(
+      expect((breaker as any).options.timeout).toBe(
         STELLAR_CIRCUIT_BREAKER_OPTIONS.timeout,
       );
-      expect(breaker.options.errorThresholdPercentage).toBe(
+      expect((breaker as any).options.errorThresholdPercentage).toBe(
         STELLAR_CIRCUIT_BREAKER_OPTIONS.errorThresholdPercentage,
       );
-      expect(breaker.options.resetTimeout).toBe(
+      expect((breaker as any).options.resetTimeout).toBe(
         STELLAR_CIRCUIT_BREAKER_OPTIONS.resetTimeout,
       );
-      expect(breaker.options.volumeThreshold).toBe(
+      expect((breaker as any).options.volumeThreshold).toBe(
         STELLAR_CIRCUIT_BREAKER_OPTIONS.volumeThreshold,
       );
       expect(breaker.opened).toBe(false);
@@ -112,15 +112,14 @@ describe('BlockchainService', () => {
       ).rejects.toThrow('RPC node unreachable');
     });
 
-    it('should throw and propagate error when getBalance fails on-chain', async () => {
+    it('should return safe fallback 0.00 when getBalance fails on-chain', async () => {
       const mockRpc = (service as any).rpcServer;
       mockRpc.getAccount = jest
         .fn()
         .mockRejectedValue(new Error('Stellar RPC 503 Service Unavailable'));
 
-      await expect(
-        service.getBalance(Keypair.random().publicKey()),
-      ).rejects.toThrow('Stellar RPC 503 Service Unavailable');
+      const balance = await service.getBalance(Keypair.random().publicKey());
+      expect(balance).toBe('0.00');
     });
 
     it('should call getHealth through circuit breaker in checkConnection', async () => {

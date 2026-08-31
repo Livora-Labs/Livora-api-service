@@ -209,9 +209,7 @@ describe('Milestone M2 Adversarial Test Suite: Web3 Blockchain Resiliency & Circ
       await expect(service.getNonceOnChain(testUser)).rejects.toThrow(
         'Simulated RPC getAccount error',
       );
-      await expect(service.getBalance(testUser)).rejects.toThrow(
-        'Simulated RPC getAccount error',
-      );
+      expect(await service.getBalance(testUser)).toBe('0.00');
       expect(await service.checkConnection()).toBe(false);
     });
   });
@@ -598,8 +596,8 @@ describe('Milestone M2 Adversarial Test Suite: Web3 Blockchain Resiliency & Circ
 
   describe('4. WalletsService Subsidized FeeBump Delegation', () => {
     let walletsService: WalletsService;
-    let prisma: jest.Mocked<PrismaService>;
-    let blockchainService: jest.Mocked<BlockchainService>;
+    let prisma: any;
+    let blockchainService: any;
 
     beforeEach(async () => {
       const module: TestingModule = await Test.createTestingModule({

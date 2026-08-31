@@ -30,13 +30,13 @@ El **Módulo de Lotes (`BatchesModule`)** es el componente central en la arquite
                                                 [ BullMQ: blockchain-queue ]
                                                              │
                                                              ▼
-                                                  (Arbitrum Stylus Worker)
+                                                  (Stellar Soroban Worker)
 ```
 
 ### Principios Clave de Diseño
 
 1. **Trazabilidad On-Chain y Distribución de EcoTokens**: Cada lote consolida un conjunto de solicitudes de recolección (`CollectionRequest`). Este enlace directo preserva el origen exacto de los residuos y permite que, tras la verificación del pesaje industrial, los EcoTokens se distribuyan de forma equitativa y proporcional entre los hogares participantes y el recolector.
-2. **Desacoplamiento e Integración Asíncrona (HTTP 202 Accepted)**: El proceso de minado y emisión de transacciones en la blockchain de **Arbitrum Stylus** puede introducir latencia variable. Para garantizar una experiencia de usuario rápida y fluida en la báscula industrial, la API valida el lote, actualiza el estado local a `PROCESSING`, encola el trabajo en Redis vía **BullMQ** y responde de inmediato con HTTP 202 Accepted.
+2. **Desacoplamiento e Integración Asíncrona (HTTP 202 Accepted)**: El proceso de minado y emisión de transacciones en la blockchain de **Stellar Soroban** puede introducir latencia variable. Para garantizar una experiencia de usuario rápida y fluida en la báscula industrial, la API valida el lote, actualiza el estado local a `PROCESSING`, encola el trabajo en Redis vía **BullMQ** y responde de inmediato con HTTP 202 Accepted.
 3. **Idempotencia Rigurosa contra Pagos Duplicados**: El pesaje industrial dispara transacciones financieras y de incentivos. El módulo implementa un control de idempotencia estricto que rechaza cualquier reintento sobre lotes en estados `PROCESSING`, `RECEIVED` o `CONSOLIDATED` arrojando un `ConflictException` (HTTP 409 Conflict).
 
 ---

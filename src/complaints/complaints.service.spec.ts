@@ -32,13 +32,7 @@ interface MockComplaintRecord {
 
 describe('ComplaintsService', () => {
   let service: ComplaintsService;
-  let prismaMock: {
-    complaint: {
-      findMany: jest.Mock<Promise<MockComplaintRecord[]>, [any]>;
-      create: jest.Mock<Promise<MockComplaintRecord>, [any]>;
-      findUnique: jest.Mock<Promise<MockComplaintRecord | null>, [any]>;
-    };
-  };
+  let prismaMock: any;
   let mailServiceMock: {
     sendComplaintConfirmationEmail: jest.Mock<
       Promise<void>,

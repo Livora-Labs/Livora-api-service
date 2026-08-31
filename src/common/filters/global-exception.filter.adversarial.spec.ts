@@ -224,7 +224,7 @@ describe('Adversarial Stress Test: GlobalExceptionFilter (RFC 9457)', () => {
       const payload = getSentPayload(mockReply);
       expect(payload.type).toBe('https://api.livora.org/errors/bad_request');
       expect(payload.invalid_params).toEqual([
-        { name: 'username', reason: 'username must not be empty' },
+        { name: 'field', reason: 'username must not be empty' },
         { name: 'email', reason: 'email must be valid, email is required' },
         { name: 'age', reason: 'age must be at least 18' },
         { name: 'terms', reason: 'terms must be accepted' },

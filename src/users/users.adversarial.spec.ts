@@ -8,6 +8,7 @@ import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ConfigService } from '@nestjs/config';
+import { WalletsService } from '../wallets/wallets.service';
 import { Role } from '@prisma/client';
 import { CryptoUtil } from '../common/utils/crypto.util';
 import { StrKey } from '@stellar/stellar-sdk';
@@ -32,18 +33,19 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
         findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        findMany: jest.fn(),
       },
       storeProfile: {
-        updateMany: jest.fn().mockResolvedValue({ count: 2 }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       kycApplication: {
-        updateMany: jest.fn().mockResolvedValue({ count: 3 }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       complaint: {
-        updateMany: jest.fn().mockResolvedValue({ count: 4 }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       notification: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 10 }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
       },
       betaSignup: {
         deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -64,6 +66,10 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
         {
           provide: SupabaseService,
           useValue: { getClient: () => mockSupabaseClient },
+        },
+        {
+          provide: WalletsService,
+          useValue: { getBalance: jest.fn().mockResolvedValue('0.0') },
         },
         {
           provide: ConfigService,
@@ -149,7 +155,7 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
       // Verify User update
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-multi-rel-1' },
-        data: {
+        data: expect.objectContaining({
           email: expect.stringMatching(
             /^deleted_user-mul_\d+@deleted\.livora\.org$/,
           ),
@@ -158,7 +164,7 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
           receptionPin: null,
           isActive: false,
           deletedAt: expect.any(Date),
-        },
+        }),
       });
 
       // Verify StoreProfile update

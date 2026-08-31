@@ -42,28 +42,28 @@ export class SalesController {
   }
 
   @Get('certificates')
-  @Roles(Role.EMPRESA_B2B)
+  @Roles(Role.EMPRESA_B2B, Role.ADMIN)
   @ApiOperation({
     summary:
-      'Listar certificados ESG emitidos para la empresa B2B (Rol: EMPRESA_B2B)',
+      'Listar certificados ESG emitidos para la empresa B2B o todos para ADMIN (Rol: EMPRESA_B2B / ADMIN)',
   })
   async getCertificates(
-    @CurrentUser('id') buyerId: string,
+    @CurrentUser() user: any,
     @Query() query: PaginationQueryDto,
   ) {
-    return this.salesService.getCertificates(buyerId, query);
+    return this.salesService.getCertificates(user.id, user.role, query);
   }
 
   @Get('certificates/:id')
-  @Roles(Role.EMPRESA_B2B)
+  @Roles(Role.EMPRESA_B2B, Role.ADMIN)
   @ApiOperation({
-    summary: 'Obtener detalle de certificado ESG por ID (Rol: EMPRESA_B2B)',
+    summary: 'Obtener detalle de certificado ESG por ID (Rol: EMPRESA_B2B / ADMIN)',
   })
   async getCertificateById(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser('id') buyerId: string,
+    @CurrentUser() user: any,
   ) {
-    return this.salesService.getCertificateById(id, buyerId);
+    return this.salesService.getCertificateById(id, user.id, user.role);
   }
 
   @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })

@@ -40,10 +40,10 @@ export class BatchesController {
    * Devuelve el historial de lotes paginado con forzado de seguridad por rol.
    */
   @Get()
-  @Roles(Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
   @ApiOperation({
     summary:
-      'Listar historial de lotes paginado (Rol: RECOLECTOR / CENTRO_ACOPIO / ALMACEN)',
+      'Listar historial de lotes paginado (Rol: RECOLECTOR / CENTRO_ACOPIO / ALMACEN / ADMIN)',
   })
   async findAll(@CurrentUser() user: any, @Query() query: FindBatchesQueryDto) {
     return this.batchesService.findAll(user.id, user.role, query);

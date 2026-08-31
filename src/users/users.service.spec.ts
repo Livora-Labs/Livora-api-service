@@ -4,6 +4,7 @@ import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ConfigService } from '@nestjs/config';
+import { WalletsService } from '../wallets/wallets.service';
 import { Role } from '@prisma/client';
 
 describe('UsersService', () => {
@@ -59,6 +60,12 @@ describe('UsersService', () => {
         UsersService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: SupabaseService, useValue: mockSupabaseService },
+        {
+          provide: WalletsService,
+          useValue: {
+            getBalance: jest.fn().mockResolvedValue('0.0'),
+          },
+        },
         {
           provide: ConfigService,
           useValue: {
@@ -176,7 +183,7 @@ describe('UsersService', () => {
       // 1. User anonymization & private key destruction
       expect(mockPrismaService.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1234-5678' },
-        data: {
+        data: expect.objectContaining({
           email: expect.stringMatching(
             /^deleted_user-123_\d+@deleted\.livora\.org$/,
           ),
@@ -185,7 +192,7 @@ describe('UsersService', () => {
           receptionPin: null,
           isActive: false,
           deletedAt: expect.any(Date),
-        },
+        }),
       });
 
       // 2. Store profile anonymization

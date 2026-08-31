@@ -9,9 +9,9 @@ import { CryptoUtil } from '../common/utils/crypto.util';
 
 describe('WalletsService', () => {
   let service: WalletsService;
-  let prisma: jest.Mocked<PrismaService>;
-  let blockchainService: jest.Mocked<BlockchainService>;
-  let configService: jest.Mocked<ConfigService>;
+  let prisma: any;
+  let blockchainService: any;
+  let configService: any;
 
   const encryptionKey = 'livora_wallet_aes256_secret!';
   const userKeypair = Keypair.random();

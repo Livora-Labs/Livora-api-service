@@ -150,13 +150,13 @@ Inicia sesión como **CENTRO_ACOPIO**:
 
 ## 💳 6. Acto 5: Billeteras Web3 y Relayer Subsidiado (Rol: HOGAR / RECOLECTOR)
 
-1. **Consultar Saldo ERC-20 (`GET /wallets/me/balance`):**
+1. **Consultar Saldo EcoToken SEP-41 (`GET /wallets/me/balance`):**
    - Retorna `{ "balance": "150.5" }`.
 
 2. **Enviar Transacción Subsidiada de Gas (`POST /wallets/transactions`):**
    ```json
    {
-     "toAddress": "0x1234567890123456789012345678901234567890",
+     "toAddress": "GBUQ7ESFDUS66F6CGQZ7J56B6RFXQYODQY5J3SSTZ6T72OBAYHQF5QG6",
      "amount": 25.0
    }
    ```
@@ -197,7 +197,7 @@ Inicia sesión como **CENTRO_ACOPIO**:
 
 1. **Enviar KYC de Recolector (`POST /collectors/kyc-applications` - RECOLECTOR):**
    ```json
-   { "documentUrl": "https://arbi-storage.org/kyc/doc_123.pdf" }
+   { "documentUrl": "https://storage.livora.org/kyc/doc_123.pdf" }
    ```
 
 2. **Solicitud de Afiliación B2B Pública (`POST /b2b/applications` - Público):**

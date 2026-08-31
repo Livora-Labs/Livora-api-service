@@ -34,7 +34,7 @@ El módulo de Autenticación y Gestión de Usuarios de **Livora** adopta un mode
 ### Principios Clave:
 1. **Separación de Responsabilidades de Autenticación**: Supabase Auth gestiona el almacenamiento seguro de credenciales, hashing de contraseñas de usuarios y emisión/firma de Json Web Tokens (JWT).
 2. **Sincronización de UUID Master**: Al registrar un usuario, el UUID devuelto por Supabase Auth (`user.id`) se utiliza como Primary Key (`id`) de la tabla local `users` en PostgreSQL.
-3. **Billetera Custodial Web3 Automática**: Cada usuario registrado obtiene una billetera Ethereum (address y clave privada) generada automáticamente al momento de la creación de su cuenta.
+3. **Billetera Custodial Web3 Automática**: Cada usuario registrado obtiene una billetera **Stellar** (clave pública `G...` y clave secreta `S...`) generada automáticamente con `@stellar/stellar-sdk` (`Keypair.random()`) al momento de la creación de su cuenta.
 
 ---
 
@@ -57,8 +57,8 @@ Ubicación: `prisma/schema.prisma`
 | `id` | `String` | `@id @db.Uuid` | ID único sincronizado desde Supabase Auth (UUID v4). |
 | `email` | `String` | `@unique` | Correo electrónico del usuario. |
 | `role` | `Role` | Enum `Role` | Rol asignado dentro de la plataforma. |
-| `walletAddress` | `String?` | `@unique` | Dirección pública de la billetera Ethereum (Web3). |
-| `encryptedPrivateKey` | `String?` | Opcional | Clave privada encriptada en formato `iv:authTag:cipher`. |
+| `walletAddress` | `String?` | `@unique` | Clave pública de la cuenta Stellar (`G...`). |
+| `encryptedPrivateKey` | `String?` | Opcional | Clave secreta Stellar (`S...`) encriptada con AES-256-GCM. |
 | `createdAt` | `DateTime` | `@default(now())` | Fecha de creación del registro. |
 | `updatedAt` | `DateTime` | `@updatedAt` | Fecha de última actualización. |
 
@@ -70,6 +70,7 @@ enum Role {
   EMPRESA_B2B
   ALMACEN
   ADMIN
+  TIENDA
 }
 
 model User {
@@ -108,11 +109,11 @@ model User {
 Para permitir la firma automatizada de transacciones y eventos de trazabilidad en la red Web3 sin requerir que el usuario administre directamente sus llaves criptográficas (modo custodial), el sistema realiza el siguiente proceso:
 
 ### 3.1. Generación de la Billetera
-En `UsersService.create()`, se utiliza la librería `ethers` v6:
+En `UsersService.create()`, se utiliza `@stellar/stellar-sdk`:
 ```typescript
-const randomWallet = ethers.Wallet.createRandom();
-const walletAddress = randomWallet.address;
-const privateKey = randomWallet.privateKey;
+const pair = Keypair.random();
+const walletAddress = pair.publicKey();
+const privateKey = pair.secret();
 ```
 
 ### 3.2. Encriptación Simétrica (AES-256-GCM)
@@ -155,7 +156,7 @@ Crea la cuenta en Supabase Auth, genera la billetera Web3 custodial cifrada y gu
     "id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
     "email": "recolector@livora.com",
     "role": "RECOLECTOR",
-    "walletAddress": "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+    "walletAddress": "GBUQ7ESFDUS66F6CGQZ7J56B6RFXQYODQY5J3SSTZ6T72OBAYHQF5QG6",
     "createdAt": "2026-08-03T21:00:00.000Z",
     "updatedAt": "2026-08-03T21:00:00.000Z"
   }

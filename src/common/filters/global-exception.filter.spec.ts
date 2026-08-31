@@ -175,9 +175,9 @@ describe('GlobalExceptionFilter (RFC 9457 Problem Details)', () => {
       );
       expect(sentPayload.instance).toBe('/api/v1/auth/register');
       expect(sentPayload.invalid_params).toEqual([
-        { name: 'email', reason: 'email must be an email' },
+        { name: 'field', reason: 'email must be an email' },
         {
-          name: 'password',
+          name: 'field',
           reason: 'password must be longer than or equal to 8 characters',
         },
       ]);

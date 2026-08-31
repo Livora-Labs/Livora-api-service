@@ -1,16 +1,5 @@
 export const BLOCKCHAIN_QUEUE = 'blockchain-queue';
 
-export const ECO_BATCH_REGISTRY_ABI = [
-  'function registerBatch(bytes32 batchId, string ipfsCid, address[] recipients, uint256[] amounts) external returns (bool)',
-  'function registerBatchWeighed(bytes32 batchId, string ipfsCid, address collector, address[] households, bytes32[] materialCodes, uint256[] weightsGrams) external returns (bool)',
-  'function isBatchProcessed(bytes32 batchId) external view returns (bool)',
-  'function materialRate(bytes32 materialCode) external view returns (uint256)',
-  'function collectorShare() external view returns (uint256)',
-  'function nonces(address owner) external view returns (uint256)',
-  'function transferDelegated(address from, address to, uint256 amount, uint256 nonce, uint8 v, bytes32 r, bytes32 s) external returns (bool)',
-  'event BatchRegistered(bytes32 indexed batchId, string ipfsCid, address indexed worker, uint256 totalReward, uint32 recipientsCount, uint64 timestamp)',
-  'event BatchWeighed(bytes32 indexed batchId, uint256 totalWeightGrams, uint256 totalReward, uint256 collectorReward, uint32 householdsCount)',
-];
 
 /**
  * Normaliza un nombre de material al código ASCII que espera el contrato:

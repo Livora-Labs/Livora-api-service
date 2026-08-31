@@ -25,8 +25,6 @@ describe('Adversarial M3 Verification — Redis OTP State Lifecycle & Attacks', 
   const testRegisterDto: RegisterDto = {
     email: testEmail,
     password: 'AdversarialPassword123!',
-    name: 'Adversary Tester',
-    phone: '+51999888777',
     role: Role.HOGAR,
   };
 

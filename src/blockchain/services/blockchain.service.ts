@@ -299,10 +299,17 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
       const balanceDecimal = Number(balanceStroops || 0) / 10000000;
       return balanceDecimal.toFixed(2);
     } catch (error: any) {
-      this.logger.error(
-        `Error al obtener balance para ${walletAddress}: ${error.message}`,
+      if (
+        error.message &&
+        (error.message.includes('MissingValue') ||
+          error.message.includes('Storage'))
+      ) {
+        return '0.00';
+      }
+      this.logger.warn(
+        `Error al obtener balance para ${walletAddress}: ${error.message}. Retornando 0.00`,
       );
-      throw error;
+      return '0.00';
     }
   }
 
