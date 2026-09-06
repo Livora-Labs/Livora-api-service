@@ -28,7 +28,6 @@ import { UploadsModule } from './uploads/uploads.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { MailService } from './common/services/mail.service';
 import { RedisModule } from './redis/redis.module';
 import { HealthModule } from './health/health.module';
 

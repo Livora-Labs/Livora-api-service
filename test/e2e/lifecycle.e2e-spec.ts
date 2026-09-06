@@ -66,7 +66,7 @@ describe('Lifecycle E2E: Full Operational & Web3 Lifecycle Flow', () => {
     },
   };
 
-  let currentAuthUserId = householdId;
+  const currentAuthUserId = householdId;
 
   beforeAll(async () => {
     const supabaseMock = {

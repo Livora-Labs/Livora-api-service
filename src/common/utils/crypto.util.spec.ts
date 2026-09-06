@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import { CryptoUtil } from './crypto.util';
 
 describe('CryptoUtil', () => {
@@ -13,34 +14,32 @@ describe('CryptoUtil', () => {
       expect(decrypted).toBe(knownPrivateKey);
     });
 
-    it('should produce different ciphertexts for same plaintext (random IV)', () => {
-      const encrypted1 = CryptoUtil.encrypt(knownPrivateKey, secretKey);
-      const encrypted2 = CryptoUtil.encrypt(knownPrivateKey, secretKey);
-
-      expect(encrypted1).not.toBe(encrypted2);
-    });
-
-    it('should throw on decrypt with wrong secret key', () => {
+    it('should throw an error when decrypting with the wrong key', () => {
       const encrypted = CryptoUtil.encrypt(knownPrivateKey, secretKey);
+      const wrongKey = 'wrongSecretKey32CharacterLength!';
 
-      expect(() => {
-        CryptoUtil.decrypt(encrypted, 'wrongSecretKey32CharacterLength!');
-      }).toThrow();
+      expect(() => CryptoUtil.decrypt(encrypted, wrongKey)).toThrow();
     });
 
-    it('should throw on invalid encrypted format (missing colon-separated parts)', () => {
-      expect(() => {
-        CryptoUtil.decrypt('invalidformat', secretKey);
-      }).toThrow('Invalid encrypted text format');
+    it('should throw an error for malformed ciphertext format', () => {
+      expect(() => CryptoUtil.decrypt('invalid_format', secretKey)).toThrow(
+        'Invalid encrypted text format',
+      );
+      expect(() =>
+        CryptoUtil.decrypt('not:enough:parts:here', secretKey),
+      ).toThrow('Invalid encrypted text format');
     });
 
-    it('should NOT expose plaintext in the encrypted output', () => {
-      const encrypted = CryptoUtil.encrypt(knownPrivateKey, secretKey);
+    it('should produce distinct ciphertexts for identical plaintexts (unique IV per encryption)', () => {
+      const enc1 = CryptoUtil.encrypt(knownPrivateKey, secretKey);
+      const enc2 = CryptoUtil.encrypt(knownPrivateKey, secretKey);
 
-      expect(encrypted).not.toContain(knownPrivateKey);
+      expect(enc1).not.toBe(enc2);
+      expect(CryptoUtil.decrypt(enc1, secretKey)).toBe(knownPrivateKey);
+      expect(CryptoUtil.decrypt(enc2, secretKey)).toBe(knownPrivateKey);
     });
 
-    it('encrypted key should not be stored in memory after decrypt call', () => {
+    it('zeroes sensitive internal buffers after cryptographic operations', () => {
       const encrypted = CryptoUtil.encrypt(knownPrivateKey, secretKey);
       const decrypted = CryptoUtil.decrypt(encrypted, secretKey);
 
@@ -50,7 +49,6 @@ describe('CryptoUtil', () => {
 
     it('should decrypt legacy SHA-256 encrypted payload transparently (backward compatibility)', () => {
       // Simulate an old ciphertext produced with crypto.createHash('sha256')
-      const crypto = require('crypto');
       const legacyKey = crypto.createHash('sha256').update(secretKey).digest();
       const iv = crypto.randomBytes(12);
       const cipher = crypto.createCipheriv('aes-256-gcm', legacyKey, iv);

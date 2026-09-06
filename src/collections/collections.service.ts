@@ -193,7 +193,7 @@ export class CollectionsService {
       throw new BadRequestException('La solicitud no está en modalidad de subasta (AUCTION)');
     }
 
-    let proposedRates: Record<string, number> = dto.proposedRates || {};
+    const proposedRates: Record<string, number> = dto.proposedRates || {};
 
     // Validar tarifas personalizadas si se proporcionaron
     if (Object.keys(proposedRates).length > 0) {

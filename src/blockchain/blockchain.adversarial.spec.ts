@@ -414,6 +414,7 @@ describe('Milestone M2 Adversarial Test Suite: Web3 Blockchain Resiliency & Circ
                 .fn()
                 .mockReturnValue(workerKeypair.publicKey()),
               registerBatchWeighed: jest.fn(),
+              notarizeBatchReceipt: jest.fn(),
               executeDelegatedTransfer: jest.fn(),
               executeSubsidizedTransfer: jest.fn(),
               getNonceOnChain: jest.fn(),
@@ -476,11 +477,9 @@ describe('Milestone M2 Adversarial Test Suite: Web3 Blockchain Resiliency & Circ
       ] as any);
 
       // Simulate blockchain failure (e.g. circuit open or out of gas)
-      blockchainService.registerBatchWeighed = jest
-        .fn()
-        .mockRejectedValue(
-          new Error('CircuitBreaker: OPEN. Stellar RPC is unreachable.'),
-        );
+      const rpcError = new Error('CircuitBreaker: OPEN. Stellar RPC is unreachable.');
+      blockchainService.notarizeBatchReceipt = jest.fn().mockRejectedValue(rpcError);
+      blockchainService.registerBatchWeighed = jest.fn().mockRejectedValue(rpcError);
 
       // Must reject and re-throw
       await expect(processor.process(job)).rejects.toThrow(

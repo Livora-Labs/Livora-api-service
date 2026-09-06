@@ -413,10 +413,19 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
       ]);
       return BigInt(result || 0);
     } catch (err: any) {
-      this.logger.warn(
-        `Nonce no inicializado en contrato para ${owner} (retornando 0n): ${err.message}`,
-      );
-      return 0n;
+      const msg = err?.message || String(err);
+      if (
+        msg.includes('MissingValue') ||
+        msg.includes('missing_value') ||
+        msg.includes('Error(Storage') ||
+        msg.includes('not found')
+      ) {
+        this.logger.warn(
+          `Nonce no inicializado en contrato para ${owner} (retornando 0n): ${msg}`,
+        );
+        return 0n;
+      }
+      throw err;
     }
   }
 

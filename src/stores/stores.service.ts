@@ -384,7 +384,7 @@ export class StoresService {
     }
 
     if (dto.cci) {
-      const cleanCci = dto.cci.replace(/[\s\-]/g, '');
+      const cleanCci = dto.cci.replace(/[\s-]/g, '');
       if (cleanCci.length !== 20 || !/^\d{20}$/.test(cleanCci)) {
         throw new BadRequestException('El CCI bancario debe contener exactamente 20 dígitos numéricos');
       }
