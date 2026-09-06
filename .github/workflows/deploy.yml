@@ -81,7 +81,18 @@ jobs:
     needs: [build-and-push]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
+      - name: Verify SSH Credentials
+        id: check_ssh
+        run: |
+          if [ -z "${{ secrets.SSH_HOST }}" ]; then
+            echo "has_ssh=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ SSH_HOST no está configurado en GitHub Secrets. El despliegue automático por SSH se omitirá de forma segura hasta que se configure el servidor."
+          else
+            echo "has_ssh=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Deploy to VPS via SSH
+        if: steps.check_ssh.outputs.has_ssh == 'true'
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
