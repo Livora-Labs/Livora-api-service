@@ -1,9 +1,14 @@
 import { Type } from 'class-transformer';
-import { IsNumber, IsOptional, Max, Min } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, Max, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { RequestStatus } from '@prisma/client';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export class FindCollectionsQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ enum: RequestStatus, description: 'Filtrar por estado' })
+  @IsOptional()
+  @IsEnum(RequestStatus)
+  status?: RequestStatus;
   @ApiPropertyOptional({
     description: 'Latitud para la búsqueda geográfica (-90 a 90)',
   })

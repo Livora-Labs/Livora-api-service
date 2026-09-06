@@ -157,8 +157,9 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
         where: { id: 'user-multi-rel-1' },
         data: expect.objectContaining({
           email: expect.stringMatching(
-            /^deleted_user-mul_\d+@deleted\.livora\.org$/,
+            /^deleted_user-multi-rel-1_\d+@anon\.livora\.pe$/,
           ),
+          name: 'ANONIMO',
           encryptedPrivateKey: null,
           fcmToken: null,
           receptionPin: null,
@@ -188,10 +189,21 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
         },
       });
 
-      // Verify Complaint update
+      // Verify Complaint update (Ley 29733 ARCO full PII scrub)
       expect(mockPrisma.complaint.updateMany).toHaveBeenCalledWith({
         where: { userId: 'user-multi-rel-1' },
         data: {
+          documentNumber: '00000000',
+          fullName: 'USUARIO ANONIMIZADO (ARCO)',
+          address: 'ANONIMO',
+          phone: '000000000',
+          email: 'anonimo@anon.livora.pe',
+          representativeName: null,
+          representativeDoc: null,
+          claimDetail:
+            'Contenido suprimido por solicitud de cancelación ARCO (Ley 29733)',
+          consumerRequest:
+            'Contenido suprimido por solicitud de cancelación ARCO (Ley 29733)',
           subject: 'Queja Anonimizada',
           description:
             'Contenido suprimido por solicitud de cancelación ARCO (Ley 29733)',

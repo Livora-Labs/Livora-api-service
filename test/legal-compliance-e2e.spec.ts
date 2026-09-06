@@ -2104,7 +2104,7 @@ describe('Peruvian Legal Compliance & Web3 Custodial E2E Suite (Indecopi Ley 295
         expect(dbUser.isActive).toBe(false);
         expect(dbUser.deletedAt).toBeInstanceOf(Date);
         expect(dbUser.encryptedPrivateKey).toBeNull(); // Irreversibly purged
-        expect(dbUser.email).toMatch(/^deleted_supabase_/); // Anonymized
+        expect(dbUser.email).toMatch(/^deleted_supabase[-_]/); // Anonymized
         expect(dbUser.walletAddress).toBe(initialWallet); // Preserved for blockchain immutability
 
         // Step 5: Verify Complaint Record is retained for Indecopi regulatory compliance
@@ -2118,7 +2118,7 @@ describe('Peruvian Legal Compliance & Web3 Custodial E2E Suite (Indecopi Ley 295
 
     describe('Rapid Burst / Concurrency Sequential Integrity', () => {
       it('3.B.1 Interleaved rapid burst generates strictly increasing non-colliding correlatives', async () => {
-        const promises = [];
+        const promises: Array<Promise<any>> = [];
 
         for (let i = 0; i < 10; i++) {
           const isReclamo = i % 2 === 0;

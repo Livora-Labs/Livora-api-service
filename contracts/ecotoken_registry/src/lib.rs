@@ -296,6 +296,45 @@ impl EcoBatchRegistry {
         true
     }
 
+    /// Notarización pura ESG de recepción de lote en centro de acopio (sin minteo de tokens)
+    pub fn notarize_batch_receipt(
+        env: Env,
+        caller: Address,
+        batch_id: BytesN<32>,
+        center: Address,
+        ipfs_cid: String,
+    ) -> bool {
+        Self::require_worker_or_owner(&env, &caller);
+        caller.require_auth();
+
+        let batch_key = DataKey::ProcessedBatch(batch_id.clone());
+        if env.storage().persistent().has(&batch_key) {
+            panic!("Lote ya procesado");
+        }
+
+        // Registrar trazabilidad inmutable
+        env.storage().persistent().set(&batch_key, &true);
+        env.storage().persistent().extend_ttl(&batch_key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_EXTEND);
+
+        let details_key = DataKey::BatchDetails(batch_id.clone());
+        let details = BatchRecord {
+            timestamp: env.ledger().timestamp(),
+            total_reward: 0,
+            recipients_count: 1,
+            processed: true,
+        };
+        env.storage().persistent().set(&details_key, &details);
+        env.storage().persistent().extend_ttl(&details_key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_EXTEND);
+
+        // Emitir evento público inmutable en el ledger de Stellar
+        env.events().publish(
+            (Symbol::new(&env, "batch_received"), batch_id),
+            (center, ipfs_cid),
+        );
+
+        true
+    }
+
     // --- Configuración de Tarifas ---
 
     pub fn set_material_rate(env: Env, caller: Address, material_code: Symbol, rate_stroops_per_kg: i128) {
@@ -709,5 +748,29 @@ mod tests {
 
         // Si corre sin errores, las extensiones de TTL (extend_ttl) fueron llamadas exitosamente
         // a nivel de host en persistent/instance storage.
+    }
+
+    #[test]
+    fn test_notarize_batch_receipt() {
+        let env = Env::default();
+        let (_, worker, _, client) = setup_test(&env);
+
+        let center = Address::generate(&env);
+        let batch_id = BytesN::from_array(&env, &[9u8; 32]);
+        let ipfs_cid = String::from_str(&env, "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco");
+
+        let initial_supply = client.total_supply();
+
+        let res = client.notarize_batch_receipt(&worker, &batch_id, &center, &ipfs_cid);
+        assert!(res);
+
+        // Verificar que NO se mintearon tokens
+        assert_eq!(client.total_supply(), initial_supply);
+
+        // Verificar trazabilidad inmutable registrada
+        assert!(client.is_batch_processed(&batch_id));
+        let details = client.get_batch(&batch_id);
+        assert!(details.processed);
+        assert_eq!(details.total_reward, 0);
     }
 }

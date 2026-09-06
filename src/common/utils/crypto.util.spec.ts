@@ -47,5 +47,20 @@ describe('CryptoUtil', () => {
       // We check that static properties on CryptoUtil don't hold the plaintext
       expect(Object.values(CryptoUtil)).not.toContain(decrypted);
     });
+
+    it('should decrypt legacy SHA-256 encrypted payload transparently (backward compatibility)', () => {
+      // Simulate an old ciphertext produced with crypto.createHash('sha256')
+      const crypto = require('crypto');
+      const legacyKey = crypto.createHash('sha256').update(secretKey).digest();
+      const iv = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', legacyKey, iv);
+      let legacyEncrypted = cipher.update(knownPrivateKey, 'utf8', 'hex');
+      legacyEncrypted += cipher.final('hex');
+      const authTag = cipher.getAuthTag().toString('hex');
+      const legacyPayload = `${iv.toString('hex')}:${authTag}:${legacyEncrypted}`;
+
+      const decrypted = CryptoUtil.decrypt(legacyPayload, secretKey);
+      expect(decrypted).toBe(knownPrivateKey);
+    });
   });
 });

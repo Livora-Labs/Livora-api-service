@@ -591,7 +591,7 @@ describe('Milestone M4 Adversarial Challenge: Ley 29733, ARCO Cascade & Web3 Key
       const user = prismaMock._stores.users.get(merchantUserId);
       expect(user).toBeDefined();
       expect(user.email).not.toBe(merchantEmail);
-      expect(user.email).toMatch(/^deleted_supabase_\d+@deleted\.livora\.org$/);
+      expect(user.email).toMatch(/^deleted_.*@.*livora\.(org|pe)$/);
       expect(user.isActive).toBe(false);
       expect(user.deletedAt).toBeInstanceOf(Date);
       expect(user.fcmToken).toBeNull();
@@ -689,6 +689,7 @@ describe('Milestone M4 Adversarial Challenge: Ley 29733, ARCO Cascade & Web3 Key
             .fn()
             .mockReturnValue({ auth: { admin: { deleteUser: jest.fn() } } }),
         } as any,
+        { getBalance: jest.fn() } as any,
       );
 
       await expect(

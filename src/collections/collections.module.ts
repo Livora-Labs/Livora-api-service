@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { CollectionsService } from './collections.service';
 import { CollectionsController } from './collections.controller';
 import { PrismaModule } from '../prisma/prisma.module';
+import { RedisModule } from '../redis/redis.module';
 import { SupabaseModule } from '../supabase/supabase.module';
 import { AuthModule } from '../auth/auth.module';
 import { BlockchainModule } from '../blockchain/blockchain.module';
@@ -11,6 +12,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 @Module({
   imports: [
     PrismaModule,
+    RedisModule,
     SupabaseModule,
     AuthModule,
     BlockchainModule,

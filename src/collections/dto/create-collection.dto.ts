@@ -9,6 +9,7 @@ import {
   Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsValidWeightRecord } from '../../common/validators/is-valid-weight-record.validator';
 
 export class CreateCollectionDto {
   @ApiProperty({
@@ -36,7 +37,34 @@ export class CreateCollectionDto {
     return unwrapped;
   })
   @IsObject({ message: 'itemsEstimated debe ser un objeto JSON válido' })
+  @IsValidWeightRecord(
+    { min: 0.5, maxDecimalPlaces: 2 },
+    {
+      message: 'El peso mínimo por material es de 0.5 kg y no debe tener más de 2 decimales',
+    },
+  )
   itemsEstimated: Record<string, any>;
+
+  @ApiPropertyOptional({
+    enum: ['AUTOMATIC', 'AUCTION'],
+    default: 'AUTOMATIC',
+    description: 'Modalidad de asignación: AUTOMATIC (primer acopio) o AUCTION (subasta de tarifas)',
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    let v = value;
+    if (v && typeof v === 'object' && 'value' in v) {
+      v = v.value;
+    }
+    if (typeof v === 'string') {
+      const upper = v.trim().toUpperCase();
+      if (upper === 'SUBASTA' || upper === 'AUCTION') return 'AUCTION';
+      if (upper === 'AUTOMATIC' || upper === 'AUTOMATICO') return 'AUTOMATIC';
+    }
+    return v;
+  })
+  @IsString()
+  assignmentMode?: 'AUTOMATIC' | 'AUCTION';
 
   @ApiPropertyOptional({
     example: 'Bolsa blanca afuera de la puerta',

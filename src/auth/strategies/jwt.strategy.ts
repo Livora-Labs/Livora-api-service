@@ -19,12 +19,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
   ) {
+    const jwtSecret = configService.get<string>('SUPABASE_JWT_SECRET');
+    if (!jwtSecret && process.env.NODE_ENV !== 'test') {
+      throw new Error(
+        'CRITICAL SECURITY ERROR: La variable de entorno SUPABASE_JWT_SECRET es obligatoria y no está configurada.',
+      );
+    }
+
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey:
-        configService.get<string>('SUPABASE_JWT_SECRET') ||
-        'your_supabase_jwt_secret',
+      secretOrKey: jwtSecret || 'test_jwt_secret_in_isolated_unit_tests',
     });
   }
 

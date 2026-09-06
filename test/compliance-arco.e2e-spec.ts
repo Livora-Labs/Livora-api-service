@@ -422,7 +422,7 @@ describe('Compliance Data Model & Irreversible ARCO Deletion (E2E Suite)', () =>
 
     // 1. Email is anonymized
     expect(modifiedUser.email).toMatch(
-      /^deleted_supabase_\d+@deleted\.livora\.org$/,
+      /^deleted_.*@.*livora\.(org|pe)$/,
     );
 
     // 2. Web3 private key is irreversibly destroyed (null)

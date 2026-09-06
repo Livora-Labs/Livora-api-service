@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { BlockchainService } from '../blockchain/services/blockchain.service';
 import { CryptoUtil } from '../common/utils/crypto.util';
+import { PaginatedResultDto } from '../common/dto/paginated-result.dto';
 
 @Injectable()
 export class WalletsService {
@@ -42,7 +43,7 @@ export class WalletsService {
       where: { userId: user.id, status: 'COMPLETED' },
       select: { tokenAmount: true },
     });
-    const totalSpent = redemptions.reduce((sum, r) => sum + r.tokenAmount, 0);
+    const totalSpent = redemptions.reduce((sum, r) => sum + Number(r.tokenAmount), 0);
 
     // 2. Try to get on-chain balance first
     const contractId = this.configService.get<string>('ECOTOKEN_CONTRACT_ID');
@@ -52,8 +53,10 @@ export class WalletsService {
           user.walletAddress,
         );
         const onChainBalance = parseFloat(onChainBalanceStr);
-        const finalBalance = Math.max(0, onChainBalance - totalSpent);
-        return { balance: finalBalance.toFixed(2) };
+        if (onChainBalance > 0) {
+          const finalBalance = Math.max(0, onChainBalance - totalSpent);
+          return { balance: finalBalance.toFixed(2) };
+        }
       } catch (error: any) {
         this.logger.error(
           `Error al consultar balance Soroban on-chain: ${error.message}`,
@@ -61,7 +64,7 @@ export class WalletsService {
       }
     }
 
-    // 3. Fallback: calculate mock balance dynamically based on DB rewards and redemptions
+    // 3. Fallback: calculate off-chain ledger balance dynamically based on DB rewards and redemptions
     let totalEarned = 0;
     if (user.role === 'RECOLECTOR') {
       const batches = await this.prisma.batch.findMany({
@@ -88,7 +91,6 @@ export class WalletsService {
         where: {
           householdId: userId,
           status: 'COMPLETED',
-          batchId: { not: null },
         },
         include: { batch: true },
       });
@@ -106,6 +108,18 @@ export class WalletsService {
           });
           const divisor = siblings || 1;
           totalEarned += (batchTotal * 0.8) / divisor;
+        } else {
+          const actualWeights =
+            (r.actualWeights as Record<string, number>) ||
+            (r.itemsEstimated as Record<string, number>) ||
+            {};
+          let reqTotal = 0;
+          for (const [mat, rawWt] of Object.entries(actualWeights)) {
+            const wt = typeof rawWt === 'number' ? rawWt : parseFloat(String(rawWt)) || 0;
+            const rate = await this.blockchainService.getMaterialRate(mat);
+            reqTotal += wt * rate;
+          }
+          totalEarned += reqTotal * 0.40;
         }
       }
     } else if (user.role === 'TIENDA') {
@@ -117,9 +131,16 @@ export class WalletsService {
           where: { storeId: storeProfile.id, status: 'COMPLETED' },
           select: { tokenAmount: true },
         });
-        totalEarned = redemptions.reduce((sum, r) => sum + r.tokenAmount, 0);
+        totalEarned = redemptions.reduce((sum, r) => sum + Number(r.tokenAmount), 0);
       }
     }
+
+    const payments = await this.prisma.paymentTransaction.findMany({
+      where: { userId: user.id, status: 'COMPLETED' },
+      select: { tokenAmount: true },
+    });
+    const totalPayments = payments.reduce((sum, p) => sum + Number(p.tokenAmount), 0);
+    totalEarned += totalPayments;
 
     const finalBalance = Math.max(0, totalEarned - totalSpent);
     return { balance: finalBalance.toFixed(2) };
@@ -147,10 +168,16 @@ export class WalletsService {
 
     const encryptionKey =
       this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
-      'livora_wallet_aes256_secret!';
+      this.configService.get<string>('ENCRYPTION_KEY');
+    if (!encryptionKey && process.env.NODE_ENV !== 'test') {
+      throw new Error(
+        'CRITICAL SECURITY ERROR: La variable WALLET_ENCRYPTION_KEY es obligatoria para firmar transacciones Web3.',
+      );
+    }
+    const finalKey = encryptionKey || 'test_isolated_wallet_encryption_key_32c';
     const userSecretKey = CryptoUtil.decrypt(
       user.encryptedPrivateKey,
-      encryptionKey,
+      finalKey,
     );
     if (!userSecretKey) {
       throw new BadRequestException(
@@ -175,7 +202,12 @@ export class WalletsService {
     };
   }
 
-  async getTransactionHistory(userId: string) {
+  async getTransactionHistory(
+    userId: string,
+    page = 1,
+    limit = 15,
+    direction?: string,
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
@@ -268,7 +300,6 @@ export class WalletsService {
         where: {
           householdId: userId,
           status: 'COMPLETED',
-          batchId: { not: null },
         },
         include: {
           batch: {
@@ -277,6 +308,9 @@ export class WalletsService {
                 select: { email: true, walletAddress: true },
               },
             },
+          },
+          collector: {
+            select: { name: true, walletAddress: true },
           },
         },
         orderBy: { updatedAt: 'desc' },
@@ -321,14 +355,65 @@ export class WalletsService {
             ipfsCid: r.batch.ipfsCid || null,
             createdAt: r.batch.updatedAt,
           });
+        } else {
+          const weights =
+            (r.actualWeights as Record<string, number>) ||
+            (r.itemsEstimated as Record<string, number>) ||
+            {};
+          let reqTotal = 0;
+          for (const [mat, rawWt] of Object.entries(weights)) {
+            const wt =
+              typeof rawWt === 'number'
+                ? rawWt
+                : parseFloat(String(rawWt)) || 0;
+            const rate =
+              {
+                PET: 10,
+                CARTON: 5,
+                CARTÓN: 5,
+                VIDRIO: 3,
+                PLASTICO: 10,
+                PLÁSTICO: 10,
+                ALUMINIO: 15,
+                HDPE: 10,
+              }[mat.toUpperCase()] || 5;
+            reqTotal += wt * rate;
+          }
+          const rewardAmount = reqTotal * 0.4;
+          if (rewardAmount > 0) {
+            txs.push({
+              id: r.id,
+              type: 'RECOMPENSA_RECICLAJE',
+              amount: Number(rewardAmount.toFixed(2)),
+              direction: 'IN',
+              recipientName: 'Sistema Livora (EcoTokens)',
+              recipientWallet:
+                r.collector?.walletAddress ||
+                'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
+              txHash: null,
+              ipfsCid: null,
+              createdAt: r.updatedAt,
+            });
+          }
         }
       }
     }
 
+    // Filter by direction if specified
+    const filtered =
+      direction && direction !== 'TODAS'
+        ? txs.filter((t) => t.direction === direction)
+        : txs;
+
     // Sort by date descending
-    return txs.sort(
+    const sorted = filtered.sort(
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
+    const total = sorted.length;
+    const skip = (page - 1) * limit;
+    const paged = sorted.slice(skip, skip + limit);
+
+    return new PaginatedResultDto(paged, total, page, limit);
   }
 }

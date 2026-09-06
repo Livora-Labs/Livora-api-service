@@ -122,6 +122,7 @@ describe('RFC 9457 & Fastify Engine Adversarial E2E Tests', () => {
         whitelist: true,
         transform: true,
         forbidNonWhitelisted: true,
+        exceptionFactory: (errors) => new BadRequestException(errors),
       }),
     );
 
@@ -180,7 +181,7 @@ describe('RFC 9457 & Fastify Engine Adversarial E2E Tests', () => {
     );
     expect(paramNames).toContain('email');
     expect(paramNames).toContain('amount');
-    expect(paramNames).toContain('property');
+    expect(paramNames).toContain('extraField');
   });
 
   it('4. GET /test-adversarial/unauthorized returns RFC 9457 401 Problem Details', async () => {

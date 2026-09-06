@@ -17,7 +17,6 @@ import {
   ThrottlerGuard,
   ThrottlerModule,
   ThrottlerStorage,
-  ThrottlerStorageRecord,
 } from '@nestjs/throttler';
 import request from 'supertest';
 import {
@@ -34,7 +33,12 @@ class MockDistributedRedisThrottlerStorage implements ThrottlerStorage {
     limit: number,
     blockDuration: number,
     throttlerName: string,
-  ): Promise<ThrottlerStorageRecord> {
+  ): Promise<{
+    totalHits: number;
+    timeToExpire: number;
+    isBlocked: boolean;
+    timeToBlockExpire: number;
+  }> {
     const storageKey = `{${key}:${throttlerName}}:hits`;
     const now = Date.now();
     const entry = this.storage.get(storageKey);

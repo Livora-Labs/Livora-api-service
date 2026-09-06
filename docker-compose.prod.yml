@@ -6,24 +6,111 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "3000:3000"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./deploy/public:/srv/public:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - api
+      - livora_api
+      - frontend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
 
-  api:
+  frontend:
+    build:
+      context: ../Livora-frontend
+      dockerfile: Dockerfile
+    container_name: livora_frontend
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - NEXT_PUBLIC_API_URL=https://${DOMAIN:-52.200.2.107.sslip.io}
+      - NEXT_PUBLIC_API_BASE_URL=https://${DOMAIN:-52.200.2.107.sslip.io}
+    depends_on:
+      livora_api:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  migration:
     build: .
-    container_name: livora_api
+    restart: "no"
+    env_file: .env.production
+    environment:
+      - APP_MODE=MIGRATION
+    command: ["npx", "prisma", "db", "push", "--accept-data-loss"]
+    depends_on:
+      livora_postgres:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  livora_api:
+    build: .
     restart: always
     env_file: .env.production
+    environment:
+      - APP_MODE=API
+      - DB_POOL_MAX=10
+    expose:
+      - "3000"
+    deploy:
+      replicas: 3
+    command: npm run start:api
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1));\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
-      - postgres
-      - redis
+      livora_postgres:
+        condition: service_healthy
+      livora_redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
 
-  postgres:
+  livora_worker:
+    build: .
+    container_name: livora_worker
+    restart: always
+    env_file: .env.production
+    environment:
+      - APP_MODE=WORKER
+      - DB_POOL_MAX=5
+    command: npm run start:worker
+    depends_on:
+      livora_postgres:
+        condition: service_healthy
+      livora_redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  livora_postgres:
     image: postgis/postgis:16-3.4-alpine
     container_name: livora_postgres
     restart: always
@@ -31,18 +118,41 @@ services:
       POSTGRES_USER: ${DB_USER:-livora}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-livora_secret}
       POSTGRES_DB: ${DB_NAME:-livora_db}
+    ports:
+      - "${DB_PORT:-5434}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-livora} -d ${DB_NAME:-livora_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
 
-  redis:
+  livora_redis:
     image: redis:7-alpine
     container_name: livora_redis
     restart: always
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
 
 volumes:
   postgres_data:
+    name: ${POSTGRES_VOLUME_NAME:-livora_postgres_data}
   redis_data:
   caddy_data:
   caddy_config:

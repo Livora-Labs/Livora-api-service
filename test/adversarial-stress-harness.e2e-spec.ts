@@ -616,7 +616,7 @@ describe('Adversarial Stress & Edge Case Harness (Challenger 1)', () => {
       // 3. Verify User state after ARCO
       const afterUser = dbUsers.get(testUserId);
       expect(afterUser.encryptedPrivateKey).toBeNull(); // Irreversibly destroyed
-      expect(afterUser.email).toMatch(/^deleted_user-arc_\d+@deleted\.livora\.org$/);
+      expect(afterUser.email).toMatch(/^deleted_.*_\d+@anon\.livora\.pe$/);
       expect(afterUser.fcmToken).toBeNull();
       expect(afterUser.receptionPin).toBeNull();
       expect(afterUser.isActive).toBe(false);

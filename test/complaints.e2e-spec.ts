@@ -10,6 +10,8 @@ import { ComplaintsService } from '../src/complaints/complaints.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { MailService } from '../src/common/services/mail.service';
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
+import { SupabaseAuthGuard } from '../src/common/guards/supabase-auth.guard';
+import { RolesGuard } from '../src/common/guards/roles.guard';
 
 interface MockComplaintRecord {
   id: string;
@@ -52,11 +54,15 @@ describe('Libro de Reclamaciones Virtual - Complaints API (E2E Suite)', () => {
   let app: NestFastifyApplication;
   let complaintsStore: Map<string, MockComplaintRecord>;
   let lastDispatchedMail: DispatchedMailInfo | null = null;
+  let createdComplaintId = 'complaint-uuid-1';
+  let createdCorrelative = 'R-00001-2026';
 
   beforeAll(async () => {
     complaintsStore = new Map<string, MockComplaintRecord>();
 
-    const mockPrisma = {
+    const mockPrisma: any = {
+      getReadClient: () => mockPrisma,
+      $transaction: jest.fn(async (cb: any) => cb(mockPrisma)),
       complaint: {
         findMany: jest.fn(
           ({
@@ -121,6 +127,7 @@ describe('Libro de Reclamaciones Virtual - Complaints API (E2E Suite)', () => {
         ),
       },
     };
+    mockPrisma.read = mockPrisma;
 
     const mockMailService = {
       sendComplaintConfirmationEmail: jest.fn(
@@ -150,7 +157,18 @@ describe('Libro de Reclamaciones Virtual - Complaints API (E2E Suite)', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: MailService, useValue: mockMailService },
       ],
-    }).compile();
+    })
+      .overrideGuard(SupabaseAuthGuard)
+      .useValue({
+        canActivate: (context: any) => {
+          const req = context.switchToHttp().getRequest();
+          req.user = { id: 'admin-id', role: 'ADMIN', email: 'admin@livora.pe' };
+          return true;
+        },
+      })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     app = moduleRef.createNestApplication<NestFastifyApplication>(
       new FastifyAdapter({ trustProxy: true }),
@@ -202,6 +220,8 @@ describe('Libro de Reclamaciones Virtual - Complaints API (E2E Suite)', () => {
 
     const body = res.body as MockComplaintRecord;
     expect(body.id).toBeDefined();
+    createdComplaintId = body.id;
+    createdCorrelative = body.correlativeNumber;
     expect(body.correlativeNumber).toBe(`R-00001-${currentYear}`);
     expect(body.documentNumber).toBe('10293847');
     expect(body.fullName).toBe('Carlos Rodriguez Silva');
@@ -302,11 +322,11 @@ describe('Libro de Reclamaciones Virtual - Complaints API (E2E Suite)', () => {
 
   it('5. GET /complaints/:id: returns full complaint data by UUID', async () => {
     const res = await request(app.getHttpServer())
-      .get('/complaints/complaint-uuid-1')
+      .get(`/complaints/${createdComplaintId}`)
       .expect(200);
 
     const body = res.body as MockComplaintRecord;
-    expect(body.id).toBe('complaint-uuid-1');
+    expect(body.id).toBe(createdComplaintId);
     expect(body.fullName).toBe('Carlos Rodriguez Silva');
   });
 
@@ -321,19 +341,18 @@ describe('Libro de Reclamaciones Virtual - Complaints API (E2E Suite)', () => {
   });
 
   it('7. GET /complaints/correlative/:correlativeNumber: returns complaint data by official correlative', async () => {
-    const currentYear = new Date().getFullYear();
     const res = await request(app.getHttpServer())
-      .get(`/complaints/correlative/R-00001-${currentYear}`)
+      .get(`/complaints/correlative/${createdCorrelative}`)
       .expect(200);
 
     const body = res.body as MockComplaintRecord;
-    expect(body.correlativeNumber).toBe(`R-00001-${currentYear}`);
+    expect(body.correlativeNumber).toBe(createdCorrelative);
     expect(body.fullName).toBe('Carlos Rodriguez Silva');
   });
 
   it('8. GET /complaints/:id/pdf: downloads PDF binary stream for the complaint', async () => {
     const res = await request(app.getHttpServer())
-      .get('/complaints/complaint-uuid-1/pdf')
+      .get(`/complaints/${createdComplaintId}/pdf`)
       .expect(200);
 
     expect(res.headers['content-type']).toContain('application/pdf');

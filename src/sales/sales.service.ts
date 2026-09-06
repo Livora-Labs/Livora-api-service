@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Role } from '@prisma/client';
+import { Role, ConsolidatedStatus } from '@prisma/client';
 import { IpfsService } from '../blockchain/services/ipfs.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { CreateCertificateDto } from '../certificates/dto/create-certificate.dto';
@@ -59,8 +59,8 @@ export class SalesService {
       },
     });
 
-    const totalIn = aggregateIn._sum.quantityKg || 0;
-    const totalOut = aggregateOut._sum.quantityKg || 0;
+    const totalIn = Number(aggregateIn._sum.quantityKg || 0);
+    const totalOut = Number(aggregateOut._sum.quantityKg || 0);
 
     const allowedLimit = totalIn * (1 - SHRINK_FACTOR);
     if (totalOut + dto.weightKg > allowedLimit) {
@@ -79,9 +79,9 @@ export class SalesService {
       },
     });
 
-    if (!invItem || invItem.quantityKg < dto.weightKg) {
+    if (!invItem || Number(invItem.quantityKg) < dto.weightKg) {
       throw new BadRequestException(
-        `Inventario insuficiente para ${normMaterial}. Disponible: ${invItem?.quantityKg || 0} kg, requerido: ${dto.weightKg} kg.`,
+        `Inventario insuficiente para ${normMaterial}. Disponible: ${Number(invItem?.quantityKg || 0)} kg, requerido: ${dto.weightKg} kg.`,
       );
     }
 
@@ -103,6 +103,13 @@ export class SalesService {
         },
       });
 
+      if (dto.consolidatedBatchId) {
+        await tx.consolidatedBatch.update({
+          where: { id: dto.consolidatedBatchId },
+          data: { status: ConsolidatedStatus.SOLD },
+        });
+      }
+
       // Registrar venta
       return tx.sale.create({
         data: {
@@ -111,10 +118,12 @@ export class SalesService {
           materialType: normMaterial,
           weightKg: dto.weightKg,
           totalAmount: dto.totalAmount,
+          consolidatedBatchId: dto.consolidatedBatchId || null,
         },
         include: {
           buyer: { select: { id: true, email: true } },
           center: { select: { id: true, email: true } },
+          consolidatedBatch: true,
         },
       });
     });

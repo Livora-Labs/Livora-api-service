@@ -16,7 +16,7 @@ import { CreateKycApplicationDto } from '../kyc/dto/create-kyc-application.dto';
 import { CreateB2bApplicationDto } from '../b2b/dto/create-b2b-application.dto';
 import { UpdateKycStatusDto } from './dto/update-kyc-status.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
-import { UpdateComplaintStatusDto } from './dto/update-complaint-status.dto';
+import { UpdateComplaintStatusDto } from '../complaints/dto/update-complaint-status.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -119,5 +119,17 @@ export class AdminController {
     @Body() dto: UpdateComplaintStatusDto,
   ) {
     return this.adminService.updateComplaintStatus(id, dto);
+  }
+
+  @Post('admin/payments/:id/retry-mint')
+  @ApiBearerAuth()
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary:
+      'Re-ejecución administrativa de minteo de tokens para pagos con cobro fiduciario confirmado (Rol: ADMIN)',
+  })
+  async retryPaymentMint(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.retryPaymentMint(id);
   }
 }

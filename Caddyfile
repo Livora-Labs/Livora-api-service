@@ -2,9 +2,8 @@
 	email info@runway7fashion.com
 }
 
-# HTTPS con certificado automático de Let's Encrypt (dominio sslip.io -> IP)
-52.200.2.107.sslip.io {
-	# Landing para usuarios finales en la raíz del dominio
+(livora_routes) {
+	# Landing y archivos estáticos públicos
 	handle / {
 		root * /srv/public
 		rewrite * /landing.html
@@ -40,17 +39,76 @@
 		rewrite * /terminos.html
 		file_server
 	}
+
+	# Aplicación Web Frontend (Next.js Standalone)
+	handle /admin* {
+		reverse_proxy frontend:3001
+	}
+	handle /company* {
+		reverse_proxy frontend:3001
+	}
+	handle /libro-de-reclamaciones* {
+		reverse_proxy frontend:3001
+	}
+	handle /_next/* {
+		reverse_proxy frontend:3001
+	}
+	handle /cookies* {
+		reverse_proxy frontend:3001
+	}
+	handle /perfil* {
+		reverse_proxy frontend:3001
+	}
+	handle /centro* {
+		reverse_proxy frontend:3001
+	}
+	handle /verificar-cuenta* {
+		reverse_proxy frontend:3001
+	}
+	handle /recuperar-contrasena* {
+		reverse_proxy frontend:3001
+	}
+	handle /restablecer-contrasena* {
+		reverse_proxy frontend:3001
+	}
+
+	# WebSockets y API Backend (NestJS Fastify)
+	handle /socket.io/* {
+		reverse_proxy livora_api:3000 {
+			lb_policy cookie lb_livora_ws
+			header_up Connection {>Connection}
+			header_up Upgrade {>Upgrade}
+		}
+	}
 	handle {
-		reverse_proxy api:3000
+		reverse_proxy livora_api:3000
 	}
 }
 
-# Se mantiene el acceso HTTP directo por IP (compatibilidad con el mobile actual)
-http://52.200.2.107 {
-	reverse_proxy api:3000
+# Dominio público HTTPS con Let's Encrypt / ZeroSSL (paramétrico con fallback a sslip.io)
+{$DOMAIN:52.200.2.107.sslip.io} {
+	import livora_routes
+}
+
+# Acceso HTTP directo por IP y local (compatibilidad con apps móviles y emuladores)
+http://{$SERVER_IP:52.200.2.107}, http://10.0.2.2, http://localhost, http://127.0.0.1, http://192.168.1.36 {
+	import livora_routes
+}
+
+# Puerto 3000 para compatibilidad directa con emuladores Android (10.0.2.2:3000) y desarrollo local
+http://:3000 {
+	import livora_routes
 }
 
 # ===== Stack Stellar (paralelo, aislado) =====
-stellar.52.200.2.107.sslip.io {
-	reverse_proxy stellar_api:3000
+stellar.{$DOMAIN:52.200.2.107.sslip.io} {
+	handle /socket.io/* {
+		reverse_proxy stellar_api:3000 {
+			header_up Connection {>Connection}
+			header_up Upgrade {>Upgrade}
+		}
+	}
+	handle {
+		reverse_proxy stellar_api:3000
+	}
 }

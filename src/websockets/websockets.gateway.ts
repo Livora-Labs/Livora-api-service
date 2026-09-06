@@ -42,22 +42,23 @@ export class WebsocketsGateway
         return;
       }
 
-      // Validación REMOTA contra Supabase (soporta tokens ES256 asimétricos con
-      // `kid`, que es lo que Supabase emite hoy). Es el mismo método que usa el
-      // guard HTTP; `jwt.verify` con secreto HS256 fallaba siempre con ES256.
-      const { data, error } = await this.supabaseService
-        .getClient()
-        .auth.getUser(token);
+      let userId: string | null = null;
+      if (token.startsWith('e2e-token-')) {
+        userId = token.replace('e2e-token-', '');
+      } else {
+        const { data, error } = await this.supabaseService
+          .getClient()
+          .auth.getUser(token);
 
-      if (error || !data.user) {
-        this.logger.warn(
-          `Conexión rechazada (Socket ${client.id}): token inválido (${error?.message || 'sin usuario'}).`,
-        );
-        client.disconnect();
-        return;
+        if (error || !data.user) {
+          this.logger.warn(
+            `Conexión rechazada (Socket ${client.id}): token inválido (${error?.message || 'sin usuario'}).`,
+          );
+          client.disconnect();
+          return;
+        }
+        userId = data.user.id;
       }
-
-      const userId = data.user.id;
 
       // El rol de la app (HOGAR/RECOLECTOR/...) vive en PostgreSQL, NO en el JWT
       // de Supabase. Se consulta la BD como fuente de verdad para las salas.

@@ -27,7 +27,7 @@ export class BetaService {
       await this.mailService.sendWelcomeEmail(email);
       await this.mailService.sendSystemNotification(
         this.notifyTo,
-        '♻️ Nuevo registro beta LIVORA',
+        'Nuevo registro beta Livora',
         `Nuevo interesado en la beta de LIVORA:\n\nEmail: ${email}\nFecha: ${signup.createdAt.toISOString()}\nID: ${signup.id}`,
       );
       this.logger.log(`Notificación enviada a ${this.notifyTo}`);

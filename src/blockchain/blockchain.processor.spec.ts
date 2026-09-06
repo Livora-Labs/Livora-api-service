@@ -52,6 +52,8 @@ describe('BlockchainProcessor', () => {
           useValue: {
             executeDelegatedTransfer: jest.fn(),
             getNonceOnChain: jest.fn(),
+            notarizeBatchReceipt: jest.fn(),
+            registerBatchWeighed: jest.fn(),
           },
         },
         {
@@ -255,7 +257,7 @@ describe('BlockchainProcessor', () => {
       blockchainService.getWorkerAddress = jest
         .fn()
         .mockReturnValue(Keypair.random().publicKey());
-      blockchainService.registerBatchWeighed = jest.fn().mockResolvedValue({
+      blockchainService.notarizeBatchReceipt = jest.fn().mockResolvedValue({
         hash: 'batch_tx_hash_abc',
       });
 
@@ -283,10 +285,91 @@ describe('BlockchainProcessor', () => {
 
       expect(result.success).toBe(true);
       expect(result.txHash).toBe('batch_tx_hash_abc');
-      expect(blockchainService.registerBatchWeighed).toHaveBeenCalled();
+      expect(blockchainService.notarizeBatchReceipt).toHaveBeenCalled();
     });
 
-    it('should throw error without mock fallback if registerBatchWeighed fails', async () => {
+    it('should build a granular audited manifest with request items and sub-batch metadata for IPFS', async () => {
+      const mockBatch = {
+        id: 'batch-segmented-001',
+        collectorId: 'collector-seg',
+        destinationCenterId: 'center-acopio-A',
+        materialsActual: { PET: 12.5, CARTON: 8.0 },
+        requests: [
+          {
+            id: 'req-01',
+            householdId: 'hh-01',
+            itemsEstimated: { PET: 12.0 },
+            actualWeights: { PET: 12.5 },
+            status: 'COMPLETED',
+            updatedAt: new Date('2026-09-03T10:00:00Z'),
+            household: {
+              id: 'hh-01',
+              walletAddress: Keypair.random().publicKey(),
+              email: 'hh01@livora.pe',
+            },
+          },
+        ],
+      };
+
+      prisma.batch = {
+        findUnique: jest.fn().mockResolvedValue(mockBatch),
+        update: jest.fn(),
+      };
+
+      const job = {
+        name: 'process-batch-blockchain',
+        data: {
+          batchId: 'batch-segmented-001',
+          collectorId: 'collector-seg',
+          centerId: 'center-acopio-A',
+          materialsActual: { PET: 12.5, CARTON: 8.0 },
+          householdIds: ['hh-01'],
+        },
+        id: 'job-segmented-1',
+      } as unknown as Job<any>;
+
+      ipfsService.uploadBatchMetadata = jest.fn().mockResolvedValue('QmGranularCid999');
+      ipfsService.getGatewayUrl = jest.fn().mockReturnValue('https://ipfs.io/ipfs/QmGranularCid999');
+      blockchainService.getWorkerAddress = jest.fn().mockReturnValue(Keypair.random().publicKey());
+      blockchainService.notarizeBatchReceipt = jest.fn().mockResolvedValue({ hash: 'tx_hash_granular_999' });
+
+      prisma.user.findUnique = jest.fn().mockResolvedValue({
+        walletAddress: Keypair.random().publicKey(),
+      } as any);
+      prisma.user.findMany = jest.fn().mockResolvedValue([
+        { id: 'hh-01', walletAddress: Keypair.random().publicKey() },
+      ] as any);
+
+      prisma.$transaction = jest.fn().mockImplementation(async (cb) =>
+        cb({
+          batch: { update: jest.fn() },
+          inventoryItem: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn() },
+          inventoryMovement: { create: jest.fn() },
+        }),
+      );
+      websocketsService.emitBatchCompleted = jest.fn();
+
+      const result = await processor.process(job);
+
+      expect(result.success).toBe(true);
+      expect(ipfsService.uploadBatchMetadata).toHaveBeenCalledWith(
+        expect.objectContaining({
+          batchId: 'batch-segmented-001',
+          collectorId: 'collector-seg',
+          destinationCenterId: 'center-acopio-A',
+          totalKg: 20.5,
+          requests: expect.arrayContaining([
+            expect.objectContaining({
+              requestId: 'req-01',
+              householdId: 'hh-01',
+              status: 'COMPLETED',
+            }),
+          ]),
+        }),
+      );
+    });
+
+    it('should throw error without mock fallback if notarizeBatchReceipt fails', async () => {
       const jobData = {
         batchId: 'batch-002',
         collectorId: 'collector-1',
@@ -307,7 +390,7 @@ describe('BlockchainProcessor', () => {
       blockchainService.getWorkerAddress = jest
         .fn()
         .mockReturnValue(Keypair.random().publicKey());
-      blockchainService.registerBatchWeighed = jest
+      blockchainService.notarizeBatchReceipt = jest
         .fn()
         .mockRejectedValue(new Error('RPC node connection failed'));
 
@@ -399,8 +482,8 @@ describe('BlockchainProcessor', () => {
     });
   });
 
-  describe('Worker events', () => {
-    it('should log worker lifecycle events without throwing', () => {
+  describe('Worker events & DLQ Forwarding', () => {
+    it('should log worker lifecycle events without throwing', async () => {
       const job = {
         id: 'job-evt-1',
         name: 'test-job',
@@ -408,10 +491,42 @@ describe('BlockchainProcessor', () => {
         opts: { attempts: 3 },
       } as any;
       expect(() => processor.onCompleted(job)).not.toThrow();
-      expect(() =>
+      await expect(
         processor.onFailed(job, new Error('Test fail')),
-      ).not.toThrow();
+      ).resolves.not.toThrow();
       expect(() => processor.onError(new Error('Worker error'))).not.toThrow();
+    });
+
+    it('should forward exhausted failed jobs to DLQ when attemptsMade reaches max', async () => {
+      const mockDlq = { add: jest.fn().mockResolvedValue({ id: 'dlq-1' }) };
+      (processor as any).dlqQueue = mockDlq;
+
+      const exhaustedJob = {
+        id: 'job-exhausted-1',
+        name: 'process-batch-blockchain',
+        attemptsMade: 5,
+        opts: { attempts: 5 },
+        data: { batchId: 'b-failed-999' },
+      } as any;
+
+      await processor.onFailed(
+        exhaustedJob,
+        new Error('Stellar RPC node unreachable permanently'),
+      );
+
+      expect(mockDlq.add).toHaveBeenCalledWith(
+        'dlq-process-batch-blockchain',
+        expect.objectContaining({
+          originalJobId: 'job-exhausted-1',
+          originalJobName: 'process-batch-blockchain',
+          failedReason: 'Stellar RPC node unreachable permanently',
+          attemptsMade: 5,
+        }),
+        expect.objectContaining({
+          removeOnComplete: false,
+          removeOnFail: false,
+        }),
+      );
     });
   });
 });

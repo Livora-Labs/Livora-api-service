@@ -21,6 +21,7 @@ describe('BatchesService', () => {
         create: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
+        findMany: jest.fn(),
       },
       collectionRequest: {
         updateMany: jest.fn(),
@@ -50,54 +51,60 @@ describe('BatchesService', () => {
   });
 
   describe('getOpenBatch', () => {
-    it('should return existing OPEN batch and associate unbatched accepted requests', async () => {
-      const mockBatch = {
-        id: 'batch-uuid',
-        collectorId: 'collector-1',
-        status: BatchStatus.OPEN,
-        requests: [],
-      };
-      prismaMock.batch.findFirst.mockResolvedValue(mockBatch);
-      prismaMock.batch.findUnique.mockResolvedValue({
-        ...mockBatch,
-        requests: [],
-      });
+    it('should return all open batches for the collector', async () => {
+      const mockBatches = [
+        {
+          id: 'batch-1',
+          collectorId: 'collector-1',
+          destinationCenterId: 'center-a',
+          status: BatchStatus.OPEN,
+          requests: [],
+        },
+        {
+          id: 'batch-2',
+          collectorId: 'collector-1',
+          destinationCenterId: 'center-b',
+          status: BatchStatus.OPEN,
+          requests: [],
+        },
+      ];
+      prismaMock.batch.findMany.mockResolvedValue(mockBatches);
 
       const result = await service.getOpenBatch('collector-1');
 
-      expect(prismaMock.batch.findFirst).toHaveBeenCalledWith({
+      expect(prismaMock.batch.findMany).toHaveBeenCalledWith({
         where: { collectorId: 'collector-1', status: BatchStatus.OPEN },
-        include: { requests: true },
+        orderBy: { createdAt: 'desc' },
+        include: expect.any(Object),
       });
-      expect(prismaMock.collectionRequest.updateMany).toHaveBeenCalledWith({
-        where: {
-          collectorId: 'collector-1',
-          status: RequestStatus.ACCEPTED,
-          batchId: null,
-        },
-        data: { batchId: 'batch-uuid' },
-      });
-      expect(result).toBeDefined();
+      expect(result).toHaveLength(2);
+      expect(result).toEqual(mockBatches);
     });
 
-    it('should create new OPEN batch if none exists', async () => {
-      const createdBatch = {
-        id: 'new-batch-uuid',
-        collectorId: 'collector-1',
-        status: BatchStatus.OPEN,
-        requests: [],
-      };
-      prismaMock.batch.findFirst.mockResolvedValue(null);
-      prismaMock.batch.create.mockResolvedValue(createdBatch);
-      prismaMock.batch.findUnique.mockResolvedValue(createdBatch);
+    it('should filter by centerId when provided', async () => {
+      const mockBatches = [
+        {
+          id: 'batch-1',
+          collectorId: 'collector-1',
+          destinationCenterId: 'center-a',
+          status: BatchStatus.OPEN,
+          requests: [],
+        },
+      ];
+      prismaMock.batch.findMany.mockResolvedValue(mockBatches);
 
-      const result = await service.getOpenBatch('collector-1');
+      const result = await service.getOpenBatch('collector-1', 'center-a');
 
-      expect(prismaMock.batch.create).toHaveBeenCalledWith({
-        data: { collectorId: 'collector-1', status: BatchStatus.OPEN },
-        include: { requests: true },
+      expect(prismaMock.batch.findMany).toHaveBeenCalledWith({
+        where: {
+          collectorId: 'collector-1',
+          destinationCenterId: 'center-a',
+          status: BatchStatus.OPEN,
+        },
+        orderBy: { createdAt: 'desc' },
+        include: expect.any(Object),
       });
-      expect(result).toBeDefined();
+      expect(result).toHaveLength(1);
     });
   });
 
@@ -167,13 +174,16 @@ describe('BatchesService', () => {
   });
 
   describe('receiveBatch', () => {
-    it('should receive batch, update status to PROCESSING, add queue job and return HTTP 202 payload', async () => {
+    it('should receive batch without discrepancy, update status to PROCESSING, add queue job and return HTTP 202 payload', async () => {
       const mockBatch = {
         id: 'batch-1',
         collectorId: 'collector-1',
         destinationCenterId: 'center-1',
         status: BatchStatus.IN_TRANSIT,
-        requests: [{ householdId: 'h-1' }, { householdId: 'h-2' }],
+        requests: [
+          { householdId: 'h-1', itemsEstimated: { PET: 25.0 } },
+          { householdId: 'h-2', itemsEstimated: { HDPE: 10.0 } },
+        ],
       };
 
       prismaMock.batch.findUnique.mockResolvedValue(mockBatch);
@@ -194,22 +204,53 @@ describe('BatchesService', () => {
       });
       expect(queueMock.add).toHaveBeenCalledWith(
         'process-batch-blockchain',
-        {
+        expect.objectContaining({
           batchId: 'batch-1',
           collectorId: 'collector-1',
           centerId: 'center-1',
           materialsActual: materials,
           householdIds: ['h-1', 'h-2'],
-        },
+          correlationId: expect.any(String),
+        }),
         {
           jobId: 'batch-batch-1',
-          attempts: 3,
+          attempts: 5,
           backoff: {
             type: 'exponential',
-            delay: 5000,
+            delay: 2000,
           },
         },
       );
+    });
+
+    it('should flag batch as FLAGGED_FOR_REVIEW and not queue blockchain job when weight discrepancy exceeds 15%', async () => {
+      const mockBatch = {
+        id: 'batch-1',
+        collectorId: 'collector-1',
+        destinationCenterId: 'center-1',
+        status: BatchStatus.IN_TRANSIT,
+        requests: [
+          { householdId: 'h-1', itemsEstimated: { PET: 10.0 } },
+        ],
+      };
+
+      prismaMock.batch.findUnique.mockResolvedValue(mockBatch);
+      prismaMock.batch.update.mockResolvedValue({
+        ...mockBatch,
+        status: BatchStatus.FLAGGED_FOR_REVIEW,
+        hasDiscrepancy: true,
+      });
+
+      queueMock.add.mockClear();
+
+      // Estimated is 10.0 kg, actual is 20.0 kg (100% discrepancy > 15%)
+      const response = await service.receiveBatch('batch-1', 'center-1', {
+        materialsActual: { PET: 20.0 },
+      });
+
+      expect(response.status).toBe(BatchStatus.FLAGGED_FOR_REVIEW);
+      expect(response.hasDiscrepancy).toBe(true);
+      expect(queueMock.add).not.toHaveBeenCalled();
     });
 
     it('should throw ConflictException (HTTP 409) if batch is already PROCESSING or RECEIVED', async () => {
@@ -228,20 +269,29 @@ describe('BatchesService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
-    it('should throw BadRequestException if batch status is OPEN instead of IN_TRANSIT', async () => {
-      prismaMock.batch.findUnique.mockResolvedValue({
+    it('should receive batch successfully when batch status is OPEN as operational resilience', async () => {
+      const mockBatch = {
         id: 'batch-1',
         collectorId: 'collector-1',
         destinationCenterId: 'center-1',
         status: BatchStatus.OPEN,
-        requests: [],
+        requests: [
+          { householdId: 'h-1', itemsEstimated: { PET: 10.0 } },
+        ],
+      };
+
+      prismaMock.batch.findUnique.mockResolvedValue(mockBatch);
+      prismaMock.batch.update.mockResolvedValue({
+        ...mockBatch,
+        status: BatchStatus.PROCESSING,
       });
 
-      await expect(
-        service.receiveBatch('batch-1', 'center-1', {
-          materialsActual: { PET: 10 },
-        }),
-      ).rejects.toThrow(BadRequestException);
+      const response = await service.receiveBatch('batch-1', 'center-1', {
+        materialsActual: { PET: 10.0 },
+      });
+
+      expect(response.status).toBe(BatchStatus.PROCESSING);
+      expect(queueMock.add).toHaveBeenCalled();
     });
 
     it('should throw ForbiddenException if centerId does not match destinationCenterId', async () => {
@@ -258,6 +308,42 @@ describe('BatchesService', () => {
           materialsActual: { PET: 10 },
         }),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('approveFlaggedBatch', () => {
+    it('should approve FLAGGED_FOR_REVIEW batch and dispatch to blockchain queue', async () => {
+      const mockBatch = {
+        id: 'batch-flagged',
+        collectorId: 'col-1',
+        destinationCenterId: 'center-1',
+        status: BatchStatus.FLAGGED_FOR_REVIEW,
+        materialsActual: { PET: 25.0 },
+        requests: [{ householdId: 'h-1' }],
+      };
+
+      prismaMock.batch.findUnique.mockResolvedValue(mockBatch);
+      prismaMock.batch.update.mockResolvedValue({
+        ...mockBatch,
+        status: BatchStatus.PROCESSING,
+      });
+
+      const res = await service.approveFlaggedBatch('batch-flagged', 'admin-user-id');
+
+      expect(res.status).toBe(BatchStatus.PROCESSING);
+      expect(queueMock.add).toHaveBeenCalled();
+    });
+
+    it('should throw BadRequestException if batch is not FLAGGED_FOR_REVIEW', async () => {
+      prismaMock.batch.findUnique.mockResolvedValue({
+        id: 'batch-open',
+        status: BatchStatus.OPEN,
+        requests: [],
+      });
+
+      await expect(
+        service.approveFlaggedBatch('batch-open', 'admin-id'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

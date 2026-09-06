@@ -1,4 +1,4 @@
-import { Matches, IsNotEmpty, IsNumber, IsPositive } from 'class-validator';
+import { Matches, IsNotEmpty, IsNumber, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateTransactionDto {
@@ -17,7 +17,7 @@ export class CreateTransactionDto {
     description: 'Cantidad de EcoTokens a transferir',
   })
   @IsNotEmpty({ message: 'amount es obligatorio' })
-  @IsNumber({}, { message: 'amount debe ser un número' })
-  @IsPositive({ message: 'amount debe ser un número positivo' })
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'amount debe ser un número con máximo 2 decimales' })
+  @Min(0.10, { message: 'El monto mínimo de transferencia es de 0.10 ECO' })
   amount: number;
 }

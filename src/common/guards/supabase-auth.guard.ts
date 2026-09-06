@@ -7,6 +7,8 @@ import {
 import { SupabaseService } from '../../supabase/supabase.service';
 import { UsersService } from '../../users/users.service';
 
+import * as jwt from 'jsonwebtoken';
+
 @Injectable()
 export class SupabaseAuthGuard implements CanActivate {
   constructor(
@@ -35,18 +37,41 @@ export class SupabaseAuthGuard implements CanActivate {
       throw new UnauthorizedException('Token JWT no especificado');
     }
 
-    const supabaseClient = this.supabaseService.getClient();
-    const { data, error } = await supabaseClient.auth.getUser(token);
+    // Fast-path: Verificación local de firma HMAC con SUPABASE_JWT_SECRET (RFC 7519)
+    const jwtSecret = process.env.SUPABASE_JWT_SECRET;
+    let userId: string | null = null;
 
-    if (error || !data.user) {
-      throw new UnauthorizedException('Token de sesión no válido o expirado');
+    if (jwtSecret) {
+      try {
+        const decoded = jwt.verify(token, jwtSecret) as { sub?: string };
+        if (decoded?.sub) {
+          userId = decoded.sub;
+        }
+      } catch {
+        // Fallback transparente a llamada remota
+      }
     }
 
-    const user = await this.usersService.findById(data.user.id);
+    if (!userId) {
+      const supabaseClient = this.supabaseService.getClient();
+      const { data, error } = await supabaseClient.auth.getUser(token);
+
+      if (error || !data.user) {
+        throw new UnauthorizedException('Token de sesión no válido o expirado');
+      }
+      userId = data.user.id;
+    }
+
+    let user = await this.usersService.findById(userId);
     if (!user) {
-      throw new UnauthorizedException(
-        'Usuario autenticado pero sin perfil local en la base de datos',
-      );
+      if (typeof this.usersService.autoProvisionFromAuth === 'function') {
+        user = await this.usersService.autoProvisionFromAuth(userId);
+      }
+      if (!user) {
+        throw new UnauthorizedException(
+          'Usuario autenticado pero sin perfil local en la base de datos',
+        );
+      }
     }
 
     if (user.deletedAt !== null || user.isActive === false) {

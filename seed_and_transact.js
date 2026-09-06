@@ -15,7 +15,8 @@ const crypto = require('crypto');
 const dotenv = require('dotenv');
 const path = require('path');
 
-dotenv.config({ path: path.join(__dirname, '.env') });
+const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.env';
+dotenv.config({ path: path.join(__dirname, envFile) });
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -155,25 +156,16 @@ const TEST_USERS = [
     ruc: '20609876543',
     bankAccount: '191-98765432-0-01 (BCP Soles)',
   },
-  {
-    email: 'almacen@livora.pe',
-    password: 'LivoraAlmacen2026!',
-    role: 'ALMACEN',
-    name: 'Almacén Central y Logística Livora',
-    phone: '+51 967890123',
-    address: 'Carretera Central Km 14, Ate, Lima',
-    receptionPin: '9012',
-  },
 ];
 
 async function main() {
   console.log('====================================================');
-  console.log('🚀 INICIANDO CREACIÓN DE USUARIOS Y TRANSACCIONES ON-CHAIN');
+  console.log('[INIT] Iniciando creacion de usuarios y transacciones on-chain');
   console.log('====================================================\n');
 
-  console.log(`📡 Stellar RPC: ${RPC_URL}`);
-  console.log(`🪙 Contrato EcoToken: ${CONTRACT_ID}`);
-  console.log(`🔑 Relayer / Worker: ${workerPair.publicKey()}\n`);
+  console.log(`[INFO] Stellar RPC: ${RPC_URL}`);
+  console.log(`[INFO] Contrato EcoToken: ${CONTRACT_ID}`);
+  console.log(`[INFO] Relayer / Worker: ${workerPair.publicKey()}\n`);
 
   const createdUserMap = {};
 
@@ -279,7 +271,7 @@ async function main() {
     });
 
     createdUserMap[u.role] = { ...dbUser, plainPassword: u.password, keypair: pair };
-    console.log(`✅ [${u.role}] ${u.email} -> Wallet: ${dbUser.walletAddress}`);
+    console.log(`[USER_OK] [${u.role}] ${u.email} -> Wallet: ${dbUser.walletAddress}`);
   }
 
   console.log('\n--- 2. EJECUTANDO TRANSACCIONES ON-CHAIN EN STELLAR SOROBAN ---');
@@ -314,7 +306,7 @@ async function main() {
     hash: mintHogarTx.hash,
     url: `https://stellar.expert/explorer/testnet/tx/${mintHogarTx.hash}`,
   });
-  console.log(`   ✨ Hash: ${mintHogarTx.hash}`);
+  console.log(`   [TX_HASH]: ${mintHogarTx.hash}`);
 
   console.log('\n[TX 2] Minando 150.00 ECO a Billetera Recolector...');
   const mintRecTx = await sendContractTx(
@@ -337,7 +329,7 @@ async function main() {
     hash: mintRecTx.hash,
     url: `https://stellar.expert/explorer/testnet/tx/${mintRecTx.hash}`,
   });
-  console.log(`   ✨ Hash: ${mintRecTx.hash}`);
+  console.log(`   [TX_HASH]: ${mintRecTx.hash}`);
 
   console.log('\n[TX 3] Minando 1000.00 ECO a Billetera Empresa B2B...');
   const mintEmpTx = await sendContractTx(
@@ -360,7 +352,7 @@ async function main() {
     hash: mintEmpTx.hash,
     url: `https://stellar.expert/explorer/testnet/tx/${mintEmpTx.hash}`,
   });
-  console.log(`   ✨ Hash: ${mintEmpTx.hash}`);
+  console.log(`   [TX_HASH]: ${mintEmpTx.hash}`);
 
   // B. REGISTRO DE LOTE PESADO ON-CHAIN (register_batch_weighed)
   console.log('\n[TX 4] Registrando Lote de Reciclaje Pesado en Soroban (Trazabilidad Hogar -> Recolector -> Centro)...');
@@ -432,7 +424,7 @@ async function main() {
     url: `https://stellar.expert/explorer/testnet/tx/${batchWeighedTx.hash}`,
     ipfsCid: ipfsCidSample,
   });
-  console.log(`   ✨ Hash: ${batchWeighedTx.hash}`);
+  console.log(`   [TX_HASH]: ${batchWeighedTx.hash}`);
 
   // C. CANJE EN TIENDA ASOCIADA ON-CHAIN (Transferencia Hogar -> Tienda)
   console.log('\n[TX 5] Ejecutando Canje / Pago con EcoTokens en Tienda Aliada...');
@@ -471,7 +463,7 @@ async function main() {
     hash: storePaymentTx.hash,
     url: `https://stellar.expert/explorer/testnet/tx/${storePaymentTx.hash}`,
   });
-  console.log(`   ✨ Hash: ${storePaymentTx.hash}`);
+  console.log(`   [TX_HASH]: ${storePaymentTx.hash}`);
 
   // D. TRANSFERENCIA B2B Y CERTIFICADO ESG
   console.log('\n[TX 6] Creando Transferencia B2B y Notarización de Certificado ESG...');
@@ -500,27 +492,27 @@ async function main() {
     },
   });
 
-  console.log(`   ✨ Certificado ID: ${cert.id}`);
-  console.log(`   ✨ IPFS Hash: ${certIpfs}`);
+  console.log(`   [CERT_ID]: ${cert.id}`);
+  console.log(`   [IPFS_HASH]: ${certIpfs}`);
 
   console.log('\n====================================================');
-  console.log('🎉 PROCESO COMPLETADO CON ÉXITO');
+  console.log('[SUCCESS] Proceso completado exitosamente');
   console.log('====================================================\n');
 
-  console.log('📋 RESUMEN DE USUARIOS CREADOS:');
+  console.log('[ACCOUNTS] Resumen de cuentas verificadas:');
   for (const u of TEST_USERS) {
-    console.log(`• Rol: ${u.role}`);
+    console.log(`- Rol: ${u.role}`);
     console.log(`  Email: ${u.email}`);
     console.log(`  Password: ${u.password}`);
     console.log(`  Panel Web: http://localhost:3001${getPanelPath(u.role)}`);
     console.log(`  Wallet Stellar: ${createdUserMap[u.role].walletAddress}\n`);
   }
 
-  console.log('🔗 TRANSACCIONES EN EL BLOCKCHAIN EXPLORER (StellarExpert):');
+  console.log('[EXPLORER] Transacciones en StellarExpert Testnet:');
   for (const tx of executedTransactions) {
-    console.log(`• ${tx.title} (${tx.amount})`);
+    console.log(`- ${tx.title} (${tx.amount})`);
     console.log(`  Intervinientes: ${tx.user}`);
-    console.log(`  Enlace Explorer: ${tx.url}\n`);
+    console.log(`  Explorer URL: ${tx.url}\n`);
   }
 }
 
@@ -539,7 +531,7 @@ function getPanelPath(role) {
 
 main()
   .catch((e) => {
-    console.error('❌ Error ejecutando script:', e);
+    console.error('[ERROR] Error ejecutando script:', e);
     process.exit(1);
   })
   .finally(() => prisma.$disconnect());

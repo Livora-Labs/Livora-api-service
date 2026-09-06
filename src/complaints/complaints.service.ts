@@ -1,7 +1,9 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ComplaintStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../common/services/mail.service';
 import { CreateComplaintDto } from './dto/create-complaint.dto';
+import { UpdateComplaintStatusDto } from './dto/update-complaint-status.dto';
 import PDFDocument from 'pdfkit';
 
 // Datos del proveedor (fuente única de verdad)
@@ -26,7 +28,7 @@ export interface ComplaintPdfData {
   representativeDoc?: string | null;
   goodType: string;
   goodDescription: string;
-  amount?: number | null;
+  amount?: number | any | null;
   claimType: string;
   claimDetail: string;
   consumerRequest: string;
@@ -92,7 +94,7 @@ export class ComplaintsService {
   async generateComplaintPdf(complaint: ComplaintPdfData): Promise<Buffer> {
     return new Promise<Buffer>((resolve, reject) => {
       try {
-        const doc = new PDFDocument({ margin: 40, size: 'A4' });
+        const doc = new PDFDocument({ margin: 40, size: 'A4', compress: false });
         const chunks: Buffer[] = [];
 
         doc.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -344,5 +346,37 @@ export class ComplaintsService {
       );
     }
     return complaint;
+  }
+
+  /**
+   * Actualiza el estado y sustento legal de una reclamación (Rol: ADMIN).
+   * Registra respondedAt = new Date() cuando pasa a RESOLVED o CLOSED.
+   */
+  async updateComplaintStatus(
+    id: string,
+    dto: UpdateComplaintStatusDto,
+  ) {
+    const complaint = await this.prisma.complaint.findUnique({
+      where: { id },
+    });
+
+    if (!complaint) {
+      throw new NotFoundException(
+        `Hoja de reclamación con ID ${id} no encontrada`,
+      );
+    }
+
+    return this.prisma.complaint.update({
+      where: { id },
+      data: {
+        status: dto.status,
+        legalResponseNote: dto.legalResponseNote ?? complaint.legalResponseNote,
+        respondedAt:
+          dto.status === ComplaintStatus.RESOLVED ||
+          dto.status === ComplaintStatus.CLOSED
+            ? new Date()
+            : complaint.respondedAt,
+      },
+    });
   }
 }

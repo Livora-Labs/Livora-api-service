@@ -42,6 +42,7 @@ describe('StoresService', () => {
       user: {
         findUnique: jest.fn(),
       },
+      $executeRaw: jest.fn().mockResolvedValue(1),
     };
 
     walletsMock = {
@@ -191,8 +192,18 @@ describe('StoresService', () => {
     };
 
     it('should confirm redemption successfully if household user has enough balance', async () => {
-      prismaMock.redemptionTransaction.findUnique.mockResolvedValue(
-        mockRedemption,
+      prismaMock.redemptionTransaction.findUnique.mockImplementation(
+        (args: any) => {
+          if (args?.where?.id) {
+            return Promise.resolve({
+              ...mockRedemption,
+              userId: 'household-uuid',
+              status: RedemptionStatus.COMPLETED,
+              tokenAmount: 15.5,
+            });
+          }
+          return Promise.resolve(mockRedemption);
+        },
       );
       prismaMock.user.findUnique.mockResolvedValue({
         id: 'household-uuid',
@@ -200,12 +211,6 @@ describe('StoresService', () => {
           'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
       });
       walletsMock.getBalance.mockResolvedValue({ balance: '50.0' });
-      prismaMock.redemptionTransaction.update.mockResolvedValue({
-        ...mockRedemption,
-        userId: 'household-uuid',
-        status: RedemptionStatus.COMPLETED,
-        tokenAmount: 15.5,
-      });
 
       const result = await service.confirmRedemption(
         'household-uuid',
@@ -213,21 +218,8 @@ describe('StoresService', () => {
         { termsAccepted: true },
       );
 
-      expect(prismaMock.redemptionTransaction.findUnique).toHaveBeenCalledWith({
-        where: { qrCodeRef: 'LIVORA-QR-xxx' },
-        include: {
-          store: {
-            include: {
-              user: { select: { id: true, walletAddress: true } },
-            },
-          },
-        },
-      });
+      expect(prismaMock.$executeRaw).toHaveBeenCalled();
       expect(walletsMock.getBalance).toHaveBeenCalledWith('household-uuid');
-      expect(prismaMock.redemptionTransaction.update).toHaveBeenCalledWith({
-        where: { id: 'red-uuid' },
-        data: { userId: 'household-uuid', status: RedemptionStatus.COMPLETED, tokenAmount: 15.5 },
-      });
       expect(websocketsMock.emitStoreNotification).toHaveBeenCalledWith(
         'store-user-uuid',
         'redemption:completed',
@@ -258,8 +250,18 @@ describe('StoresService', () => {
     });
 
     it('should apply optional donation and insurance charges successfully', async () => {
-      prismaMock.redemptionTransaction.findUnique.mockResolvedValue(
-        mockRedemption,
+      prismaMock.redemptionTransaction.findUnique.mockImplementation(
+        (args: any) => {
+          if (args?.where?.id) {
+            return Promise.resolve({
+              ...mockRedemption,
+              userId: 'household-uuid',
+              tokenAmount: 17.0,
+              status: RedemptionStatus.COMPLETED,
+            });
+          }
+          return Promise.resolve(mockRedemption);
+        },
       );
       prismaMock.user.findUnique.mockResolvedValue({
         id: 'household-uuid',
@@ -267,12 +269,6 @@ describe('StoresService', () => {
           'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
       });
       walletsMock.getBalance.mockResolvedValue({ balance: '50.0' });
-      prismaMock.redemptionTransaction.update.mockResolvedValue({
-        ...mockRedemption,
-        userId: 'household-uuid',
-        tokenAmount: 17.0, // 15.5 base + 1.0 donation + 0.5 insurance
-        status: RedemptionStatus.COMPLETED,
-      });
 
       const result = await service.confirmRedemption(
         'household-uuid',
@@ -280,10 +276,7 @@ describe('StoresService', () => {
         { termsAccepted: true, donationOptIn: true, insuranceOptIn: true },
       );
 
-      expect(prismaMock.redemptionTransaction.update).toHaveBeenCalledWith({
-        where: { id: 'red-uuid' },
-        data: { userId: 'household-uuid', status: RedemptionStatus.COMPLETED, tokenAmount: 17.0 },
-      });
+      expect(prismaMock.$executeRaw).toHaveBeenCalled();
       expect(queueMock.add).toHaveBeenCalledWith(
         'redemption-transfer',
         expect.objectContaining({
@@ -314,10 +307,14 @@ describe('StoresService', () => {
   });
 
   describe('requestSettlement', () => {
-    it('should create settlement request successfully', async () => {
+    it('should create settlement request successfully when balance is sufficient', async () => {
       prismaMock.storeProfile.findUnique.mockResolvedValue({
         id: 'store-uuid',
       });
+      walletsMock.getBalance.mockResolvedValue({ balance: '100.0' });
+      prismaMock.settlementRequest.aggregate = jest
+        .fn()
+        .mockResolvedValue({ _sum: { tokenAmount: 0 } });
       prismaMock.settlementRequest.create.mockResolvedValue({
         id: 'settlement-uuid',
         storeId: 'store-uuid',
@@ -333,8 +330,25 @@ describe('StoresService', () => {
       expect(prismaMock.storeProfile.findUnique).toHaveBeenCalledWith({
         where: { userId: 'user-uuid' },
       });
+      expect(walletsMock.getBalance).toHaveBeenCalledWith('user-uuid');
       expect(result.fiatAmount).toBe(60.0);
       expect(result.status).toBe(SettlementStatus.PENDING);
+    });
+
+    it('should throw BadRequestException if store available balance is insufficient', async () => {
+      prismaMock.storeProfile.findUnique.mockResolvedValue({
+        id: 'store-uuid',
+      });
+      walletsMock.getBalance.mockResolvedValue({ balance: '20.0' });
+      prismaMock.settlementRequest.aggregate = jest
+        .fn()
+        .mockResolvedValue({ _sum: { tokenAmount: 10.0 } });
+
+      await expect(
+        service.requestSettlement('user-uuid', {
+          tokenAmount: 60.0,
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

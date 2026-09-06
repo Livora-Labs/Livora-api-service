@@ -1,6 +1,6 @@
 services:
 
-  postgres:
+  livora_postgres:
     image: postgis/postgis:16-3.4-alpine
     container_name: livora_postgres
     restart: always
@@ -12,8 +12,18 @@ services:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-livora} -d ${DB_NAME:-livora_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
 
-  redis:
+  livora_redis:
     image: redis:7-alpine
     container_name: livora_redis
     restart: always
@@ -21,8 +31,92 @@ services:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  livora_api:
+    build: .
+    container_name: livora_api
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - APP_MODE=API
+      - PORT=3000
+      - DATABASE_URL=postgresql://${DB_USER:-livora}:${DB_PASSWORD:-livora_secret}@livora_postgres:5432/${DB_NAME:-livora_db}?schema=public
+      - REDIS_HOST=livora_redis
+      - REDIS_PORT=6379
+      - DB_POOL_MAX=10
+    ports:
+      - "${PORT:-3000}:3000"
+    command: npm run start:api
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1));\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      livora_postgres:
+        condition: service_healthy
+      livora_redis:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  livora_worker:
+    build: .
+    container_name: livora_worker
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - APP_MODE=WORKER
+      - DATABASE_URL=postgresql://${DB_USER:-livora}:${DB_PASSWORD:-livora_secret}@livora_postgres:5432/${DB_NAME:-livora_db}?schema=public
+      - REDIS_HOST=livora_redis
+      - REDIS_PORT=6379
+      - DB_POOL_MAX=5
+    command: npm run start:worker
+    depends_on:
+      livora_postgres:
+        condition: service_healthy
+      livora_redis:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  livora_frontend:
+    build:
+      context: ../Livora-frontend
+      dockerfile: Dockerfile
+    container_name: livora_frontend
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost:3000
+    ports:
+      - "${FRONTEND_PORT:-3001}:3000"
+    depends_on:
+      livora_api:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
 
 volumes:
   postgres_data:
   redis_data:
-

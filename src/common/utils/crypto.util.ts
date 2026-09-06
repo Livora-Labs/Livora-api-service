@@ -2,16 +2,39 @@ import * as crypto from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
+const KDF_SALT = 'livora_wallet_encryption_salt_kdf_v1';
+const PBKDF2_ITERATIONS = 100000;
+const KEY_LENGTH = 32;
 
 export class CryptoUtil {
   /**
-   * Encrypts a plain text string (e.g. private key) using AES-256-GCM.
+   * Deriva una clave AES-256 de 32 bytes usando PBKDF2 con SHA-512 (estándar NIST).
+   */
+  private static deriveKeyPbkdf2(secretKey: string): Buffer {
+    return crypto.pbkdf2Sync(
+      String(secretKey),
+      KDF_SALT,
+      PBKDF2_ITERATIONS,
+      KEY_LENGTH,
+      'sha512',
+    );
+  }
+
+  /**
+   * Derivación legacy con SHA-256 simple para retrocompatibilidad con registros existentes.
+   */
+  private static deriveKeyLegacySha256(secretKey: string): Buffer {
+    return crypto.createHash('sha256').update(String(secretKey)).digest();
+  }
+
+  /**
+   * Encrypts a plain text string (e.g. private key) using AES-256-GCM and PBKDF2 key derivation.
    * @param text Plain text to encrypt
-   * @param secretKey 32-character or padded secret key
+   * @param secretKey Master encryption secret
    * @returns Formatted hex string: iv:authTag:encryptedData
    */
   static encrypt(text: string, secretKey: string): string {
-    const key = crypto.createHash('sha256').update(String(secretKey)).digest();
+    const key = this.deriveKeyPbkdf2(secretKey);
     const iv = crypto.randomBytes(IV_LENGTH);
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
 
@@ -25,6 +48,7 @@ export class CryptoUtil {
 
   /**
    * Decrypts a cipher text formatted as iv:authTag:encryptedData.
+   * Attempts decryption with PBKDF2 first; if authentication tag fails, falls back to legacy SHA-256.
    * @param encryptedFormat Encrypted string in hex format
    * @param secretKey Secret key used during encryption
    * @returns Decrypted plain text
@@ -36,16 +60,31 @@ export class CryptoUtil {
     }
 
     const [ivHex, authTagHex, encryptedText] = parts;
-    const key = crypto.createHash('sha256').update(String(secretKey)).digest();
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(authTagHex, 'hex');
 
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(authTag);
+    // 1. Intentar descifrar con la clave estándar PBKDF2
+    try {
+      const key = this.deriveKeyPbkdf2(secretKey);
+      const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+      decipher.setAuthTag(authTag);
 
-    let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
+      let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    } catch (pbkdf2Error) {
+      // 2. Fallback a clave legacy SHA-256 para billeteras previamente cifradas
+      try {
+        const legacyKey = this.deriveKeyLegacySha256(secretKey);
+        const legacyDecipher = crypto.createDecipheriv(ALGORITHM, legacyKey, iv);
+        legacyDecipher.setAuthTag(authTag);
 
-    return decrypted;
+        let legacyDecrypted = legacyDecipher.update(encryptedText, 'hex', 'utf8');
+        legacyDecrypted += legacyDecipher.final('utf8');
+        return legacyDecrypted;
+      } catch {
+        throw new Error('No se pudo descifrar la información o la firma AuthTag no es válida');
+      }
+    }
   }
 }

@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -18,10 +21,16 @@ import { CreateCollectionDto } from './dto/create-collection.dto';
 import { FindCollectionsQueryDto } from './dto/find-collections-query.dto';
 import { UpdateCollectionStatusDto } from './dto/update-collection-status.dto';
 import { VerifyPinDto } from './dto/verify-pin.dto';
+import { SubmitBidDto } from './dto/submit-bid.dto';
+import { SelectBidDto } from './dto/select-bid.dto';
+import { AvailableCollectionsQueryDto } from './dto/available-collections-query.dto';
+import { RateCollectionDto } from './dto/rate-collection.dto';
+import { EditCollectionRequestDto } from './dto/edit-collection-request.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { IpfsTransform } from '../common/decorators/ipfs-transform.decorator';
 
 export interface AuthenticatedUser {
   id: string;
@@ -31,6 +40,7 @@ export interface AuthenticatedUser {
 
 @ApiTags('Collections')
 @ApiBearerAuth()
+@IpfsTransform()
 @Controller('collection-requests')
 @UseGuards(SupabaseAuthGuard, RolesGuard)
 export class CollectionsController {
@@ -122,6 +132,7 @@ export class CollectionsController {
 
           payloadDto = {
             itemsEstimated: itemsEstimatedParsed,
+            assignmentMode: (fields.assignmentMode?.value as any) ?? payloadDto?.assignmentMode,
             description: fields.description?.value ?? payloadDto?.description,
             latitude: fields.latitude?.value
               ? Number(fields.latitude.value)
@@ -139,9 +150,9 @@ export class CollectionsController {
   }
 
   @Get()
-  @Roles(Role.HOGAR, Role.RECOLECTOR)
+  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
   @ApiOperation({
-    summary: 'Listar solicitudes de recolección (Rol: HOGAR / RECOLECTOR)',
+    summary: 'Listar solicitudes de recolección',
   })
   async findAll(
     @CurrentUser() user: AuthenticatedUser,
@@ -150,11 +161,23 @@ export class CollectionsController {
     return this.collectionsService.findAll(user, query);
   }
 
-  @Get(':id')
-  @Roles(Role.HOGAR, Role.RECOLECTOR)
+  @Get('available')
+  @Roles(Role.RECOLECTOR, Role.ADMIN)
   @ApiOperation({
     summary:
-      'Obtener detalle de una solicitud de recolección por ID (Rol: HOGAR / RECOLECTOR)',
+      'Buscar solicitudes de recolección disponibles en radar GPS con filtrado avanzado por Acopio y lotes activos (Rol: RECOLECTOR)',
+  })
+  async findAvailable(
+    @CurrentUser('id') collectorId: string,
+    @Query() query: AvailableCollectionsQueryDto,
+  ) {
+    return this.collectionsService.findAvailable(collectorId, query);
+  }
+
+  @Get(':id')
+  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @ApiOperation({
+    summary: 'Obtener detalle de una solicitud de recolección por ID',
   })
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
@@ -163,24 +186,149 @@ export class CollectionsController {
     return this.collectionsService.findOne(id, user.id, user.role);
   }
 
+  @Post(':id/bids')
+  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @ApiOperation({
+    summary: 'Enviar propuesta/postulación de tarifas a una solicitud en subasta (Rol: CENTRO_ACOPIO)',
+  })
+  async submitBid(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') centerId: string,
+    @Body() dto: SubmitBidDto,
+  ) {
+    return this.collectionsService.submitBid(centerId, id, dto);
+  }
+
+  @Delete(':id/bids/:bidId')
+  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @ApiOperation({
+    summary: 'Retirar propuesta de subasta antes de ser seleccionada (Rol: CENTRO_ACOPIO)',
+  })
+  async withdrawBid(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('bidId', ParseUUIDPipe) bidId: string,
+    @CurrentUser('id') centerId: string,
+  ) {
+    return this.collectionsService.withdrawBid(centerId, id, bidId);
+  }
+
+  @Post(':id/select-bid')
+  @Roles(Role.HOGAR)
+  @ApiOperation({
+    summary: 'Hogar selecciona la propuesta de un Centro de Acopio en modo Subasta (Rol: HOGAR)',
+  })
+  async selectBid(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') householdId: string,
+    @Body() dto: SelectBidDto,
+  ) {
+    return this.collectionsService.selectBid(householdId, id, dto);
+  }
+
+  @Post(':id/claim-automatic')
+  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @ApiOperation({
+    summary: 'Centro de Acopio toma directamente una solicitud en modo Automático (Rol: CENTRO_ACOPIO)',
+  })
+  async claimAutomatic(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') centerId: string,
+  ) {
+    return this.collectionsService.claimAutomatic(centerId, id);
+  }
+
+  @Post(':id/rate')
+  @Roles(Role.HOGAR)
+  @ApiOperation({
+    summary:
+      'Calificar servicio de recolección completado de 1 a 5 estrellas y feedback (Rol: HOGAR)',
+  })
+  async rateCollection(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') householdId: string,
+    @Body() dto: RateCollectionDto,
+  ) {
+    return this.collectionsService.rateCollectionRequest(householdId, id, dto);
+  }
+
   @Patch(':id')
   @Roles(Role.HOGAR, Role.RECOLECTOR)
   @ApiOperation({
-    summary: 'Actualizar estado de solicitud (ej. ACCEPTED o COLLECTED)',
+    summary:
+      'Actualizar solicitud: edición parcial de materiales (HOGAR en PENDING) o actualización de estado',
   })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: UpdateCollectionStatusDto,
+    @Body() body: any,
   ) {
-    return this.collectionsService.updateStatus(id, user.id, user.role, dto);
+    if (
+      user.role === Role.HOGAR &&
+      (body.itemsEstimated !== undefined || (body.description !== undefined && body.status === undefined))
+    ) {
+      return this.collectionsService.editCollectionRequest(user.id, id, body);
+    }
+    return this.collectionsService.updateStatus(id, user.id, user.role, body);
+  }
+
+  async updateRequest(
+    id: string,
+    user: AuthenticatedUser,
+    body: any,
+  ) {
+    return this.updateStatus(id, user, body);
+  }
+
+  @Post(':id/accept')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.RECOLECTOR)
+  @ApiOperation({
+    summary: 'Aceptar solicitud de recolección y bloquear Escrow (Rol: RECOLECTOR)',
+  })
+  async acceptRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.collectionsService.updateStatus(id, user.id, user.role, {
+      status: 'ACCEPTED' as any,
+    });
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.HOGAR, Role.RECOLECTOR)
+  @ApiOperation({
+    summary: 'Cancelar solicitud de recolección en estado PENDING',
+  })
+  async cancelRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.collectionsService.updateStatus(id, user.id, user.role, {
+      status: 'CANCELLED' as any,
+    });
+  }
+
+  @Post(':id/abandon')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.RECOLECTOR)
+  @ApiOperation({
+    summary:
+      'Abandonar recolección aceptada por contingencia operativa y retornar a PENDING (Rol: RECOLECTOR)',
+  })
+  async abandonRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') collectorId: string,
+    @Body('reason') reason?: string,
+  ) {
+    return this.collectionsService.abandonCollectionRequest(id, collectorId, reason);
   }
 
   @Post(':id/verify')
   @Roles(Role.RECOLECTOR)
   @ApiOperation({
     summary:
-      'Verificar entrega física mediante PIN de 4 dígitos del Hogar (Rol: RECOLECTOR)',
+      'Verificar entrega física mediante PIN de 4 dígitos y liquidar tokens con peso real (Rol: RECOLECTOR)',
   })
   async verifyPin(
     @Param('id', ParseUUIDPipe) id: string,
@@ -190,3 +338,4 @@ export class CollectionsController {
     return this.collectionsService.verifyPin(id, collectorId, dto);
   }
 }
+

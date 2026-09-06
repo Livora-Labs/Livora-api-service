@@ -1,9 +1,11 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -12,13 +14,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { WebsocketsService } from '../websockets/websockets.service';
 import { BlockchainService } from '../blockchain/services/blockchain.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateStoreProfileDto } from './dto/create-store-profile.dto';
 import { CreateQrRedemptionDto } from './dto/create-qr-redemption.dto';
 import { CreateSettlementRequestDto } from './dto/create-settlement-request.dto';
 import { PaySettlementDto } from './dto/pay-settlement.dto';
 import { ConfirmRedemptionDto } from './dto/confirm-redemption.dto';
-import { RedemptionStatus, SettlementStatus } from '@prisma/client';
+import { UpdateSettlementStatusDto } from './dto/update-settlement-status.dto';
+import { RedemptionStatus, SettlementStatus, Role } from '@prisma/client';
 import * as crypto from 'crypto';
+import { PaginatedResultDto } from '../common/dto/paginated-result.dto';
 
 @Injectable()
 export class StoresService {
@@ -31,6 +36,7 @@ export class StoresService {
     private readonly configService: ConfigService,
     private readonly blockchainService: BlockchainService,
     @InjectQueue('blockchain-queue') private readonly blockchainQueue: Queue,
+    @Optional() private readonly notificationsService?: NotificationsService,
   ) {}
 
   /**
@@ -163,7 +169,7 @@ export class StoresService {
     if (dto.insuranceOptIn === true) {
       extraAmount += 0.5;
     }
-    const finalAmount = redemption.tokenAmount + extraAmount;
+    const finalAmount = Number(redemption.tokenAmount) + extraAmount;
 
     // 2. Verificar el saldo del Hogar
     const userWallet = await this.prisma.user.findUnique({
@@ -187,15 +193,20 @@ export class StoresService {
       );
     }
 
-    // 3. Vincular y cambiar estado a COMPLETED en una transacción de base de datos
-    const updatedRedemption = await this.prisma.redemptionTransaction.update({
+    // 3. Vincular y cambiar estado a COMPLETED de forma atómica y condicional
+    const result = await this.prisma.$executeRaw`
+      UPDATE redemption_transactions 
+      SET status = 'COMPLETED', "userId" = ${householdUserId}::uuid, "tokenAmount" = ${finalAmount}::numeric, "updatedAt" = NOW()
+      WHERE id = ${redemption.id}::uuid AND status = 'PENDING'
+    `;
+
+    if (result === 0) {
+      throw new ConflictException('Canje procesado previamente o ya no está disponible');
+    }
+
+    const updatedRedemption = (await this.prisma.redemptionTransaction.findUnique({
       where: { id: redemption.id },
-      data: {
-        userId: householdUserId,
-        status: RedemptionStatus.COMPLETED,
-        tokenAmount: finalAmount,
-      },
-    });
+    }))!;
 
     // 4. Disparar notificación WebSocket a la sala privada de la tienda store:${storeUserId}
     const storeUserId = redemption.store.user.id;
@@ -232,6 +243,131 @@ export class StoresService {
   }
 
   /**
+   * POST /stores/redemptions/:id/refund (Rol: TIENDA)
+   * Anulación y reversión de canje de EcoTokens en punto de venta.
+   * Valida:
+   * 1. Que el canje pertenezca a la tienda y esté en COMPLETED.
+   * 2. Que no exceda 24 horas desde createdAt (si excede, HTTP 400).
+   * 3. Guardia anti-doble gasto: Que el saldo libre de EcoTokens de la tienda >= monto del reembolso.
+   * 4. Transacción atómica en PostgreSQL cambiando a REFUNDED.
+   * 5. Encolado asíncrono en BullMQ ('redemption-refund-transfer') para restitución on-chain (Tienda -> Hogar).
+   */
+  async refundRedemption(storeUserId: string, redemptionId: string) {
+    const storeProfile = await this.prisma.storeProfile.findUnique({
+      where: { userId: storeUserId },
+      include: {
+        user: { select: { id: true, walletAddress: true } },
+      },
+    });
+
+    if (!storeProfile) {
+      throw new NotFoundException('Perfil de tienda no encontrado para este usuario');
+    }
+
+    const redemption = await this.prisma.redemptionTransaction.findUnique({
+      where: { id: redemptionId },
+      include: {
+        user: { select: { id: true, walletAddress: true } },
+      },
+    });
+
+    if (!redemption) {
+      throw new NotFoundException('Transacción de canje no encontrada');
+    }
+
+    if (redemption.storeId !== storeProfile.id) {
+      throw new ForbiddenException('Esta transacción no corresponde a tu tienda');
+    }
+
+    if (redemption.status !== (RedemptionStatus.COMPLETED as any)) {
+      throw new BadRequestException(
+        `Solo transacciones en estado COMPLETED pueden ser anuladas (Estado actual: ${redemption.status})`,
+      );
+    }
+
+    // Validación de 24 horas
+    const now = new Date();
+    const createdAt = new Date(redemption.createdAt);
+    const diffHours = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60);
+
+    if (diffHours > 24) {
+      throw new BadRequestException(
+        `El plazo máximo de 24 horas para anular el canje ha expirado (Han transcurrido ${diffHours.toFixed(1)} horas)`,
+      );
+    }
+
+    // Guardia anti-doble gasto: verificar saldo disponible en tokens de la tienda
+    const refundAmount = Number(redemption.tokenAmount);
+    const storeBalanceResult = await this.walletsService.getBalance(storeUserId);
+    const storeBalance = parseFloat(storeBalanceResult.balance || '0');
+
+    if (storeBalance < refundAmount) {
+      throw new BadRequestException(
+        `Saldo insuficiente de EcoTokens en la tienda para revertir el canje. Requerido: ${refundAmount} ECO, Saldo disponible: ${storeBalance} ECO.`,
+      );
+    }
+
+    // Transacción atómica en base de datos
+    const updatedRedemption = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.redemptionTransaction.update({
+        where: { id: redemptionId },
+        data: {
+          status: 'REFUNDED' as any,
+          updatedAt: new Date(),
+        },
+      });
+      return updated;
+    });
+
+    // Encolar trabajo de transferencia on-chain (Tienda -> Hogar) en BullMQ
+    if (
+      redemption.userId &&
+      redemption.user?.walletAddress &&
+      storeProfile.user?.walletAddress
+    ) {
+      await this.blockchainQueue.add(
+        'redemption-refund-transfer',
+        {
+          redemptionId: updatedRedemption.id,
+          fromStoreUserId: storeUserId,
+          toHouseholdUserId: redemption.userId,
+          fromWallet: storeProfile.user.walletAddress,
+          toWallet: redemption.user.walletAddress,
+          tokenAmount: updatedRedemption.tokenAmount,
+        },
+        {
+          attempts: 5,
+          backoff: { type: 'exponential', delay: 5000 },
+        },
+      );
+    }
+
+    // Notificaciones WebSocket y Push
+    this.websocketsService.emitStoreNotification(
+      storeUserId,
+      'redemption:refunded',
+      {
+        redemptionId: updatedRedemption.id,
+        tokenAmount: updatedRedemption.tokenAmount,
+        status: updatedRedemption.status,
+      },
+    );
+
+    if (redemption.userId) {
+      this.notificationsService
+        ?.sendPushNotification(
+          redemption.userId,
+          '↩️ Canje anulado y reembolsado',
+          `Tu canje por ${redemption.tokenAmount} EcoTokens en ${storeProfile.businessName} ha sido anulado. Los tokens han sido devueltos a tu saldo.`,
+          { redemptionId: updatedRedemption.id, status: 'REFUNDED' },
+        )
+        .catch(() => {});
+    }
+
+    return updatedRedemption;
+  }
+
+  /**
    * POST /stores/settlements
    * Solicita una liquidación (Rol: TIENDA).
    * Calcula el fiatAmount (1 Token = 1 Sol) y registra en PENDING.
@@ -244,6 +380,39 @@ export class StoresService {
     if (!storeProfile) {
       throw new NotFoundException(
         'Perfil de tienda no encontrado para este usuario',
+      );
+    }
+
+    if (dto.cci) {
+      const cleanCci = dto.cci.replace(/[\s\-]/g, '');
+      if (cleanCci.length !== 20 || !/^\d{20}$/.test(cleanCci)) {
+        throw new BadRequestException('El CCI bancario debe contener exactamente 20 dígitos numéricos');
+      }
+      if (cleanCci !== storeProfile.bankAccount) {
+        await this.prisma.storeProfile.update({
+          where: { id: storeProfile.id },
+          data: { bankAccount: cleanCci },
+        });
+      }
+    }
+
+    // 1. Validar saldo disponible de EcoTokens para evitar sobregiro o liquidaciones sin respaldo
+    const balanceObj = await this.walletsService.getBalance(userId);
+    const totalBalance = parseFloat(balanceObj.balance) || 0;
+
+    const activePending = await this.prisma.settlementRequest.aggregate({
+      where: {
+        storeId: storeProfile.id,
+        status: SettlementStatus.PENDING,
+      },
+      _sum: { tokenAmount: true },
+    });
+    const alreadyPendingAmount = Number(activePending._sum.tokenAmount || 0);
+    const availableBalance = Math.max(0, totalBalance - alreadyPendingAmount);
+
+    if (availableBalance < dto.tokenAmount) {
+      throw new BadRequestException(
+        `Saldo insuficiente de EcoTokens. Solicitas liquidar ${dto.tokenAmount} ECO, pero tu saldo disponible es de ${availableBalance.toFixed(2)} ECO (Saldo total: ${totalBalance.toFixed(2)} ECO, Retenido en liquidación previa: ${alreadyPendingAmount.toFixed(2)} ECO).`,
       );
     }
 
@@ -288,9 +457,12 @@ export class StoresService {
       throw new NotFoundException('Solicitud de liquidación no encontrada');
     }
 
-    if (settlement.status !== SettlementStatus.PENDING) {
+    if (
+      settlement.status !== SettlementStatus.PENDING &&
+      settlement.status !== SettlementStatus.APPROVED_PENDING_PAYMENT
+    ) {
       throw new ConflictException(
-        `La solicitud de liquidación ya no está pendiente (Estado actual: ${settlement.status})`,
+        `La solicitud de liquidación ya no está pendiente de pago (Estado actual: ${settlement.status})`,
       );
     }
 
@@ -342,6 +514,129 @@ export class StoresService {
   }
 
   /**
+   * Actualiza el estado de una liquidación según su máquina de estados (Rol: ADMIN).
+   * PENDING -> APPROVED_PENDING_PAYMENT | REJECTED | PAID
+   * APPROVED_PENDING_PAYMENT -> PAID | REJECTED
+   */
+  async updateSettlementStatus(
+    settlementId: string,
+    dto: UpdateSettlementStatusDto,
+  ) {
+    const settlement = await this.prisma.settlementRequest.findUnique({
+      where: { id: settlementId },
+      include: {
+        store: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                walletAddress: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!settlement) {
+      throw new NotFoundException('Solicitud de liquidación no encontrada');
+    }
+
+    const storeUserId = settlement.store.user.id;
+
+    if (dto.status === SettlementStatus.APPROVED_PENDING_PAYMENT) {
+      if (settlement.status !== SettlementStatus.PENDING) {
+        throw new ConflictException(
+          `Solo solicitudes en PENDING pueden pasar a APPROVED_PENDING_PAYMENT (Estado actual: ${settlement.status})`,
+        );
+      }
+      const updated = await this.prisma.settlementRequest.update({
+        where: { id: settlementId },
+        data: { status: SettlementStatus.APPROVED_PENDING_PAYMENT },
+      });
+      this.websocketsService.emitStoreNotification(
+        storeUserId,
+        'settlement:approved',
+        {
+          settlementId: updated.id,
+          tokenAmount: updated.tokenAmount,
+          fiatAmount: updated.fiatAmount,
+          status: updated.status,
+        },
+      );
+      return updated;
+    }
+
+    if (dto.status === SettlementStatus.PAID) {
+      if (!dto.receiptUrl) {
+        throw new BadRequestException(
+          'receiptUrl es obligatorio para marcar la liquidación como PAID',
+        );
+      }
+      return this.paySettlement(settlementId, { receiptUrl: dto.receiptUrl });
+    }
+
+    if (dto.status === SettlementStatus.REJECTED) {
+      if (
+        settlement.status !== SettlementStatus.PENDING &&
+        settlement.status !== SettlementStatus.APPROVED_PENDING_PAYMENT
+      ) {
+        throw new ConflictException(
+          `Solo solicitudes en PENDING o APPROVED_PENDING_PAYMENT pueden ser rechazadas (Estado actual: ${settlement.status})`,
+        );
+      }
+      const updated = await this.prisma.settlementRequest.update({
+        where: { id: settlementId },
+        data: {
+          status: SettlementStatus.REJECTED,
+        },
+      });
+      this.websocketsService.emitStoreNotification(
+        storeUserId,
+        'settlement:rejected',
+        {
+          settlementId: updated.id,
+          tokenAmount: updated.tokenAmount,
+          fiatAmount: updated.fiatAmount,
+          status: updated.status,
+          rejectionReason:
+            dto.rejectionReason || 'Rechazada por administración',
+        },
+      );
+      return updated;
+    }
+
+    throw new BadRequestException(
+      `Transición hacia el estado ${dto.status} no permitida`,
+    );
+  }
+
+  /**
+   * Tarea para expirar transacciones de canje (QR) pendientes
+   * que tengan más de 24 horas de antigüedad (invocada desde RedemptionExpirationWorker).
+   */
+  async handleExpirePendingRedemptions() {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const result = await this.prisma.redemptionTransaction.updateMany({
+      where: {
+        status: RedemptionStatus.PENDING,
+        createdAt: {
+          lt: twentyFourHoursAgo,
+        },
+      },
+      data: {
+        status: RedemptionStatus.EXPIRED,
+      },
+    });
+
+    if (result.count > 0) {
+      this.logger.log(
+        `[CRON REDEMPTIONS] Se marcaron ${result.count} códigos QR pendientes como EXPIRED (>24h).`,
+      );
+    }
+  }
+
+  /**
    * Obtiene el perfil de tienda de un usuario (Rol: TIENDA)
    */
   async getProfile(userId: string) {
@@ -389,33 +684,59 @@ export class StoresService {
     });
   }
 
-  async getRedemptions(userId: string) {
+  async getRedemptions(userId: string, page = 1, limit = 15) {
     const storeProfile = await this.prisma.storeProfile.findUnique({
       where: { userId },
     });
     if (!storeProfile) {
       throw new NotFoundException('Perfil de tienda no encontrado');
     }
-    return this.prisma.redemptionTransaction.findMany({
-      where: { storeId: storeProfile.id },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        user: { select: { email: true } },
-      },
-    });
+    const where = { storeId: storeProfile.id };
+    const skip = (page - 1) * limit;
+
+    const readPrisma =
+      (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
+
+    const [total, redemptions] = await Promise.all([
+      readPrisma.redemptionTransaction.count({ where }),
+      readPrisma.redemptionTransaction.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          user: { select: { email: true } },
+        },
+      }),
+    ]);
+
+    return new PaginatedResultDto(redemptions, total, page, limit);
   }
 
-  async getSettlements(userId: string) {
+  async getSettlements(userId: string, page = 1, limit = 15) {
     const storeProfile = await this.prisma.storeProfile.findUnique({
       where: { userId },
     });
     if (!storeProfile) {
       throw new NotFoundException('Perfil de tienda no encontrado');
     }
-    return this.prisma.settlementRequest.findMany({
-      where: { storeId: storeProfile.id },
-      orderBy: { createdAt: 'desc' },
-    });
+    const where = { storeId: storeProfile.id };
+    const skip = (page - 1) * limit;
+
+    const readPrisma =
+      (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
+
+    const [total, settlements] = await Promise.all([
+      readPrisma.settlementRequest.count({ where }),
+      readPrisma.settlementRequest.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return new PaginatedResultDto(settlements, total, page, limit);
   }
 
   async getRedemptionDetails(qrCodeRef: string) {
@@ -444,5 +765,48 @@ export class StoresService {
       businessName: redemption.store.businessName,
       status: redemption.status,
     };
+  }
+
+  /**
+   * GET /stores/allied
+   * Retorna el catálogo de comercios y tiendas aliadas reales registradas en el sistema.
+   */
+  async getAlliedStores() {
+    const readPrisma =
+      (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
+
+    const stores = await readPrisma.user.findMany({
+      where: {
+        role: { in: [Role.TIENDA, Role.ALMACEN] },
+        isActive: true,
+      },
+      include: {
+        storeProfile: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return stores.map((u) => {
+      const sp = u.storeProfile;
+      const name = sp?.businessName || u.name || 'Comercio Aliado';
+      return {
+        id: sp?.id || u.id,
+        userId: u.id,
+        name,
+        businessName: sp?.businessName || u.name || name,
+        category: 'BioFerias & Orgánicos',
+        address: sp?.address || u.address || 'Lima, Perú',
+        latitude: u.latitude || -12.1215,
+        longitude: u.longitude || -77.0298,
+        phone: u.phone || '+51 956789012',
+        email: u.email,
+        discount: 'Canje 1 ECO = S/ 1.00 PEN',
+        description:
+          'Comercio eco-amigable aliado al ecosistema Livora para canje de EcoTokens.',
+        walletAddress: u.walletAddress,
+        logoUrl: sp?.logoUrl,
+        ruc: sp?.ruc,
+      };
+    });
   }
 }

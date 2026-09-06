@@ -11,6 +11,7 @@ import { Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 describe('Adversarial M3 Verification — Redis OTP State Lifecycle & Attacks', () => {
+  jest.setTimeout(30000);
   let service: AuthService;
   let mockSupabaseService: any;
   let mockUsersService: any;

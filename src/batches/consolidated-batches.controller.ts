@@ -12,9 +12,11 @@ import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { IpfsTransform } from '../common/decorators/ipfs-transform.decorator';
 
 @ApiTags('Consolidations')
 @ApiBearerAuth()
+@IpfsTransform()
 @Controller('consolidated-batches')
 @UseGuards(SupabaseAuthGuard, RolesGuard)
 export class ConsolidatedBatchesController {

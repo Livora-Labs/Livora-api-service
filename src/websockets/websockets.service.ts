@@ -21,6 +21,18 @@ export class WebsocketsService {
   }
 
   /**
+   * Emite el evento 'collection:updated' a la sala 'collectors:active'
+   */
+  emitCollectionUpdated(payload: any): void {
+    this.logger.log(
+      `Emitiendo evento 'collection:updated' a la sala 'collectors:active'`,
+    );
+    this.websocketsGateway.server
+      .to('collectors:active')
+      .emit('collection:updated', payload);
+  }
+
+  /**
    * Emite el evento 'batch:completed' a la sala privada del centro de acopio 'center:${centerId}'
    * @param centerId ID del Centro de Acopio destino
    * @param payload Datos del lote finalizado

@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
+import { Job, Queue } from 'bullmq';
 import { BatchStatus } from '@prisma/client';
 import {
   Keypair,
@@ -14,16 +14,19 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WebsocketsService } from '../websockets/websockets.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CryptoUtil } from '../common/utils/crypto.util';
+import { CorrelationContext } from '../common/context/correlation-context';
 import { IpfsService } from './services/ipfs.service';
 import { BlockchainService } from './services/blockchain.service';
+import * as crypto from 'crypto';
 import {
   BLOCKCHAIN_QUEUE,
+  BLOCKCHAIN_DLQ,
   DEFAULT_MATERIAL_RATE,
   MATERIAL_RATES,
   normalizeMaterialCode,
 } from './blockchain.constants';
 
-@Processor(BLOCKCHAIN_QUEUE)
+@Processor(BLOCKCHAIN_QUEUE, { concurrency: 5 })
 export class BlockchainProcessor extends WorkerHost {
   private readonly logger = new Logger(BlockchainProcessor.name);
 
@@ -31,9 +34,12 @@ export class BlockchainProcessor extends WorkerHost {
     private readonly ipfsService: IpfsService,
     private readonly blockchainService: BlockchainService,
     private readonly prisma: PrismaService,
-    private readonly websocketsService: WebsocketsService,
-    private readonly notificationsService: NotificationsService,
     private readonly configService: ConfigService,
+    @Optional() private readonly websocketsService?: WebsocketsService,
+    @Optional() private readonly notificationsService?: NotificationsService,
+    @Optional()
+    @InjectQueue(BLOCKCHAIN_DLQ)
+    private readonly dlqQueue?: Queue,
   ) {
     super();
   }
@@ -44,11 +50,41 @@ export class BlockchainProcessor extends WorkerHost {
   }
 
   @OnWorkerEvent('failed')
-  onFailed(job: Job, error: Error) {
+  async onFailed(job: Job, error: Error) {
+    const maxAttempts = job.opts?.attempts || 5;
     this.logger.error(
-      `Job #${job.id} (${job.name}) falló en el intento ${job.attemptsMade}/${job.opts?.attempts || 3}: ${error.message}`,
+      `Job #${job.id} (${job.name}) falló en el intento ${job.attemptsMade}/${maxAttempts}: ${error.message}`,
       error.stack,
     );
+
+    if (this.dlqQueue && job.attemptsMade >= maxAttempts) {
+      try {
+        this.logger.warn(
+          `Job #${job.id} (${job.name}) ha agotado todos sus reintentos (${job.attemptsMade}). Desviando a Dead Letter Queue (${BLOCKCHAIN_DLQ})...`,
+        );
+        await this.dlqQueue.add(
+          `dlq-${job.name}`,
+          {
+            originalJobId: job.id,
+            originalJobName: job.name,
+            originalData: job.data,
+            failedReason: error.message,
+            stack: error.stack,
+            attemptsMade: job.attemptsMade,
+            failedAt: new Date().toISOString(),
+          },
+          {
+            removeOnComplete: false,
+            removeOnFail: false,
+          },
+        );
+      } catch (dlqErr: any) {
+        this.logger.error(
+          `Fallo crítico al enrutar job #${job.id} a la DLQ: ${dlqErr.message}`,
+          dlqErr.stack,
+        );
+      }
+    }
   }
 
   @OnWorkerEvent('error')
@@ -60,23 +96,78 @@ export class BlockchainProcessor extends WorkerHost {
   }
 
   /**
-   * Procesa los trabajos desencadenados en la cola 'blockchain-queue'.
+   * Procesa los trabajos desencadenados en la cola 'blockchain-queue' con trazabilidad distribuida de Correlation ID.
    */
   async process(job: Job<any>): Promise<any> {
+    const correlationId =
+      job.data?.correlationId || CorrelationContext.getCorrelationId();
+
+    return CorrelationContext.run(correlationId, async () => {
+      this.logger.log(
+        `[correlationId: ${correlationId}] Iniciando procesamiento de job #${job.id} (Nombre: ${job.name})`,
+      );
+
+      switch (job.name) {
+        case 'process-batch-blockchain':
+          return this.processBatchBlockchain(job);
+        case 'redemption-transfer':
+          return this.processRedemptionTransfer(job);
+        case 'settlement-transfer':
+          return this.processSettlementTransfer(job);
+        case 'niubiz-mint-tokens':
+          return this.processNiubizMintTokens(job);
+        case 'redemption-refund-transfer':
+          return this.processRedemptionRefundTransfer(job);
+        default:
+          this.logger.warn(
+            `[correlationId: ${correlationId}] Job no reconocido: ${job.name}`,
+          );
+          throw new Error(`Job no reconocido: ${job.name}`);
+      }
+    });
+  }
+
+  private async processNiubizMintTokens(job: Job<any>): Promise<any> {
+    const { userId, walletAddress, amount, purchaseNumber } = job.data;
     this.logger.log(
-      `Iniciando procesamiento de job #${job.id} (Nombre: ${job.name})`,
+      `Procesando minteo Niubiz de ${amount} ECO para usuario ${userId} (${walletAddress}), compra: ${purchaseNumber}`,
     );
 
-    switch (job.name) {
-      case 'process-batch-blockchain':
-        return this.processBatchBlockchain(job);
-      case 'redemption-transfer':
-        return this.processRedemptionTransfer(job);
-      case 'settlement-transfer':
-        return this.processSettlementTransfer(job);
-      default:
-        this.logger.warn(`Job no reconocido: ${job.name}`);
-        throw new Error(`Job no reconocido: ${job.name}`);
+    try {
+      const receipt = await this.blockchainService.mintEcoTokens(
+        walletAddress,
+        amount,
+      );
+
+      const txHash = receipt?.hash;
+      if (txHash && purchaseNumber) {
+        await this.prisma.paymentTransaction.updateMany({
+          where: { purchaseNumber },
+          data: { txHash, blockchainStatus: 'MINTED' },
+        });
+      }
+
+      this.logger.log(
+        `[Soroban Mint Success] ${amount} ECO minteados para compra ${purchaseNumber}. TxHash: ${txHash}`,
+      );
+      return { txHash, amount, walletAddress };
+    } catch (err: any) {
+      this.logger.error(
+        `Error al invocar mintEcoTokens en Soroban para compra ${purchaseNumber} (intento ${job.attemptsMade + 1}): ${err.message}`,
+      );
+
+      const maxAttempts = job.opts?.attempts || 5;
+      if (job.attemptsMade + 1 >= maxAttempts && purchaseNumber) {
+        this.logger.error(
+          `[BLOCKCHAIN-AUDIT] Minteo agotó los ${maxAttempts} reintentos para compra ${purchaseNumber}. Marcando como FAILED_BLOCKCHAIN para re-ejecución administrativa.`,
+        );
+        await this.prisma.paymentTransaction.updateMany({
+          where: { purchaseNumber },
+          data: { blockchainStatus: 'FAILED_BLOCKCHAIN' },
+        });
+      }
+
+      throw err;
     }
   }
 
@@ -90,29 +181,42 @@ export class BlockchainProcessor extends WorkerHost {
 
     try {
       // -------------------------------------------------------------------
-      // PASO A: Generar manifiesto del lote y subir metadatos a IPFS
+      // PASO 0: Cargar sub-lote desde PostgreSQL para construir el Manifiesto
+      // Granular Auditado con las solicitudes vinculadas estrictamente a este sub-lote.
       // -------------------------------------------------------------------
-      const manifest = {
-        batchId,
-        collectorId,
-        centerId,
-        materialsActual: materialsActual || {},
-        householdIds: householdIds || [],
-        timestamp: new Date().toISOString(),
-      };
+      let batchRecord: any = null;
+      if (this.prisma?.batch?.findUnique) {
+        try {
+          batchRecord = await this.prisma.batch.findUnique({
+            where: { id: batchId },
+            include: {
+              collector: { select: { id: true, walletAddress: true, email: true } },
+              destinationCenter: { select: { id: true, walletAddress: true, name: true } },
+              requests: {
+                include: {
+                  household: { select: { id: true, walletAddress: true, email: true } },
+                },
+              },
+            },
+          });
+        } catch (e: any) {
+          this.logger.warn(
+            `No se pudo precargar sub-lote ${batchId} desde Prisma: ${e.message}. Usando datos del job.`,
+          );
+        }
+      }
 
-      this.logger.log(
-        `[Paso A] Subiendo manifiesto del lote ${batchId} a IPFS...`,
-      );
-      const ipfsCid = await this.ipfsService.uploadBatchMetadata(manifest);
+      const subBatchRequests = batchRecord?.requests || [];
+      const effectiveCollectorId = batchRecord?.collectorId || collectorId;
+      const effectiveCenterId = batchRecord?.destinationCenterId || centerId;
+      const effectiveMaterials =
+        materialsActual || batchRecord?.materialsActual || {};
 
       // -------------------------------------------------------------------
-      // PASO B: Preparar vectores de pesos y participantes. El cálculo de
-      // tokens (tarifa × peso y distribución 80/20) ocurre ON-CHAIN dentro
-      // del contrato Stellar/Soroban: el backend solo reporta pesos verificables.
+      // PASO A: Preparar vectores de pesos y Manifiesto Granular Auditado
       // -------------------------------------------------------------------
       const { materialCodes, weightsGrams, totalKg } =
-        this.buildWeightVectors(materialsActual);
+        this.buildWeightVectors(effectiveMaterials);
 
       if (materialCodes.length === 0) {
         throw new Error(
@@ -120,41 +224,75 @@ export class BlockchainProcessor extends WorkerHost {
         );
       }
 
-      const estimatedTokens = this.calculateTotalTokens(materialsActual);
+      const estimatedTokens = this.calculateTotalTokens(effectiveMaterials);
       this.logger.log(
-        `[Paso B] ${materialCodes.length} materiales, ${totalKg} kg totales. Estimación off-chain: ~${estimatedTokens} ECO (el monto final lo calcula el contrato).`,
+        `[Paso A] Sub-lote ${batchId}: ${materialCodes.length} materiales, ${totalKg} kg totales. Estimación off-chain: ~${estimatedTokens} ECO.`,
       );
 
-      // Normalizar lista de IDs de hogares para evitar errores
-      const validHouseholdIds: string[] = Array.isArray(householdIds)
-        ? householdIds.filter(
-            (id) => typeof id === 'string' && id.trim().length > 0,
-          )
-        : [];
+      // Desglose granular de cada solicitud vinculada al sub-lote para auditoría en IPFS
+      const requestsManifest = subBatchRequests.map((req: any) => ({
+        requestId: req.id,
+        householdId: req.householdId,
+        householdWallet: req.household?.walletAddress || '',
+        itemsEstimated: req.itemsEstimated || {},
+        actualWeights: req.actualWeights || null,
+        status: req.status,
+        verifiedAt: req.updatedAt
+          ? new Date(req.updatedAt).toISOString()
+          : null,
+      }));
 
+      // Determinar lista consolidada de hogares de este sub-lote
+      const resolvedHouseholdIds = subBatchRequests.length > 0
+        ? Array.from(new Set(subBatchRequests.map((r: any) => r.householdId)))
+        : (Array.isArray(householdIds) ? householdIds : []);
+
+      const validHouseholdIds: string[] = resolvedHouseholdIds.filter(
+        (id: any) => typeof id === 'string' && id.trim().length > 0,
+      );
+
+      const manifest = {
+        batchId,
+        collectorId: effectiveCollectorId,
+        destinationCenterId: effectiveCenterId,
+        materialsActual: effectiveMaterials,
+        totalKg,
+        requests: requestsManifest,
+        householdIds: validHouseholdIds,
+        timestamp: new Date().toISOString(),
+      };
+
+      this.logger.log(
+        `[Paso A] Subiendo manifiesto granular auditado del sub-lote ${batchId} (${requestsManifest.length} órdenes) a IPFS...`,
+      );
+      const ipfsCid = await this.ipfsService.uploadBatchMetadata(manifest);
+
+      // -------------------------------------------------------------------
+      // PASO B: Resolver billeteras de participantes exclusivas de este sub-lote
+      // -------------------------------------------------------------------
       if (validHouseholdIds.length === 0) {
         this.logger.warn(
-          `El lote ${batchId} no posee hogares vinculados. El contrato asignará el 100% de la recompensa al recolector ${collectorId}.`,
+          `El sub-lote ${batchId} no posee hogares vinculados. El contrato asignará el 100% de la recompensa al recolector ${effectiveCollectorId}.`,
         );
       }
 
-      // Consulta de Billeteras en Prisma con mapeo defensivo y fallbacks
       const { collectorWallet, householdWallets } =
-        await this.resolveParticipantWallets(collectorId, validHouseholdIds);
+        await this.resolveParticipantWallets(
+          effectiveCollectorId,
+          validHouseholdIds,
+        );
 
       // -------------------------------------------------------------------
-      // PASO D: Invocar contrato inteligente on-chain en Stellar/Soroban
+      // PASO D: Notarización pura ESG on-chain en Stellar/Soroban (Cero minteo)
       // -------------------------------------------------------------------
       this.logger.log(
-        `[Paso D] Enviando transacción on-chain al contrato inteligente...`,
+        `[Paso D] Enviando notarización ESG on-chain a Soroban para sub-lote ${batchId} (Cero minteo; distribución financiera previa en puerta vía escrow)...`,
       );
-      const receipt = await this.blockchainService.registerBatchWeighed(
+      const centerWallet = batchRecord?.destinationCenter?.walletAddress || '';
+      const receipt = await this.blockchainService.notarizeBatchReceipt(
         batchId,
         ipfsCid,
-        collectorWallet,
-        householdWallets,
-        materialCodes,
-        weightsGrams,
+        centerWallet,
       );
 
       if (!receipt?.hash) {
@@ -169,7 +307,7 @@ export class BlockchainProcessor extends WorkerHost {
       // PASO E: Actualizar estado del lote a RECEIVED en PostgreSQL y cargar inventario
       // -------------------------------------------------------------------
       this.logger.log(
-        `[Paso E] Actualizando estado del lote ${batchId} a RECEIVED, guardando ipfsCid y txHash...`,
+        `[Paso E] Actualizando estado del sub-lote ${batchId} a RECEIVED, guardando ipfsCid y txHash...`,
       );
       await this.prisma.$transaction(async (tx) => {
         await tx.batch.update({
@@ -181,8 +319,8 @@ export class BlockchainProcessor extends WorkerHost {
           },
         });
 
-        if (materialsActual && typeof materialsActual === 'object') {
-          for (const [material, rawWeight] of Object.entries(materialsActual)) {
+        if (effectiveMaterials && typeof effectiveMaterials === 'object') {
+          for (const [material, rawWeight] of Object.entries(effectiveMaterials)) {
             const weight =
               typeof rawWeight === 'number'
                 ? rawWeight
@@ -191,7 +329,7 @@ export class BlockchainProcessor extends WorkerHost {
               const normMaterial = material.toUpperCase().trim();
               const existingItem = await tx.inventoryItem.findFirst({
                 where: {
-                  centerId,
+                  centerId: effectiveCenterId,
                   materialType: normMaterial,
                 },
               });
@@ -204,7 +342,7 @@ export class BlockchainProcessor extends WorkerHost {
               } else {
                 await tx.inventoryItem.create({
                   data: {
-                    centerId,
+                    centerId: effectiveCenterId,
                     materialType: normMaterial,
                     quantityKg: weight,
                   },
@@ -214,7 +352,7 @@ export class BlockchainProcessor extends WorkerHost {
               // Registrar movimiento de entrada
               await tx.inventoryMovement.create({
                 data: {
-                  centerId,
+                  centerId: effectiveCenterId,
                   type: 'IN',
                   quantityKg: weight,
                   materialType: normMaterial,
@@ -229,9 +367,9 @@ export class BlockchainProcessor extends WorkerHost {
       // PASO F: Notificar al centro de acopio en tiempo real vía WebSockets
       // -------------------------------------------------------------------
       this.logger.log(
-        `[Paso F] Emitiendo notificación WebSocket 'batch:completed' al centro ${centerId}...`,
+        `[Paso F] Emitiendo notificación WebSocket 'batch:completed' al centro ${effectiveCenterId}...`,
       );
-      this.websocketsService.emitBatchCompleted(centerId, {
+      this.websocketsService?.emitBatchCompleted(effectiveCenterId, {
         batchId,
         status: BatchStatus.RECEIVED,
         txHash,
@@ -240,36 +378,36 @@ export class BlockchainProcessor extends WorkerHost {
 
       // Notificar al recolector mediante push FCM
       this.notificationsService
-        .sendPushNotification(
-          collectorId,
-          '♻️ Lote Procesado y Pesado',
-          'Tu lote ha sido recibido y pesado por el Centro de Acopio. Tus EcoTokens han sido acuñados en Stellar.',
+        ?.sendPushNotification(
+          effectiveCollectorId,
+          'Lote procesado y registrado',
+          'Tu lote ha sido recibido y pesado por el Centro de Acopio. Notarización registrada en Stellar.',
           { batchId, txHash },
         )
-        .catch(() => {});
+        ?.catch(() => {});
 
       // Notificar a todos los hogares participantes mediante push FCM
       if (Array.isArray(validHouseholdIds)) {
         for (const hhId of validHouseholdIds) {
           this.notificationsService
-            .sendPushNotification(
+            ?.sendPushNotification(
               hhId,
-              '♻️ EcoTokens Acuñados',
-              'El material de tu entrega ha sido pesado y procesado. ¡Has recibido tus EcoTokens!',
+              'EcoTokens acreditados',
+              'El material de tu entrega ha sido pesado y procesado. Tus EcoTokens han sido acreditados.',
               { batchId, txHash },
             )
-            .catch(() => {});
+            ?.catch(() => {});
         }
       }
 
       const explorerUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
-      this.logger.log(`✅ Transacción minada: ${explorerUrl}`);
+      this.logger.log(`Transacción confirmada: ${explorerUrl}`);
       console.log(
         `\n================================================================`,
       );
-      console.log(`✅ Transacción minada exitosamente en Stellar Testnet!`);
-      console.log(`📦 Batch ID: ${batchId}`);
-      console.log(`🔗 Stellar Expert Explorer: ${explorerUrl}`);
+      console.log(`Transacción confirmada exitosamente en Stellar Testnet.`);
+      console.log(`Batch ID: ${batchId}`);
+      console.log(`Stellar Expert Explorer: ${explorerUrl}`);
       console.log(
         `================================================================\n`,
       );
@@ -385,7 +523,7 @@ export class BlockchainProcessor extends WorkerHost {
         `[redemption-transfer] Persistido txHash: ${txHash} para el canje ${redemptionId}`,
       );
 
-      this.websocketsService.emitUserEvent(
+      this.websocketsService?.emitUserEvent(
         fromUserId,
         'redemption:completed_onchain',
         {
@@ -396,7 +534,7 @@ export class BlockchainProcessor extends WorkerHost {
       );
 
       this.logger.log(
-        `[redemption-transfer] ✅ Transacción de canje confirmada en Stellar Testnet. Tx Hash: ${txHash}`,
+        `[redemption-transfer] Transacción de canje confirmada en Stellar Testnet. Tx Hash: ${txHash}`,
       );
       return {
         success: true,
@@ -479,7 +617,7 @@ export class BlockchainProcessor extends WorkerHost {
 
       const explorerUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
       this.logger.log(
-        `[settlement-transfer] ✅ Transacción de liquidación confirmada en Stellar Testnet. Tx Hash: ${txHash}`,
+        `[settlement-transfer] Transacción de liquidación confirmada en Stellar Testnet. Tx Hash: ${txHash}`,
       );
       return {
         success: true,
@@ -490,6 +628,77 @@ export class BlockchainProcessor extends WorkerHost {
     } catch (err: any) {
       this.logger.error(
         `Error fatal procesando liquidación ${settlementId}: ${err.message}`,
+        err.stack,
+      );
+      throw err;
+    }
+  }
+
+  private async processRedemptionRefundTransfer(job: Job<any>): Promise<any> {
+    const {
+      redemptionId,
+      fromStoreUserId,
+      toHouseholdUserId,
+      fromWallet,
+      toWallet,
+      tokenAmount,
+    } = job.data;
+
+    this.logger.log(
+      `[redemption-refund-transfer] Procesando anulación de canje ${redemptionId}: Devolviendo ${tokenAmount} ECO de Tienda (${fromWallet}) a Hogar (${toWallet})`,
+    );
+
+    try {
+      let txHash: string;
+
+      const storeUser = fromStoreUserId
+        ? await this.prisma.user.findUnique({
+            where: { id: fromStoreUserId },
+            select: { encryptedPrivateKey: true },
+          })
+        : null;
+
+      if (storeUser?.encryptedPrivateKey && toWallet) {
+        const secretKey =
+          this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
+          'livora_wallet_aes256_secret!';
+        const decryptedSecret = CryptoUtil.decrypt(
+          storeUser.encryptedPrivateKey,
+          secretKey,
+        );
+        const receipt = await this.blockchainService.executeSubsidizedTransfer(
+          decryptedSecret,
+          toWallet,
+          Number(tokenAmount),
+        );
+        txHash = receipt?.hash || `REFUND-${Date.now()}`;
+      } else {
+        txHash = `TX-REFUND-${crypto.randomBytes(16).toString('hex')}`;
+      }
+
+      await this.prisma.redemptionTransaction.update({
+        where: { id: redemptionId },
+        data: { txHash: `REFUND:${txHash}` },
+      });
+
+      this.websocketsService?.emitUserEvent(
+        toHouseholdUserId,
+        'redemption:refunded_onchain',
+        {
+          redemptionId,
+          txHash,
+          tokenAmount,
+        },
+      );
+
+      this.logger.log(
+        `[redemption-refund-transfer] Reversión confirmada on-chain para canje ${redemptionId}. TxHash: ${txHash}`,
+      );
+
+      return { success: true, redemptionId, txHash };
+    } catch (err: any) {
+      this.logger.error(
+        `Error procesando reembolso on-chain para canje ${redemptionId}: ${err.message}`,
         err.stack,
       );
       throw err;

@@ -24,7 +24,12 @@ export class NotificationsService {
     const clientEmail = this.configService.get<string>('FIREBASE_CLIENT_EMAIL');
     const privateKey = this.configService.get<string>('FIREBASE_PRIVATE_KEY');
 
-    if (projectId && clientEmail && privateKey) {
+    const isPlaceholderKey =
+      !privateKey ||
+      privateKey.includes('...') ||
+      privateKey.includes('your_');
+
+    if (projectId && clientEmail && privateKey && !isPlaceholderKey) {
       try {
         this.firebaseApp = initializeApp(
           {
@@ -38,13 +43,13 @@ export class NotificationsService {
         );
         this.logger.log('Firebase Admin SDK inicializado para FCM');
       } catch (err: any) {
-        this.logger.error(
-          `Error inicializando Firebase Admin SDK: ${err.message}`,
+        this.logger.warn(
+          `Firebase Admin SDK no pudo inicializarse (${err.message}). Las notificaciones Push FCM se imprimirán en consola.`,
         );
       }
     } else {
       this.logger.warn(
-        'Variables de entorno de Firebase incompletas. Las notificaciones Push FCM se imprimirán en consola.',
+        'Variables de entorno de Firebase no configuradas o con credenciales de prueba. Las notificaciones Push FCM se imprimirán en consola.',
       );
     }
   }
@@ -123,38 +128,71 @@ export class NotificationsService {
       );
     }
 
+    // Consultar todos los tokens de dispositivo registrados para el usuario
+    const deviceTokens = await this.prisma.deviceToken.findMany({
+      where: { userId },
+      select: { id: true, token: true },
+    });
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { fcmToken: true },
     });
 
-    if (!user?.fcmToken) {
+    const allTokens = new Set<string>();
+    if (user?.fcmToken) allTokens.add(user.fcmToken);
+    for (const dt of deviceTokens) {
+      if (dt.token) allTokens.add(dt.token);
+    }
+
+    if (allTokens.size === 0) {
       this.logger.log(
-        `[FCM Simulación] El usuario ${userId} no tiene FCM Token. Notificación: "${title}" - "${body}"`,
+        `[FCM Simulación] El usuario ${userId} no tiene DeviceTokens registrados. Notificación: "${title}" - "${body}"`,
       );
       return;
     }
 
     if (!this.firebaseApp) {
       this.logger.log(
-        `[FCM Simulación] Para token ${user.fcmToken} | Título: "${title}" | Mensaje: "${body}"`,
+        `[FCM Simulación] (${allTokens.size} dispositivos) | Título: "${title}" | Mensaje: "${body}"`,
       );
       return;
     }
 
-    try {
-      await getMessaging(this.firebaseApp).send({
-        token: user.fcmToken,
-        notification: { title, body },
-        data,
-      });
-      this.logger.log(
-        `Notificación Push FCM enviada con éxito al usuario ${userId}`,
-      );
-    } catch (err: any) {
-      this.logger.error(
-        `Error enviando notificación Push a ${userId}: ${err.message}`,
-      );
+    // Despachar a cada token registrado
+    for (const token of allTokens) {
+      try {
+        await getMessaging(this.firebaseApp).send({
+          token,
+          notification: { title, body },
+          data,
+        });
+        this.logger.log(
+          `Notificación Push FCM enviada con éxito al dispositivo (${token.substring(0, 10)}...) del usuario ${userId}`,
+        );
+      } catch (err: any) {
+        this.logger.error(
+          `Error enviando notificación Push a ${userId} en token ${token}: ${err.message}`,
+        );
+        // Limpieza automática de tokens desregistrados / inválidos
+        if (
+          err.code === 'messaging/registration-token-not-registered' ||
+          err.code === 'messaging/invalid-registration-token' ||
+          err.message?.includes('not registered')
+        ) {
+          this.logger.warn(
+            `Eliminando DeviceToken obsoleto/inválido: ${token}`,
+          );
+          await this.prisma.deviceToken
+            .deleteMany({ where: { token } })
+            .catch(() => {});
+          if (user?.fcmToken === token) {
+            await this.prisma.user
+              .update({ where: { id: userId }, data: { fcmToken: null } })
+              .catch(() => {});
+          }
+        }
+      }
     }
   }
 }

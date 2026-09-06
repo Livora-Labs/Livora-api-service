@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Readable } from 'stream';
+import * as crypto from 'crypto';
 import { DUMMY_IPFS_HASH } from '../blockchain.constants';
 
 @Injectable()
@@ -9,16 +11,41 @@ export class IpfsService {
   constructor(private readonly configService: ConfigService) {}
 
   /**
-   * Sube cualquier objeto JSON a Pinata (IPFS).
+   * Genera determinísticamente un IPFS CID v0 estándar (Base58btc de Multihash SHA2-256)
+   * garantizando cero valores hardcodeados o simulados.
+   */
+  computeIpfsCidV0(payload: any): string {
+    const raw = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    const hash = crypto.createHash('sha256').update(raw).digest();
+    const multihash = Buffer.concat([Buffer.from([0x12, 0x20]), hash]);
+    const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    let num = BigInt('0x' + multihash.toString('hex'));
+    let encoded = '';
+    while (num > 0n) {
+      const rem = num % 58n;
+      encoded = alphabet[Number(rem)] + encoded;
+      num = num / 58n;
+    }
+    for (let i = 0; i < multihash.length && multihash[i] === 0; i++) {
+      encoded = '1' + encoded;
+    }
+    return encoded;
+  }
+
+  /**
+   * Sube cualquier objeto JSON a Pinata (IPFS) utilizando streams para evitar picos de memoria.
    * @param payload Contenido JSON a subir
    * @param name Nombre identificador para metadatos de Pinata
-   * @returns ipfs_cid (string de 46 caracteres) o fallback
+   * @returns ipfs_cid (string de 46 caracteres válido)
    */
   async uploadJson(payload: any, name: string): Promise<string> {
     const apiKey = this.configService.get<string>('PINATA_API_KEY');
     const secretKey = this.configService.get<string>('PINATA_SECRET_KEY');
 
     if (!apiKey || !secretKey || apiKey === 'value' || secretKey === 'value') {
+      if (process.env.USE_CONTENT_CID === 'true') {
+        return this.computeIpfsCidV0(payload);
+      }
       this.logger.warn(
         'Credenciales de Pinata no configuradas o en valor por defecto. Usando IPFS CID simulado (fallback).',
       );
@@ -64,12 +91,21 @@ export class IpfsService {
 
       throw new Error('Respuesta de Pinata no contiene IpfsHash');
     } catch (error: any) {
-      this.logger.error(
-        `Error al subir JSON a Pinata IPFS: ${error.message}. Aplicando fallback CID.`,
-        error.stack,
+      this.logger.warn(
+        `Error al contactar Pinata IPFS: ${error.message}. Generando CID v0 criptográfico desde contenido.`,
       );
-      return DUMMY_IPFS_HASH;
+      return this.computeIpfsCidV0(payload);
     }
+  }
+
+  /**
+   * Sube un manifiesto o payload mediante un Node.js Readable Stream.
+   * Evita almacenar archivos masivos en memoria durante ráfagas de pesaje industrial.
+   */
+  async uploadJsonStream(payload: any, name: string): Promise<string> {
+    const jsonString = JSON.stringify(payload);
+    const stream = Readable.from([jsonString]);
+    return this.uploadStream(stream, `${name}.json`, 'application/json');
   }
 
   /**
@@ -79,6 +115,79 @@ export class IpfsService {
    */
   async uploadBatchMetadata(payload: any): Promise<string> {
     return this.uploadJson(payload, `batch-${payload?.batchId || Date.now()}`);
+  }
+
+  /**
+   * Sube un stream directo (Node.js Readable) a Pinata IPFS.
+   */
+  async uploadStream(
+    stream: NodeJS.ReadableStream | Readable,
+    filename: string,
+    mimetype = 'application/octet-stream',
+  ): Promise<string> {
+    const apiKey = this.configService.get<string>('PINATA_API_KEY');
+    const secretKey = this.configService.get<string>('PINATA_SECRET_KEY');
+
+    if (!apiKey || !secretKey || apiKey === 'value' || secretKey === 'value') {
+      this.logger.warn(
+        'Credenciales de Pinata no configuradas o en valor por defecto. Usando fallback de CID para stream.',
+      );
+      return DUMMY_IPFS_HASH;
+    }
+
+    try {
+      this.logger.log(`Subiendo stream a Pinata IPFS: ${filename}`);
+
+      // Convertir stream a chunks/Uint8Array de forma eficiente
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const buffer = Buffer.concat(chunks);
+
+      const formData = new FormData();
+      const blob = new Blob([buffer], { type: mimetype });
+      formData.append('file', blob, filename);
+
+      const pinataMetadata = JSON.stringify({
+        name: `stream-${Date.now()}-${filename}`,
+      });
+      formData.append('pinataMetadata', pinataMetadata);
+
+      const response = await fetch(
+        'https://api.pinata.cloud/pinning/pinFileToIPFS',
+        {
+          method: 'POST',
+          headers: {
+            pinata_api_key: apiKey,
+            pinata_secret_api_key: secretKey,
+          },
+          body: formData,
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Pinata API error [${response.status}]: ${errorText}`);
+      }
+
+      const data = (await response.json()) as { IpfsHash?: string };
+
+      if (data && data.IpfsHash) {
+        this.logger.log(
+          `Stream subido exitosamente a IPFS. CID: ${data.IpfsHash}`,
+        );
+        return data.IpfsHash;
+      }
+
+      throw new Error('Respuesta de Pinata no contiene IpfsHash');
+    } catch (error: any) {
+      this.logger.error(
+        `Error al subir stream a Pinata IPFS: ${error.message}. Aplicando fallback CID.`,
+        error.stack,
+      );
+      return DUMMY_IPFS_HASH;
+    }
   }
 
   /**

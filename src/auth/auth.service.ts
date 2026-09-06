@@ -1,9 +1,11 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { SupabaseService } from '../supabase/supabase.service';
 import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -30,6 +32,13 @@ export class AuthService {
   ) {}
 
   async register(registerDto: RegisterDto) {
+    // 0. Prohibir autoregistro público del rol ADMINISTRADOR
+    if (registerDto.role === Role.ADMIN) {
+      throw new ForbiddenException(
+        'El rol ADMINISTRADOR no admite autoregistro público',
+      );
+    }
+
     // 1. Verificar si el correo ya existe localmente
     const existingUser = await this.usersService.findByEmail(registerDto.email);
     if (existingUser) {
@@ -382,7 +391,10 @@ export class AuthService {
     }
 
     // Obtener perfil local para incluir el rol en la respuesta
-    const userProfile = await this.usersService.findById(data.user.id);
+    let userProfile = await this.usersService.findById(data.user.id);
+    if (!userProfile) {
+      userProfile = await this.usersService.autoProvisionFromAuth(data.user);
+    }
 
     return {
       accessToken: data.session.access_token,

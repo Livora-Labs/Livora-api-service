@@ -1,9 +1,9 @@
 import {
   IsNotEmpty,
   IsNumber,
-  IsPositive,
   IsString,
   IsUUID,
+  Min,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -18,8 +18,8 @@ export class CreateSaleDto {
     description: 'Peso total vendido en kilogramos',
   })
   @IsNotEmpty({ message: 'weightKg es requerido' })
-  @IsNumber({}, { message: 'weightKg debe ser un número' })
-  @IsPositive({ message: 'weightKg debe ser positivo' })
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'weightKg debe tener como máximo 2 decimales' })
+  @Min(0.5, { message: 'El peso mínimo vendido es de 0.5 kg' })
   weightKg: number;
 
   @ApiProperty({
@@ -27,8 +27,8 @@ export class CreateSaleDto {
     description: 'Monto total acordado de la venta en USD / Token',
   })
   @IsNotEmpty({ message: 'totalAmount es requerido' })
-  @IsNumber({}, { message: 'totalAmount debe ser un número' })
-  @IsPositive({ message: 'totalAmount debe ser positivo' })
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'totalAmount debe tener como máximo 2 decimales' })
+  @Min(0.10, { message: 'El monto total mínimo es de 0.10' })
   totalAmount: number;
 
   @ApiProperty({
@@ -38,4 +38,12 @@ export class CreateSaleDto {
   @IsNotEmpty({ message: 'buyerId es requerido' })
   @IsUUID('4', { message: 'buyerId debe ser un UUID v4 válido' })
   buyerId: string;
+
+  @ApiProperty({
+    required: false,
+    example: '123e4567-e89b-12d3-a456-426614174999',
+    description: 'ID (UUID) opcional del lote consolidado vendido',
+  })
+  @IsUUID('4', { message: 'consolidatedBatchId debe ser un UUID v4 válido' })
+  consolidatedBatchId?: string;
 }

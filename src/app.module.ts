@@ -2,8 +2,9 @@ import { ExecutionContext, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from 'nestjs-throttler-storage-redis';
+import { RoleThrottlerGuard } from './common/guards/role-throttler.guard';
 import { PrismaModule } from './prisma/prisma.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { UsersModule } from './users/users.module';
@@ -24,6 +25,7 @@ import { B2bTransfersModule } from './b2b/b2b-transfers.module';
 import { BetaModule } from './beta/beta.module';
 import { ComplaintsModule } from './complaints/complaints.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { PaymentsModule } from './payments/payments.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { MailService } from './common/services/mail.service';
@@ -44,6 +46,17 @@ import { HealthModule } from './health/health.module';
         connection: {
           host: configService.get<string>('REDIS_HOST', 'localhost'),
           port: configService.get<number>('REDIS_PORT', 6379),
+          maxRetriesPerRequest: null,
+          enableReadyCheck: false,
+        },
+        defaultJobOptions: {
+          attempts: 5,
+          backoff: {
+            type: 'exponential',
+            delay: 2000,
+          },
+          removeOnComplete: { count: 200 },
+          removeOnFail: { count: 1000 },
         },
       }),
     }),
@@ -67,6 +80,7 @@ import { HealthModule } from './health/health.module';
     BetaModule,
     ComplaintsModule,
     UploadsModule,
+    PaymentsModule,
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -75,7 +89,7 @@ import { HealthModule } from './health/health.module';
           {
             name: 'default',
             ttl: 60000,
-            limit: 100,
+            limit: configService.get<number>('THROTTLER_LIMIT') || 100,
           },
           {
             name: 'auth_strict',
@@ -112,10 +126,10 @@ import { HealthModule } from './health/health.module';
             },
           },
           {
-            // Anti-spam para el Libro de Reclamaciones: máx 3 reclamos por hora por IP
+            // Anti-spam para el Libro de Reclamaciones: máx 30 reclamos por hora por IP
             name: 'complaints',
             ttl: 3600000,
-            limit: 3,
+            limit: 30,
             skipIf: (context: ExecutionContext) => {
               const handler = context.getHandler();
               const classRef = context.getClass();
@@ -140,7 +154,7 @@ import { HealthModule } from './health/health.module';
     AppService,
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useClass: RoleThrottlerGuard,
     },
   ],
 })

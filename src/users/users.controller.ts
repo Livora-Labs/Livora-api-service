@@ -7,6 +7,7 @@ import {
   HttpStatus,
   NotFoundException,
   Patch,
+  Post,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -20,6 +21,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -96,6 +98,23 @@ export class UsersController {
   ) {
     await this.usersService.updateFcmToken(userId, fcmToken);
     return { success: true, message: 'Token FCM actualizado' };
+  }
+
+  @Post('me/device-tokens')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Registrar o reasignar token de dispositivo Firebase Cloud Messaging (FCM)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Device token FCM registrado exitosamente',
+  })
+  async registerDeviceToken(
+    @CurrentUser('id') userId: string,
+    @Body() dto: RegisterDeviceTokenDto,
+  ) {
+    return this.usersService.registerDeviceToken(userId, dto);
   }
 
   @Delete('me')

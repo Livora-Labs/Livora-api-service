@@ -401,7 +401,7 @@ class E2EIntegrationController {
 
     const userKeypair = Keypair.fromSecret(decryptedSecret);
     const msg = Buffer.from(`delegated:${dbUser.walletAddress}:${amountEco}:${nonce}`);
-    const signatureHex = userKeypair.sign(msg).toString('hex');
+    const signatureHex = Buffer.from(userKeypair.sign(msg)).toString('hex');
 
     // 3. Relayer executes transfer_delegated on Soroban (paying Stroops gas)
     // Destination: Tienda wallet

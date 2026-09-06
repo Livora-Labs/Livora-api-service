@@ -20,7 +20,13 @@ export class RedisIoAdapter extends IoAdapter {
     const host = this.configService.get<string>('REDIS_HOST', 'localhost');
     const port = this.configService.get<number>('REDIS_PORT', 6379);
 
-    const pubClient = new Redis({ host, port });
+    const pubClient = new Redis({
+      host,
+      port,
+      retryStrategy: (times) => Math.min(times * 100, 3000),
+      maxRetriesPerRequest: null,
+      enableReadyCheck: true,
+    });
     const subClient = pubClient.duplicate();
 
     pubClient.on('error', (err) => {

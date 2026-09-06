@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -61,7 +62,17 @@ export class WalletsController {
       'Consultar historial de transacciones (recompensas y canjes) del usuario',
   })
   @ApiResponse({ status: 200, description: 'Historial retornado exitosamente' })
-  async getTransactionHistory(@CurrentUser('id') userId: string) {
-    return this.walletsService.getTransactionHistory(userId);
+  async getTransactionHistory(
+    @CurrentUser('id') userId: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('direction') direction?: string,
+  ) {
+    return this.walletsService.getTransactionHistory(
+      userId,
+      page ? Number(page) : 1,
+      limit ? Number(limit) : 15,
+      direction,
+    );
   }
 }

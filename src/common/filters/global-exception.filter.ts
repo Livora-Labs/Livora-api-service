@@ -121,8 +121,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
               }
               return { name, reason };
             }
-            // Fallback: string plano — no parsear la primera palabra (rompe con idiomas)
+            // Fallback: string plano de class-validator (ej. "goodType must be one of the following values")
             if (typeof msg === 'string') {
+              const match = msg.match(/^([a-zA-Z0-9_]+)\s+(.+)$/);
+              if (match) {
+                return { name: match[1], reason: msg };
+              }
               return { name: 'field', reason: msg };
             }
             return { name: 'field', reason: String(msg) };

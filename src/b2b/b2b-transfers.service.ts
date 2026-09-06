@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -54,8 +55,8 @@ export class B2bTransfersService {
         },
       });
 
-      const totalIn = aggregateIn._sum.quantityKg || 0;
-      const totalOut = aggregateOut._sum.quantityKg || 0;
+      const totalIn = Number(aggregateIn._sum.quantityKg || 0);
+      const totalOut = Number(aggregateOut._sum.quantityKg || 0);
 
       const allowedLimit = totalIn * (1 - SHRINK_FACTOR);
       if (totalOut + line.weightKg > allowedLimit) {
@@ -74,9 +75,9 @@ export class B2bTransfersService {
         },
       });
 
-      if (!invItem || invItem.quantityKg < line.weightKg) {
+      if (!invItem || Number(invItem.quantityKg) < line.weightKg) {
         throw new BadRequestException(
-          `Inventario insuficiente para ${normMaterial}. Disponible: ${invItem?.quantityKg || 0} kg, requerido: ${line.weightKg} kg.`,
+          `Inventario insuficiente para ${normMaterial}. Disponible: ${Number(invItem?.quantityKg || 0)} kg, requerido: ${line.weightKg} kg.`,
         );
       }
     }
@@ -158,10 +159,21 @@ export class B2bTransfersService {
       );
     }
 
-    // Actualizar estado a RECEIVED
-    const updatedTransfer = await this.prisma.b2bTransfer.update({
+    // Actualización atómica IN_TRANSIT -> RECEIVED para mitigar condición de carrera TOCTOU
+    const rowsAffected = await this.prisma.$executeRaw`
+      UPDATE b2b_transfers
+      SET status = 'RECEIVED'::"B2bTransferStatus", "updatedAt" = NOW()
+      WHERE id = ${id}::uuid AND status = 'IN_TRANSIT'::"B2bTransferStatus"
+    `;
+
+    if (rowsAffected === 0) {
+      throw new ConflictException(
+        'La transferencia B2B ya fue recibida o está siendo procesada concurrentemente.',
+      );
+    }
+
+    const updatedTransfer = await this.prisma.b2bTransfer.findUniqueOrThrow({
       where: { id },
-      data: { status: B2bTransferStatus.RECEIVED },
       include: {
         buyer: { select: { id: true, email: true } },
         center: { select: { id: true, email: true } },
@@ -202,7 +214,7 @@ export class B2bTransfersService {
   async getB2bCompanies() {
     return this.prisma.user.findMany({
       where: { role: 'EMPRESA_B2B' },
-      select: { id: true, email: true, walletAddress: true },
+      select: { id: true, email: true, name: true, walletAddress: true },
     });
   }
 }

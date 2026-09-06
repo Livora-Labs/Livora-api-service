@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { InventoryService } from './inventory.service';
@@ -24,6 +24,27 @@ export class InventoryController {
   async getInventory(@CurrentUser() user: any) {
     const centerId = user.role === Role.ADMIN ? undefined : user.id;
     return this.inventoryService.getInventory(centerId);
+  }
+
+  @Get('inventory/movements')
+  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @ApiOperation({
+    summary:
+      'Consultar historial de movimientos (Kárdex) de inventario (Rol: CENTRO_ACOPIO / ALMACEN / ADMIN)',
+  })
+  async getMovements(
+    @CurrentUser() user: any,
+    @Query('materialType') materialType?: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    const centerId = user.role === Role.ADMIN ? undefined : user.id;
+    return this.inventoryService.getMovements(
+      centerId,
+      materialType,
+      page ? Number(page) : 1,
+      limit ? Number(limit) : 15,
+    );
   }
 
   @Post('inventory/movements')

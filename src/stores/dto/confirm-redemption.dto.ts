@@ -5,10 +5,12 @@ export class ConfirmRedemptionDto {
   @ApiProperty({
     example: true,
     description: 'Aceptación obligatoria de los Términos y Condiciones de Uso',
+    required: false,
+    default: true,
   })
-  @IsNotEmpty({ message: 'termsAccepted es obligatorio' })
+  @IsOptional()
   @IsBoolean({ message: 'termsAccepted debe ser un valor booleano' })
-  termsAccepted: boolean;
+  termsAccepted: boolean = true;
 
   @ApiProperty({
     example: false,
@@ -31,4 +33,13 @@ export class ConfirmRedemptionDto {
   @IsOptional()
   @IsString({ message: 'householdUserId debe ser un string' })
   householdUserId?: string;
+
+  @ApiProperty({
+    example: 'LIVORA-QR-12345',
+    description: 'Código de referencia QR del cobro',
+    required: false,
+  })
+  @IsOptional()
+  @IsString({ message: 'qrCodeRef debe ser un string' })
+  qrCodeRef?: string;
 }

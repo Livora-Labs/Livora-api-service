@@ -185,8 +185,9 @@ describe('UsersService', () => {
         where: { id: 'user-1234-5678' },
         data: expect.objectContaining({
           email: expect.stringMatching(
-            /^deleted_user-123_\d+@deleted\.livora\.org$/,
+            /^deleted_user-1234-5678_\d+@anon\.livora\.pe$/,
           ),
+          name: 'ANONIMO',
           encryptedPrivateKey: null,
           fcmToken: null,
           receptionPin: null,
@@ -257,7 +258,7 @@ describe('UsersService', () => {
       expect(mockPrismaService.user.update).toHaveBeenCalled();
     });
 
-    it('should support deleteAccountGDPR alias', async () => {
+    it('should support anonymizeUser and deleteAccountGDPR aliases', async () => {
       const activeUser = {
         id: 'user-gdpr-1',
         email: 'gdpr@livora.io',
@@ -266,8 +267,11 @@ describe('UsersService', () => {
       };
       mockPrismaService.user.findUnique.mockResolvedValue(activeUser);
 
-      const result = await service.deleteAccountGDPR('user-gdpr-1');
-      expect(result.success).toBe(true);
+      const result1 = await service.deleteAccountGDPR('user-gdpr-1');
+      expect(result1.success).toBe(true);
+
+      const result2 = await service.anonymizeUser('user-gdpr-1');
+      expect(result2.success).toBe(true);
     });
   });
 

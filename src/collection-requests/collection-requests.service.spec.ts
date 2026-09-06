@@ -5,8 +5,12 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { IpfsService } from '../blockchain/services/ipfs.service';
 import { WebsocketsService } from '../websockets/websockets.service';
 import { CollectionsService } from '../collections/collections.service';
+import { RedisService } from '../redis/redis.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RequestStatus } from '@prisma/client';
+
+import { ConfigService } from '@nestjs/config';
+import { BlockchainService } from '../blockchain/services/blockchain.service';
 
 describe('CollectionsService - verifyPin', () => {
   let service: CollectionsService;
@@ -21,6 +25,14 @@ describe('CollectionsService - verifyPin', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
     },
+    $executeRaw: jest.fn().mockResolvedValue(1),
+  };
+
+  const mockRedisService = {
+    get: jest.fn(),
+    set: jest.fn(),
+    setNX: jest.fn().mockResolvedValue(true),
+    del: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -28,12 +40,25 @@ describe('CollectionsService - verifyPin', () => {
       providers: [
         CollectionsService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: RedisService, useValue: mockRedisService },
         { provide: SupabaseService, useValue: {} },
         { provide: IpfsService, useValue: {} },
+        {
+          provide: BlockchainService,
+          useValue: {
+            getBalance: jest.fn().mockResolvedValue('100'),
+            executeSubsidizedTransfer: jest.fn().mockResolvedValue({ hash: 'tx-mock' }),
+            getWorkerAddress: jest.fn().mockReturnValue('GA_MOCK_WORKER'),
+          },
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('mock-val') },
+        },
         { provide: WebsocketsService, useValue: {} },
         {
           provide: NotificationsService,
-          useValue: { sendPushNotification: jest.fn() },
+          useValue: { sendPushNotification: jest.fn().mockReturnValue(Promise.resolve(true)) },
         },
       ],
     }).compile();
@@ -55,14 +80,16 @@ describe('CollectionsService - verifyPin', () => {
     };
     const mockBatch = { id: 'batch-1' };
 
-    mockPrismaService.collectionRequest.findUnique.mockResolvedValue(
-      mockRequest,
-    );
-    mockPrismaService.batch.findFirst.mockResolvedValue(mockBatch);
-    mockPrismaService.collectionRequest.update.mockResolvedValue({
-      ...mockRequest,
-      status: RequestStatus.COMPLETED,
+    mockPrismaService.collectionRequest.findUnique.mockImplementation((args: any) => {
+      if (args?.include?.assignedCenter) {
+        return Promise.resolve({
+          ...mockRequest,
+          status: RequestStatus.COMPLETED,
+        });
+      }
+      return Promise.resolve(mockRequest);
     });
+    mockPrismaService.batch.findFirst.mockResolvedValue(mockBatch);
 
     const result = await service.verifyPin('req-1', 'collector-1', {
       pin: '1234',
@@ -70,11 +97,12 @@ describe('CollectionsService - verifyPin', () => {
 
     expect(prisma.collectionRequest.findUnique).toHaveBeenCalledWith({
       where: { id: 'req-1' },
+      include: {
+        household: true,
+        collector: true,
+      },
     });
-    expect(prisma.collectionRequest.update).toHaveBeenCalledWith({
-      where: { id: 'req-1' },
-      data: { status: RequestStatus.COMPLETED, batchId: 'batch-1' },
-    });
+    expect(mockPrismaService.$executeRaw).toHaveBeenCalled();
     expect(result.status).toBe(RequestStatus.COMPLETED);
   });
 

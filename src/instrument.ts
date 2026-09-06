@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import * as Sentry from '@sentry/nestjs';
 
 const sentryDsn = process.env.SENTRY_DSN_BACKEND || process.env.SENTRY_DSN;

@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -16,6 +17,8 @@ import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
+import { RequireIdempotency } from '../common/decorators/require-idempotency.decorator';
 
 @ApiTags('B2B Transfers')
 @ApiBearerAuth()
@@ -25,6 +28,8 @@ export class B2bTransfersController {
   constructor(private readonly b2bTransfersService: B2bTransfersService) {}
 
   @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
+  @UseInterceptors(IdempotencyInterceptor)
+  @RequireIdempotency()
   @Post()
   @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
   @ApiOperation({

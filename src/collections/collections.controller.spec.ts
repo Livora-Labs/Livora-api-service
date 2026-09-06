@@ -16,6 +16,11 @@ describe('CollectionsController', () => {
     findOne: jest.fn(),
     updateStatus: jest.fn(),
     verifyPin: jest.fn(),
+    submitBid: jest.fn(),
+    withdrawBid: jest.fn(),
+    selectBid: jest.fn(),
+    claimAutomatic: jest.fn(),
+    abandonCollectionRequest: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -218,4 +223,90 @@ describe('CollectionsController', () => {
       expect(result).toEqual(expected);
     });
   });
+
+  describe('submitBid', () => {
+    it('should call service.submitBid with centerId, requestId and dto', async () => {
+      const dto = { proposedRates: { PET: 1.2 } };
+      const expected = { id: 'bid-1', status: 'PENDING' };
+      mockCollectionsService.submitBid.mockResolvedValue(expected);
+
+      const result = await controller.submitBid('req-1', 'center-1', dto);
+
+      expect(mockCollectionsService.submitBid).toHaveBeenCalledWith(
+        'center-1',
+        'req-1',
+        dto,
+      );
+      expect(result).toEqual(expected);
+    });
+  });
+
+  describe('withdrawBid', () => {
+    it('should call service.withdrawBid with centerId, requestId and bidId', async () => {
+      const expected = { success: true };
+      mockCollectionsService.withdrawBid.mockResolvedValue(expected);
+
+      const result = await controller.withdrawBid('req-1', 'bid-1', 'center-1');
+
+      expect(mockCollectionsService.withdrawBid).toHaveBeenCalledWith(
+        'center-1',
+        'req-1',
+        'bid-1',
+      );
+      expect(result).toEqual(expected);
+    });
+  });
+
+  describe('selectBid', () => {
+    it('should call service.selectBid with householdId, requestId and dto', async () => {
+      const dto = { bidId: 'bid-1' };
+      const expected = { id: 'req-1', assignedCenterId: 'center-1' };
+      mockCollectionsService.selectBid.mockResolvedValue(expected);
+
+      const result = await controller.selectBid('req-1', 'household-1', dto);
+
+      expect(mockCollectionsService.selectBid).toHaveBeenCalledWith(
+        'household-1',
+        'req-1',
+        dto,
+      );
+      expect(result).toEqual(expected);
+    });
+  });
+
+  describe('claimAutomatic', () => {
+    it('should call service.claimAutomatic with centerId and requestId', async () => {
+      const expected = { id: 'req-1', assignedCenterId: 'center-1' };
+      mockCollectionsService.claimAutomatic.mockResolvedValue(expected);
+
+      const result = await controller.claimAutomatic('req-1', 'center-1');
+
+      expect(mockCollectionsService.claimAutomatic).toHaveBeenCalledWith(
+        'center-1',
+        'req-1',
+      );
+      expect(result).toEqual(expected);
+    });
+  });
+
+  describe('abandonRequest', () => {
+    it('should call service.abandonCollectionRequest with id, collectorId and reason', async () => {
+      const expected = { id: 'req-1', status: 'PENDING', collectorId: null };
+      mockCollectionsService.abandonCollectionRequest.mockResolvedValue(expected);
+
+      const result = await controller.abandonRequest(
+        'req-1',
+        'collector-1',
+        'Avería mecánica en camión',
+      );
+
+      expect(mockCollectionsService.abandonCollectionRequest).toHaveBeenCalledWith(
+        'req-1',
+        'collector-1',
+        'Avería mecánica en camión',
+      );
+      expect(result).toEqual(expected);
+    });
+  });
 });
+

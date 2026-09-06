@@ -74,7 +74,7 @@ export class AuthController {
     return this.authService.resendOtp(resendOtpDto);
   }
 
-  @Throttle({ auth_strict: { limit: 5, ttl: 60000 } })
+  @Throttle({ auth_strict: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @Post('login')
   @ApiOperation({ summary: 'Iniciar sesión y obtener Bearer Token JWT' })

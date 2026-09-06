@@ -3,6 +3,7 @@ import {
   NestInterceptor,
   ExecutionContext,
   CallHandler,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Observable } from 'rxjs';
@@ -12,9 +13,10 @@ import { map } from 'rxjs/operators';
 export class IpfsGatewayInterceptor implements NestInterceptor {
   private gatewayUrl: string;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(@Optional() private readonly configService?: ConfigService) {
     const gateway =
-      this.configService.get<string>('IPFS_GATEWAY_URL') ||
+      (this.configService &&
+        this.configService.get<string>('IPFS_GATEWAY_URL')) ||
       'https://ipfs.io/ipfs/';
     this.gatewayUrl = gateway.endsWith('/') ? gateway : `${gateway}/`;
   }
