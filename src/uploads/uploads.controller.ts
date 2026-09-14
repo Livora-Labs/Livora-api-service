@@ -1,12 +1,12 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Post,
-  UploadedFile,
+  Req,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import type { FastifyRequest } from 'fastify';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -30,17 +30,29 @@ export class UploadsController {
       'Subir un archivo (foto de recolección, documento KYC o recibo). Devuelve la URL pública.',
   })
   @ApiConsumes('multipart/form-data')
-  @ApiResponse({
-    status: 201,
-    description: '{ url, purpose, mimeType, size }',
-  })
-  @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
-  )
+  @ApiResponse({ status: 201, description: '{ url, purpose, mimeType, size }' })
   async upload(
-    @UploadedFile() file: Express.Multer.File,
+    @Req() req: FastifyRequest,
     @Body('purpose') purpose?: string,
   ) {
+    // @fastify/multipart está registrado globalmente (attachFieldsToBody +
+    // onFile), por lo que el archivo llega en req.incomingFile y los campos de
+    // texto (purpose) en el body. No se usa FileInterceptor (era de Express).
+    const file = (req as unknown as {
+      incomingFile?: {
+        originalname: string;
+        mimetype: string;
+        buffer: Buffer;
+        size: number;
+      };
+    }).incomingFile;
+
+    if (!file) {
+      throw new BadRequestException(
+        'No se recibió ningún archivo. Envía multipart/form-data con un campo "file".',
+      );
+    }
+
     return this.uploadsService.upload(file, purpose);
   }
 }

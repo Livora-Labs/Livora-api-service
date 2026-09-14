@@ -50,7 +50,15 @@ export class UploadsService implements OnModuleInit {
     }
   }
 
-  async upload(file: Express.Multer.File, purposeRaw?: string) {
+  async upload(
+    file: {
+      originalname: string;
+      mimetype: string;
+      buffer: Buffer;
+      size: number;
+    },
+    purposeRaw?: string,
+  ) {
     if (!file) {
       throw new BadRequestException(
         'No se recibió ningún archivo en el campo "file"',
