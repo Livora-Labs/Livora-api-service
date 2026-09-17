@@ -10,9 +10,9 @@ Proyecto presentado en la **Hackathon Ethereum Lima 2026** (transicionado a Stel
 
 | Recurso | URL |
 |---|---|
-| API en producción (HTTPS) | https://52.200.2.107.sslip.io |
-| Swagger — documentación interactiva | https://52.200.2.107.sslip.io/api/docs |
-| Arquitectura del sistema | https://52.200.2.107.sslip.io/arquitectura |
+| API en producción (HTTPS) | https://api.grupolivoralabs.com |
+| Swagger — documentación interactiva | https://api.grupolivoralabs.com/api/docs |
+| Arquitectura del sistema | https://grupolivoralabs.com/arquitectura |
 | Contrato `EcoBatchRegistry` en Stellar Testnet | https://stellar.expert/explorer/testnet/contract/CDTSHH6HOZZ76PNILNWCR63PAM5UDS7FGA3QWZOBP6UYN2WU4PC6GLOJ |
 
 ---
@@ -36,7 +36,7 @@ Stellar Soroban · EcoBatchRegistry (Rust→WASM)
 PostgreSQL (estado RECEIVED) + notificación Socket.IO en tiempo real
 ```
 
-El cálculo de incentivos ocurre **dentro del contrato**: el backend solo reporta pesos en gramos y el contrato aplica las tarifas por material (PET 10 ECO/kg, aluminio 15, vidrio 3…) y la distribución 80% hogares / 20% recolector, emitiendo eventos como auditoría pública. Detalle completo en la [página de arquitectura](https://52.200.2.107.sslip.io/arquitectura) y en [`docs/specs/`](docs/specs/).
+El cálculo de incentivos ocurre **dentro del contrato**: el backend solo reporta pesos en gramos y el contrato aplica las tarifas por material (PET 10 ECO/kg, aluminio 15, vidrio 3…) y la distribución 80% hogares / 20% recolector, emitiendo eventos como auditoría pública. Detalle completo en la [página de arquitectura](https://grupolivoralabs.com/arquitectura) y en [`docs/specs/`](docs/specs/).
 
 ---
 

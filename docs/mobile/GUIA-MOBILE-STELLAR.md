@@ -8,7 +8,7 @@
 
 | Entorno | Base URL | Notas |
 |---|---|---|
-| **Stellar (usar este)** | `https://stellar.52.200.2.107.sslip.io` | API de la rama `Stellar-migration`. Swagger en `/api/docs`. |
+| **Stellar (usar este)** | `https://api.grupolivoralabs.com` | API de la rama `Stellar-migration`. Swagger en `/api/docs`. |
 | Arbitrum (anterior, sigue vivo) | `https://52.200.2.107.sslip.io` | No apuntar aquí. |
 
 - Todo HTTPS. Header de auth: `Authorization: Bearer <accessToken>`.
@@ -154,7 +154,7 @@ Sí hay gateway Socket.IO con adaptador Redis, **estable en Stellar**. Autentica
 
 **Conexión:**
 ```js
-io('https://stellar.52.200.2.107.sslip.io', { auth: { token: accessToken } })
+io('https://api.grupolivoralabs.com', { auth: { token: accessToken } })
 // alternativa: ?token=<accessToken> en la query
 ```
 El JWT se valida contra `SUPABASE_JWT_SECRET`. Sin token → el server desconecta el socket.
@@ -295,7 +295,7 @@ Flujo en la app: subir el archivo → tomar `url` → mandarla como `photoUrl` /
 
 ## 10. Checklist mobile
 
-- [ ] Base URL → `https://stellar.52.200.2.107.sslip.io`.
+- [ ] Base URL → `https://api.grupolivoralabs.com`.
 - [ ] Registro en 2 pasos + política de contraseña completa (may/min/número/símbolo).
 - [ ] Guardar `accessToken` + `refreshToken`; renovar con `POST /auth/refresh` (usar `expiresIn` o ante 401).
 - [ ] Leer `user` del login/verify (rol + wallet); opcional `GET /users/me`.
@@ -310,4 +310,4 @@ Flujo en la app: subir el archivo → tomar `url` → mandarla como `photoUrl` /
 
 ---
 
-_Verificado contra el código de la rama `Stellar-migration`. Contratos exactos: Swagger en `https://stellar.52.200.2.107.sslip.io/api/docs`._
+_Verificado contra el código de la rama `Stellar-migration`. Contratos exactos: Swagger en `https://api.grupolivoralabs.com/api/docs`._
