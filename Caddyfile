@@ -99,7 +99,12 @@
 	handle /restablecer-contrasena* {
 		reverse_proxy frontend:3001
 	}
-	handle /store* {
+	# Portal Comercial / Tienda Aliada (Páginas Web Next.js - no interceptar /stores API de NestJS)
+	@store_pages {
+		path /store /store/*
+		not path /stores*
+	}
+	handle @store_pages {
 		reverse_proxy frontend:3001
 	}
 
