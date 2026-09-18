@@ -11,32 +11,45 @@ enum Role {
   RECOLECTOR
   CENTRO_ACOPIO
   EMPRESA_B2B
-  ALMACEN
   ADMIN
   TIENDA
 }
 
+enum UserStatus {
+  PENDING_EMAIL_VERIFICATION
+  ACTIVE
+  LOCKED_PIN_ATTEMPTS
+  SUSPENDED_DEBT
+  SUSPENDED_FRAUD
+  DELETION_REQUESTED
+  DELETED_ARCO
+}
+
 model User {
-  id                  String    @id @db.Uuid
-  email               String    @unique
+  id                  String     @id @db.Uuid
+  email               String     @unique
   role                Role
-  walletAddress       String?   @unique
+  userStatus          UserStatus @default(ACTIVE)
+  profilePhotoUrl     String?
+  walletAddress       String?    @unique
   encryptedPrivateKey String?
+  encryptionIv        String?
+  encryptionTag       String?
   receptionPin        String?
   fcmToken            String?
-  isActive            Boolean   @default(true)
+  isActive            Boolean    @default(true)
   deletedAt           DateTime?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
   name                String?
   phone               String?
   address             String?
   latitude            Float?
   longitude           Float?
-  marketingAccepted   Boolean   @default(false)
-  reputationScore     Float     @default(5.0)
-  totalRatings        Int       @default(0)
-  requiresQaReview    Boolean   @default(false)
+  marketingAccepted   Boolean    @default(false)
+  reputationScore     Float      @default(5.0)
+  totalRatings        Int        @default(0)
+  requiresQaReview    Boolean    @default(false)
 
   householdRequests      CollectionRequest[] @relation("HouseholdRequests")
   collectorRequests      CollectionRequest[] @relation("CollectorRequests")
@@ -54,6 +67,7 @@ model User {
   complaints             Complaint[]
   buyerTransfers         B2bTransfer[]       @relation("BuyerTransfers")
   centerTransfers        B2bTransfer[]       @relation("CenterTransfers")
+  disputesOpened         DisputeCase[]       @relation("UserDisputes")
 
   storeProfile        StoreProfile?
   redemptions         RedemptionTransaction[] @relation("HouseholdRedemptions")
@@ -62,6 +76,7 @@ model User {
   bids                AcopioBid[]
   paymentTransactions PaymentTransaction[]
   deviceTokens        DeviceToken[]
+  accounts            Account[]
 
   @@map("users")
 }
@@ -73,32 +88,45 @@ enum AssignmentMode {
 
 enum RequestStatus {
   PENDING
+  AUCTION_ACTIVE
+  AUCTION_ASSIGNED
   ACCEPTED
+  EN_ROUTE
+  ARRIVED
   COMPLETED
   CANCELLED
+  UNATTENDED
+  REJECTED_ON_SITE
 }
 
 model CollectionRequest {
-  id               String         @id @default(uuid()) @db.Uuid
-  status           RequestStatus  @default(PENDING)
-  assignmentMode   AssignmentMode @default(AUTOMATIC)
-  itemsEstimated   Json
-  actualWeights    Json?
-  photoUrl         String?
-  description      String?
-  verificationPin  String
-  latitude         Float
-  longitude        Float
-  householdId      String         @db.Uuid
-  collectorId      String?        @db.Uuid
-  assignedCenterId String?        @db.Uuid
-  agreedRates      Json?
-  escrowLocked     Decimal        @default(0) @db.Decimal(14, 4)
-  batchId          String?        @db.Uuid
-  rating           Int?
-  feedback         String?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id                 String         @id @default(uuid()) @db.Uuid
+  status             RequestStatus  @default(PENDING)
+  assignmentMode     AssignmentMode @default(AUTOMATIC)
+  itemsEstimated     Json
+  actualWeights      Json?
+  photoUrl           String?
+  description        String?
+  verificationPin    String
+  latitude           Float
+  longitude          Float
+  householdId        String         @db.Uuid
+  collectorId        String?        @db.Uuid
+  assignedCenterId   String?        @db.Uuid
+  agreedRates        Json?
+  escrowLocked       Decimal        @default(0) @db.Decimal(14, 4)
+  batchId            String?        @db.Uuid
+  rating             Int?
+  feedback           String?
+  enRouteAt          DateTime?
+  arrivedAt          DateTime?
+  cancellationFeePen Decimal?       @db.Decimal(12, 2)
+  noShowFeePen       Decimal?       @db.Decimal(12, 2)
+  rejectionReason    String?
+  rejectionPhotos    Json?
+  auctionExpiresAt   DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
   household      User        @relation("HouseholdRequests", fields: [householdId], references: [id])
   collector      User?       @relation("CollectorRequests", fields: [collectorId], references: [id])
@@ -117,10 +145,12 @@ enum BatchStatus {
   OPEN
   IN_TRANSIT
   PROCESSING
+  PARTIALLY_ACCEPTED
   RECEIVED
   CONSOLIDATED
   FLAGGED_FOR_REVIEW
   DISPUTED
+  REROUTED
 }
 
 model Batch {
@@ -129,6 +159,10 @@ model Batch {
   collectorId         String      @db.Uuid
   destinationCenterId String?     @db.Uuid
   materialsActual     Json?
+  usefulWeightKg      Decimal?    @db.Decimal(14, 3)
+  wasteWeightKg       Decimal?    @db.Decimal(14, 3)
+  previousCenterId    String?     @db.Uuid
+  rerouteReason       String?
   consolidatedBatchId String?     @db.Uuid
   ipfsCid             String?
   txHash              String?
@@ -145,10 +179,13 @@ model Batch {
   destinationCenter User?               @relation("DestinationBatches", fields: [destinationCenterId], references: [id])
   consolidatedBatch ConsolidatedBatch?  @relation(fields: [consolidatedBatchId], references: [id])
   requests          CollectionRequest[]
+  disputes          DisputeCase[]
 
   @@index([collectorId, status])
   @@index([destinationCenterId, status])
   @@index([collectorId, destinationCenterId, status])
+  @@index([destinationCenterId])
+  @@index([createdAt])
   @@map("batches")
 }
 
@@ -169,6 +206,8 @@ model Notification {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId, isRead])
+  @@index([createdAt])
   @@map("notifications")
 }
 
@@ -188,25 +227,44 @@ model ConsolidatedBatch {
   batches Batch[]
   sales   Sale[]
 
+  @@index([centerId])
+  @@index([createdAt])
   @@map("consolidated_batches")
 }
 
 enum KycStatus {
   PENDING
+  OBSERVED
+  IN_REVIEW
   APPROVED
   REJECTED
+  EXPIRED
 }
 
 model KycApplication {
-  id          String    @id @default(uuid()) @db.Uuid
-  status      KycStatus @default(PENDING)
-  documentUrl String?
-  userId      String    @db.Uuid
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id               String    @id @default(uuid()) @db.Uuid
+  status           KycStatus @default(PENDING)
+  documentType     String?
+  documentNumber   String?
+  documentUrl      String?
+  documentUrlBack  String?
+  selfieUrl        String?
+  taxIdRuc         String?
+  businessName     String?
+  transportType    String?
+  vehiclePlate     String?
+  bankCci          String?
+  associationName  String?
+  observationNotes String?
+  retryCount       Int       @default(0)
+  userId           String    @db.Uuid
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId, status])
+  @@index([createdAt])
   @@map("kyc_applications")
 }
 
@@ -224,6 +282,8 @@ model Sale {
   center            User               @relation("CenterSales", fields: [centerId], references: [id])
   consolidatedBatch ConsolidatedBatch? @relation(fields: [consolidatedBatchId], references: [id])
 
+  @@index([centerId])
+  @@index([createdAt])
   @@map("sales")
 }
 
@@ -242,6 +302,8 @@ model Certificate {
 
   buyer User @relation(fields: [buyerId], references: [id])
 
+  @@index([buyerId, status])
+  @@index([createdAt])
   @@map("certificates")
 }
 
@@ -318,6 +380,20 @@ model Complaint {
   @@map("complaints")
 }
 
+model ComplaintCounter {
+  id        String   @id @default(uuid()) @db.Uuid
+  year      Int
+  type      String   @db.VarChar(10)
+  lastValue Int      @default(0) @map("last_value")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([year, type])
+  @@index([year, type])
+  @@map("complaint_counters")
+}
+
+
 enum RedemptionStatus {
   PENDING
   COMPLETED
@@ -347,8 +423,37 @@ model StoreProfile {
   user        User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   redemptions RedemptionTransaction[]
   settlements SettlementRequest[]
+  products    Product[]
 
   @@map("store_profiles")
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  OUT_OF_STOCK
+  PAUSED
+  ARCHIVED
+}
+
+model Product {
+  id                 String        @id @default(uuid()) @db.Uuid
+  storeId            String        @db.Uuid
+  name               String
+  description        String?
+  tokenPrice         Decimal       @db.Decimal(14, 4)
+  fiatReferencePrice Decimal       @db.Decimal(12, 2)
+  stock              Int           @default(0)
+  imageUrl           String?
+  isActive           Boolean       @default(true)
+  productStatus      ProductStatus @default(ACTIVE)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  store StoreProfile @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@map("products")
 }
 
 model RedemptionTransaction {
@@ -386,22 +491,29 @@ model SettlementRequest {
 }
 
 enum B2bTransferStatus {
-  IN_TRANSIT
-  RECEIVED
+  REQUESTED
+  ACCEPTED
+  DELIVERED
 }
 
 model B2bTransfer {
-  id        String            @id @default(uuid()) @db.Uuid
-  materials Json
-  status    B2bTransferStatus @default(IN_TRANSIT)
-  buyerId   String            @db.Uuid
-  centerId  String            @db.Uuid
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  id                 String            @id @default(uuid()) @db.Uuid
+  requestedMaterials Json?
+  materials          Json
+  status             B2bTransferStatus @default(REQUESTED)
+  totalAmount        Decimal?          @db.Decimal(12, 2)
+  notes              String?
+  buyerId            String            @db.Uuid
+  centerId           String            @db.Uuid
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
 
   buyer  User @relation("BuyerTransfers", fields: [buyerId], references: [id])
   center User @relation("CenterTransfers", fields: [centerId], references: [id])
 
+  @@index([buyerId])
+  @@index([centerId])
+  @@index([status])
   @@map("b2b_transfers")
 }
 
@@ -450,7 +562,10 @@ enum BidStatus {
   PENDING
   ACCEPTED
   REJECTED
+  REJECTED_MANUAL
+  REJECTED_OUTBID
   WITHDRAWN
+  EXPIRED
 }
 
 model AcopioBid {
@@ -476,6 +591,9 @@ enum PaymentStatus {
   PENDING
   COMPLETED
   FAILED
+  REFUNDED
+  CHARGEBACK_DISPUTED
+  CHARGEBACK_LOST
 }
 
 enum BlockchainStatus {
@@ -532,3 +650,128 @@ model DeviceToken {
   @@index([userId])
   @@map("device_tokens")
 }
+
+// ==============================================================================
+// LIBRO MAYOR DE DOBLE PARTIDA (DOUBLE-ENTRY LEDGER) Y TRANSACTIONAL OUTBOX
+// ==============================================================================
+
+enum AccountType {
+  USER_WALLET
+  STORE_ESCROW
+  SYSTEM_MINTING_POOL
+  SYSTEM_BURNING_POOL
+  SYSTEM_ESCROW_HOLD
+}
+
+enum LedgerEntryType {
+  DEBIT
+  CREDIT
+}
+
+enum AccountStatus {
+  ACTIVE
+  FROZEN_SECURITY
+  FROZEN_FRAUD_DEBT
+  RESTRICTED_WITHDRAWALS
+  CLOSED
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
+  DEAD_LETTER
+}
+
+model Account {
+  id            String        @id @default(uuid()) @db.Uuid
+  userId        String?       @db.Uuid
+  accountType   AccountType
+  status        AccountStatus @default(ACTIVE)
+  currency      String        @default("LIVORA")
+  cachedBalance Decimal       @default(0.0000000) @db.Decimal(18, 7)
+  isFrozen      Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user          User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ledgerEntries LedgerEntry[]
+
+  @@unique([userId, currency])
+  @@index([accountType])
+  @@map("accounts")
+}
+
+model LedgerEntry {
+  id             String          @id @default(uuid()) @db.Uuid
+  accountId      String          @db.Uuid
+  entryType      LedgerEntryType
+  amount         Decimal         @db.Decimal(18, 7)
+  runningBalance Decimal         @db.Decimal(18, 7)
+  correlationId  String          @db.Uuid
+  description    String
+  txHash         String?
+  createdAt      DateTime        @default(now())
+
+  account        Account         @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, createdAt(sort: Desc)])
+  @@index([correlationId])
+  @@index([txHash])
+  @@map("ledger_entries")
+}
+
+model OutboxEvent {
+  id            String       @id @default(uuid()) @db.Uuid
+  aggregateType String
+  aggregateId   String       @db.Uuid
+  eventType     String
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  retryCount    Int          @default(0)
+  errorMessage  String?
+  publishedAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([status, createdAt])
+  @@index([aggregateType, aggregateId])
+  @@map("outbox_events")
+}
+
+enum DisputeStatus {
+  OPENED
+  EVIDENCE_SUBMITTED
+  UNDER_REVIEW
+  RESOLVED_PENALIZE_CENTER
+  RESOLVED_PENALIZE_COLLECTOR
+  RESOLVED_NO_PENALTY
+  CLOSED
+}
+
+model DisputeCase {
+  id                 String        @id @default(uuid()) @db.Uuid
+  batchId            String        @db.Uuid
+  status             DisputeStatus @default(OPENED)
+  openedById         String        @db.Uuid
+  collectorStatement String?
+  collectorPhotos    Json?
+  centerStatement    String?
+  centerPhotos       Json?
+  adminResolution    String?
+  penalizedRole      String?
+  penalizedUserId    String?       @db.Uuid
+  resolvedAt         DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  batch              Batch         @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  openedBy           User          @relation("UserDisputes", fields: [openedById], references: [id])
+
+  @@index([batchId])
+  @@index([status])
+  @@map("dispute_cases")
+}
+
+

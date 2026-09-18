@@ -16,10 +16,10 @@ export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Get('inventory')
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @Roles(Role.CENTRO_ACOPIO, Role.TIENDA, Role.ADMIN)
   @ApiOperation({
     summary:
-      'Consultar el inventario de materiales (Rol: CENTRO_ACOPIO / ALMACEN / ADMIN)',
+      'Consultar el inventario de materiales y stock (Rol: CENTRO_ACOPIO / TIENDA / ADMIN)',
   })
   async getInventory(@CurrentUser() user: any) {
     const centerId = user.role === Role.ADMIN ? undefined : user.id;
@@ -27,10 +27,10 @@ export class InventoryController {
   }
 
   @Get('inventory/movements')
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @Roles(Role.CENTRO_ACOPIO, Role.TIENDA, Role.ADMIN)
   @ApiOperation({
     summary:
-      'Consultar historial de movimientos (Kárdex) de inventario (Rol: CENTRO_ACOPIO / ALMACEN / ADMIN)',
+      'Consultar historial de movimientos (Kárdex) de inventario (Rol: CENTRO_ACOPIO / TIENDA / ADMIN)',
   })
   async getMovements(
     @CurrentUser() user: any,
@@ -48,10 +48,10 @@ export class InventoryController {
   }
 
   @Post('inventory/movements')
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.CENTRO_ACOPIO, Role.TIENDA)
   @ApiOperation({
     summary:
-      'Registrar movimiento de entrada/salida de inventario (Rol: CENTRO_ACOPIO / ALMACEN)',
+      'Registrar movimiento de entrada/salida de inventario (Rol: CENTRO_ACOPIO / TIENDA)',
   })
   async createMovement(
     @CurrentUser('id') centerId: string,

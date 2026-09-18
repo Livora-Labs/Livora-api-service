@@ -46,7 +46,7 @@ Define los roles del sistema de trazabilidad de reciclaje:
 - `RECOLECTOR`: Agente encargado de la recolección y transporte.
 - `CENTRO_ACOPIO`: Centro de recepción, clasificación y acopio.
 - `EMPRESA_B2B`: Cliente corporativo o procesador industrial.
-- `ALMACEN`: Bodega o almacenamiento intermedio.
+- `TIENDA`: Comercio aliado para canjes y cobros POS con EcoTokens.
 - `ADMIN`: Administrador global del sistema.
 
 ### Modelo Prisma: `User`
@@ -68,7 +68,6 @@ enum Role {
   RECOLECTOR
   CENTRO_ACOPIO
   EMPRESA_B2B
-  ALMACEN
   ADMIN
   TIENDA
 }

@@ -40,7 +40,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         'Usuario no registrado o token no válido',
       );
     }
-    const { encryptedPrivateKey, ...safeUser } = user;
+    const {
+      encryptedPrivateKey,
+      encryptionIv,
+      encryptionTag,
+      receptionPin,
+      ...safeUser
+    } = user;
     return safeUser;
   }
 }

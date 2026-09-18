@@ -1,4 +1,4 @@
-﻿import {
+import {
   Body,
   Controller,
   Get,
@@ -20,8 +20,7 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { Role } from '@prisma/client';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentSessionDto } from './dto/create-payment-session.dto';
-import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
-import { ProcessPaymentWebhookDto } from './dto/process-payment-webhook.dto';
+import { IzipayIpnDto } from './dto/izipay-ipn.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -32,80 +31,62 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
-  @Post('niubiz/session')
+  @Post(['izipay/session', 'crear-token', '/api/pagos/crear-token'])
   @UseGuards(SupabaseAuthGuard, RolesGuard)
-  @Roles(Role.HOGAR, Role.RECOLECTOR)
+  @Roles(Role.RECOLECTOR, Role.TIENDA)
   @ApiBearerAuth()
   @ApiOperation({
     summary:
-      'Generar token de sesión para pasarela Niubiz (1 PEN = 1 ECO) exclusivo para HOGAR y RECOLECTOR',
+      'Generar formToken para pasarela Izipay V4 (1 PEN = 1 ECO) exclusivo para RECOLECTOR y TIENDA',
   })
   @ApiResponse({
     status: 201,
-    description: 'Sesión generada exitosamente',
+    description: 'Sesión Izipay generada y formToken emitido exitosamente',
   })
   async createSession(
     @CurrentUser('id') userId: string,
     @Body() dto: CreatePaymentSessionDto,
-    @Req() req: FastifyRequest,
   ) {
-    const rawIp =
-      (req.headers['x-forwarded-for'] as string) ||
-      (req.headers['x-real-ip'] as string) ||
-      req.ip;
-    const clientIp = rawIp ? rawIp.split(',')[0].trim() : '190.236.10.15';
-    return this.paymentsService.createSession(userId, dto, clientIp);
+    return this.paymentsService.createSession(userId, dto);
   }
 
-  @Post('niubiz/confirm')
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
-  @Roles(Role.HOGAR, Role.RECOLECTOR)
-  @ApiBearerAuth()
+  @Get(['izipay/checkout-page/:orderId', 'checkout-page/:orderId'])
   @ApiOperation({
     summary:
-      'Confirmación autenticada de recarga con transactionToken capturado por la app móvil',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Transacción autorizada y tokens encolados para minteo',
-  })
-  async confirmPayment(
-    @CurrentUser('id') userId: string,
-    @Body() dto: ConfirmPaymentDto,
-  ) {
-    return this.paymentsService.confirmPayment(userId, dto);
-  }
-
-  @Get('niubiz/checkout-page/:purchaseNumber')
-  @ApiOperation({
-    summary:
-      'Renderiza la vista HTML responsiva de checkout con checkout.js para el WebView móvil',
+      'Renderiza la vista HTML responsiva de checkout con Krypton V4 de Izipay para el WebView móvil',
   })
   async renderCheckoutPage(
-    @Param('purchaseNumber') purchaseNumber: string,
+    @Param('orderId') orderId: string,
     @Res() res: FastifyReply,
   ) {
-    const html = await this.paymentsService.renderCheckoutPage(purchaseNumber);
+    const html = await this.paymentsService.renderCheckoutPage(orderId);
     res.type('text/html; charset=utf-8').send(html);
   }
 
   @HttpCode(HttpStatus.OK)
-  @Post('niubiz/webhook')
+  @Post(['izipay-ipn', '/api/pagos/izipay-ipn'])
   @ApiOperation({
     summary:
-      'Webhook server-to-server de Niubiz protegido con firma criptográfica HMAC-SHA256',
+      'Notificación de Pago Instantánea (IPN / Webhook) de Izipay verificada con HMAC-SHA256',
   })
   @ApiResponse({
     status: 200,
-    description: 'Pago confirmado por webhook',
+    description: 'IPN validado e instrucciones de minteo on-chain encoladas',
   })
-  async processWebhook(@Body() dto: ProcessPaymentWebhookDto) {
-    return this.paymentsService.processWebhook(dto);
+  async processIzipayIpn(
+    @Body() dto: IzipayIpnDto,
+    @Req() req: FastifyRequest,
+    @Res() res: FastifyReply,
+  ) {
+    // Acepta payload parseado o deserializado desde request body
+    const body = (req.body as any) || dto;
+    const responseText = await this.paymentsService.processIzipayIpn(body);
+    res.type('text/plain; charset=utf-8').send(responseText);
   }
 
   @Get('me/transactions')
   @UseGuards(SupabaseAuthGuard, RolesGuard)
-  @Roles(Role.HOGAR, Role.RECOLECTOR)
+  @Roles(Role.RECOLECTOR, Role.TIENDA)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Consultar historial de recargas del usuario móvil autenticado',

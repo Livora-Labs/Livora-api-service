@@ -178,6 +178,13 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
           `Worker Keypair cargado: ${this.workerKeypair.publicKey()}`,
         );
       } else {
+        const isProduction =
+          this.configService.get<string>('NODE_ENV') === 'production';
+        if (isProduction) {
+          throw new Error(
+            '[FATAL_SECURITY] BlockchainService no puede iniciar en PRODUCCIÓN sin WORKER_SECRET_KEY configurada.',
+          );
+        }
         this.workerKeypair = Keypair.random();
         this.logger.warn(
           `WORKER_SECRET_KEY no configurada. Generando par aleatorio: ${this.workerKeypair.publicKey()}`,
@@ -187,6 +194,13 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
       this.contractId =
         this.configService.get<string>('ECOTOKEN_CONTRACT_ID') || '';
       if (!this.contractId) {
+        const isProduction =
+          this.configService.get<string>('NODE_ENV') === 'production';
+        if (isProduction) {
+          throw new Error(
+            '[FATAL_SECURITY] BlockchainService no puede iniciar en PRODUCCIÓN sin ECOTOKEN_CONTRACT_ID configurada.',
+          );
+        }
         this.logger.warn(
           'ECOTOKEN_CONTRACT_ID no configurada. Algunas funciones Soroban fallarán.',
         );
@@ -196,6 +210,9 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
         `Error inicializando componentes de Stellar: ${error.message}`,
         error.stack,
       );
+      if (this.configService.get<string>('NODE_ENV') === 'production') {
+        throw error;
+      }
     }
   }
 
@@ -510,14 +527,11 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
       }
       return await executeWithSigner(this.workerKeypair);
     } catch (error: any) {
-      this.logger.warn(
-        `Error interactuando con Soroban RPC [registerBatchWeighed]: ${error.message}. Generando hash de transacción.`,
+      this.logger.error(
+        `Error interactuando con Soroban RPC [registerBatchWeighed]: ${error.message}`,
+        error.stack,
       );
-      const hash = crypto
-        .createHash('sha256')
-        .update(batchId + ipfsCid + Date.now().toString())
-        .digest('hex');
-      return { hash, status: 1 };
+      throw error;
     }
   }
 
@@ -588,14 +602,11 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
       }
       return await executeWithSigner(this.workerKeypair);
     } catch (error: any) {
-      this.logger.warn(
-        `Error interactuando con Soroban RPC [notarizeBatchReceipt]: ${error.message}. Generando hash de transacción de contingencia.`,
+      this.logger.error(
+        `Error interactuando con Soroban RPC [notarizeBatchReceipt]: ${error.message}`,
+        error.stack,
       );
-      const hash = crypto
-        .createHash('sha256')
-        .update('notarize:' + batchId + ipfsCid + Date.now().toString())
-        .digest('hex');
-      return { hash, status: 1 };
+      throw error;
     }
   }
 
@@ -649,14 +660,11 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
       }
       return await executeWithSigner(this.workerKeypair);
     } catch (error: any) {
-      this.logger.warn(
-        `Error interactuando con Soroban RPC [executeDelegatedTransfer]: ${error.message}. Generando hash de transacción.`,
+      this.logger.error(
+        `Error interactuando con Soroban RPC [executeDelegatedTransfer]: ${error.message}`,
+        error.stack,
       );
-      const hash = crypto
-        .createHash('sha256')
-        .update(from + to + amount + Date.now().toString())
-        .digest('hex');
-      return { hash, status: 1 };
+      throw error;
     }
   }
 
@@ -908,14 +916,11 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
       }
       return await executeWithSigner(this.workerKeypair);
     } catch (error: any) {
-      this.logger.warn(
-        `Error interactuando con Soroban RPC [mintEcoTokens]: ${error.message}. Generando hash de transacción.`,
+      this.logger.error(
+        `Error interactuando con Soroban RPC [mintEcoTokens]: ${error.message}`,
+        error.stack,
       );
-      const hash = crypto
-        .createHash('sha256')
-        .update(toAddress + amount.toString() + Date.now().toString())
-        .digest('hex');
-      return { hash, status: 1 };
+      throw error;
     }
   }
 

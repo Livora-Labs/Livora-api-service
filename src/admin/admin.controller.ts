@@ -18,6 +18,8 @@ import { UpdateKycStatusDto } from './dto/update-kyc-status.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UpdateComplaintStatusDto } from '../complaints/dto/update-complaint-status.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { FindUsersAdminQueryDto } from './dto/find-users-admin-query.dto';
+import { LedgerAuditQueryDto, ServerLogsQueryDto } from './dto/audit-query.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -68,6 +70,17 @@ export class AdminController {
     return this.adminService.getKycApplications(query);
   }
 
+  @Get('admin/users')
+  @ApiBearerAuth()
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Listar todos los usuarios registrados del sistema con paginación y filtros (Rol: ADMIN)',
+  })
+  async getUsers(@Query() query: FindUsersAdminQueryDto) {
+    return this.adminService.getUsers(query);
+  }
+
   @Patch('users/:id/kyc-status')
   @ApiBearerAuth()
   @UseGuards(SupabaseAuthGuard, RolesGuard)
@@ -101,10 +114,76 @@ export class AdminController {
   @UseGuards(SupabaseAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
-    summary: 'Obtener estado de salud del nodo Blockchain (Rol: ADMIN)',
+    summary: 'Obtener estado de salud en tiempo real del cluster RPC Stellar (Rol: ADMIN)',
   })
   async getBlockchainHealth() {
     return this.adminService.getBlockchainHealth();
+  }
+
+  @Get('admin/audit/reconciliation')
+  @ApiBearerAuth()
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Auditoría de conciliación contable de partida doble Zero Loss (Rol: ADMIN)',
+  })
+  async getFinancialReconciliation() {
+    return this.adminService.getFinancialReconciliation();
+  }
+
+  @Get('admin/audit/ledger')
+  @ApiBearerAuth()
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Auditoría paginada y filtrada del Libro Mayor de cuentas y tokens (Rol: ADMIN)',
+  })
+  async getLedgerAudit(@Query() query: LedgerAuditQueryDto) {
+    return this.adminService.getLedgerAudit(query);
+  }
+
+  @Get('admin/audit/queues')
+  @ApiBearerAuth()
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Inspección de colas BullMQ, Dead-Letter Queue (DLQ) y eventos Outbox (Rol: ADMIN)',
+  })
+  async getQueueAudit() {
+    return this.adminService.getQueueAudit();
+  }
+
+  @Post('admin/audit/queues/retry-job/:jobId')
+  @ApiBearerAuth()
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Reintentar manualmente un trabajo de la cola BullMQ o DLQ (Rol: ADMIN)',
+  })
+  async retryQueueJob(@Param('jobId') jobId: string) {
+    return this.adminService.retryQueueJob(jobId);
+  }
+
+  @Post('admin/audit/outbox/retry-event/:id')
+  @ApiBearerAuth()
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Restablecer evento Outbox a PENDING para reprocesamiento (Rol: ADMIN)',
+  })
+  async retryOutboxEvent(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.retryOutboxEvent(id);
+  }
+
+  @Get('admin/audit/logs')
+  @ApiBearerAuth()
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Consultar buffer circular de logs operativos del servidor con filtros de severidad (Rol: ADMIN)',
+  })
+  async getServerLogs(@Query() query: ServerLogsQueryDto) {
+    return this.adminService.getServerLogs(query);
   }
 
   @Patch('complaints/:id')
@@ -129,7 +208,7 @@ export class AdminController {
     summary:
       'Re-ejecución administrativa de minteo de tokens para pagos con cobro fiduciario confirmado (Rol: ADMIN)',
   })
-  async retryPaymentMint(@Param('id', ParseUUIDPipe) id: string) {
+  async retryPaymentMint(@Param('id') id: string) {
     return this.adminService.retryPaymentMint(id);
   }
 }

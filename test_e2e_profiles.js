@@ -145,13 +145,6 @@ async function runE2ETests() {
     assert(storesRes.status === 200, `GET /stores/allied returned 200`);
     assert(Array.isArray(storesRes.body) && storesRes.body.length >= 1, `Real stores exist in database (${storesRes.body?.length} found)`);
 
-    // Test Niubiz Payment Session Creation (real integration without mock intercepts)
-    const niubizSessionRes = await postWithAuth(hogarToken, '/payments/niubiz/session', { amount: 25.0 });
-    const isNiubizValid = niubizSessionRes.status === 201 || (niubizSessionRes.status === 502 && String(niubizSessionRes.body?.message || niubizSessionRes.body?.detail || '').includes('Niubiz'));
-    assert(isNiubizValid, `POST /payments/niubiz/session routed cleanly to real gateway (Status ${niubizSessionRes.status})`);
-    if (niubizSessionRes.body?.purchaseNumber) {
-      assert(!!niubizSessionRes.body?.sessionToken, `Niubiz sessionToken generated: ${niubizSessionRes.body?.sessionToken}`);
-    }
 
     // Test Creating and Cancelling a real Collection Request
     const createReqRes = await postWithAuth(hogarToken, '/collection-requests', {
@@ -191,6 +184,14 @@ async function runE2ETests() {
 
     const myBatchesRes = await getWithAuth(recolectorToken, '/batches/open');
     assert(myBatchesRes.status === 200, `GET /batches/open returned 200`);
+
+    // Test Izipay Payment Session Creation (Krypton V4)
+    const izipaySessionRes = await postWithAuth(recolectorToken, '/payments/izipay/session', { amount: 25.0 });
+    const isIzipayValid = izipaySessionRes.status === 201 || (izipaySessionRes.status === 502 && String(izipaySessionRes.body?.message || '').includes('Izipay'));
+    assert(isIzipayValid, `POST /payments/izipay/session routed cleanly (Status ${izipaySessionRes.status})`);
+    if (izipaySessionRes.body?.orderId) {
+      assert(!!izipaySessionRes.body?.formToken, `Izipay formToken generated: ${izipaySessionRes.body?.formToken?.slice(0, 20)}...`);
+    }
   }
 
   // 3. CENTRO_ACOPIO Profile

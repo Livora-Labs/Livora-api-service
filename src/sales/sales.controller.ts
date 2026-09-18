@@ -29,10 +29,10 @@ export class SalesController {
 
   @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('sales')
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.CENTRO_ACOPIO)
   @ApiOperation({
     summary:
-      'Registrar venta de material consolidado a empresa B2B (Rol: CENTRO_ACOPIO / ALMACEN)',
+      'Registrar venta de material consolidado a empresa B2B (Rol: CENTRO_ACOPIO)',
   })
   async createSale(
     @CurrentUser('id') centerId: string,
@@ -78,10 +78,10 @@ export class SalesController {
   }
 
   @Get('sales')
-  @Roles(Role.EMPRESA_B2B, Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.EMPRESA_B2B, Role.CENTRO_ACOPIO)
   @ApiOperation({
     summary:
-      'Obtener historial de compras/ventas (Rol: B2B o Acopio / Almacén)',
+      'Obtener historial de compras/ventas (Rol: B2B o Centro de Acopio)',
   })
   async getSales(
     @CurrentUser('id') userId: string,

@@ -60,5 +60,74 @@ describe('CryptoUtil', () => {
       const decrypted = CryptoUtil.decrypt(legacyPayload, secretKey);
       expect(decrypted).toBe(knownPrivateKey);
     });
+
+    it('should produce 4-part format with 16-byte random salt per record', () => {
+      const enc1 = CryptoUtil.encrypt(knownPrivateKey, secretKey);
+      const enc2 = CryptoUtil.encrypt(knownPrivateKey, secretKey);
+
+      const parts1 = enc1.split(':');
+      const parts2 = enc2.split(':');
+
+      expect(parts1).toHaveLength(4);
+      expect(parts2).toHaveLength(4);
+
+      // salt: 16 bytes (32 hex chars), iv: 12 bytes (24 hex chars), tag: 16 bytes (32 hex chars)
+      expect(parts1[0]).toHaveLength(32);
+      expect(parts1[1]).toHaveLength(24);
+      expect(parts1[2]).toHaveLength(32);
+
+      // Salts must be cryptographically unique per record
+      expect(parts1[0]).not.toBe(parts2[0]);
+    });
+
+    it('should decrypt legacy 3-part PBKDF2 encrypted payload with static salt', () => {
+      const legacyKey = crypto.pbkdf2Sync(
+        secretKey,
+        'livora_wallet_encryption_salt_kdf_v1',
+        100000,
+        32,
+        'sha512',
+      );
+      const iv = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', legacyKey, iv);
+      let legacyEncrypted = cipher.update(knownPrivateKey, 'utf8', 'hex');
+      legacyEncrypted += cipher.final('hex');
+      const authTag = cipher.getAuthTag().toString('hex');
+      const legacyPayload = `${iv.toString('hex')}:${authTag}:${legacyEncrypted}`;
+
+      const decrypted = CryptoUtil.decrypt(legacyPayload, secretKey);
+      expect(decrypted).toBe(knownPrivateKey);
+    });
+
+    it('decryptToBuffer returns mutable Buffer and zeroes successfully', () => {
+      const encrypted = CryptoUtil.encrypt(knownPrivateKey, secretKey);
+      const buf = CryptoUtil.decryptToBuffer(encrypted, secretKey);
+
+      expect(Buffer.isBuffer(buf)).toBe(true);
+      expect(buf.toString('utf8')).toBe(knownPrivateKey);
+
+      buf.fill(0);
+      expect(buf.every((byte) => byte === 0)).toBe(true);
+    });
+
+    it('withDecryptedKey executes callback and guarantees zeroization in finally block', async () => {
+      const encrypted = CryptoUtil.encrypt(knownPrivateKey, secretKey);
+      let capturedBuffer: Buffer | null = null;
+
+      const result = await CryptoUtil.withDecryptedKey(
+        encrypted,
+        secretKey,
+        (keyBuf) => {
+          capturedBuffer = keyBuf;
+          expect(keyBuf.toString('utf8')).toBe(knownPrivateKey);
+          return 'operation_success';
+        },
+      );
+
+      expect(result).toBe('operation_success');
+      expect(capturedBuffer).not.toBeNull();
+      // Verify that after withDecryptedKey completes, the key buffer is zeroized
+      expect((capturedBuffer as unknown as Buffer).every((b) => b === 0)).toBe(true);
+    });
   });
 });

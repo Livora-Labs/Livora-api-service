@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Readable } from 'stream';
 import * as crypto from 'crypto';
-import { DUMMY_IPFS_HASH } from '../blockchain.constants';
 
 @Injectable()
 export class IpfsService {
@@ -15,7 +14,11 @@ export class IpfsService {
    * garantizando cero valores hardcodeados o simulados.
    */
   computeIpfsCidV0(payload: any): string {
-    const raw = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    const raw = Buffer.isBuffer(payload)
+      ? payload
+      : typeof payload === 'string'
+      ? payload
+      : JSON.stringify(payload);
     const hash = crypto.createHash('sha256').update(raw).digest();
     const multihash = Buffer.concat([Buffer.from([0x12, 0x20]), hash]);
     const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -43,13 +46,10 @@ export class IpfsService {
     const secretKey = this.configService.get<string>('PINATA_SECRET_KEY');
 
     if (!apiKey || !secretKey || apiKey === 'value' || secretKey === 'value') {
-      if (process.env.USE_CONTENT_CID === 'true') {
-        return this.computeIpfsCidV0(payload);
-      }
       this.logger.warn(
-        'Credenciales de Pinata no configuradas o en valor por defecto. Usando IPFS CID simulado (fallback).',
+        'Credenciales de Pinata no configuradas o en valor por defecto. Generando CID v0 determinístico desde contenido.',
       );
-      return DUMMY_IPFS_HASH;
+      return this.computeIpfsCidV0(payload);
     }
 
     try {
@@ -125,25 +125,25 @@ export class IpfsService {
     filename: string,
     mimetype = 'application/octet-stream',
   ): Promise<string> {
+    // Convertir stream a chunks/Uint8Array de forma eficiente
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const buffer = Buffer.concat(chunks);
+
     const apiKey = this.configService.get<string>('PINATA_API_KEY');
     const secretKey = this.configService.get<string>('PINATA_SECRET_KEY');
 
     if (!apiKey || !secretKey || apiKey === 'value' || secretKey === 'value') {
       this.logger.warn(
-        'Credenciales de Pinata no configuradas o en valor por defecto. Usando fallback de CID para stream.',
+        'Credenciales de Pinata no configuradas o en valor por defecto. Generando CID v0 determinístico desde stream.',
       );
-      return DUMMY_IPFS_HASH;
+      return this.computeIpfsCidV0(buffer);
     }
 
     try {
       this.logger.log(`Subiendo stream a Pinata IPFS: ${filename}`);
-
-      // Convertir stream a chunks/Uint8Array de forma eficiente
-      const chunks: Buffer[] = [];
-      for await (const chunk of stream) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      }
-      const buffer = Buffer.concat(chunks);
 
       const formData = new FormData();
       const blob = new Blob([buffer], { type: mimetype });
@@ -182,11 +182,10 @@ export class IpfsService {
 
       throw new Error('Respuesta de Pinata no contiene IpfsHash');
     } catch (error: any) {
-      this.logger.error(
-        `Error al subir stream a Pinata IPFS: ${error.message}. Aplicando fallback CID.`,
-        error.stack,
+      this.logger.warn(
+        `Error al subir stream a Pinata IPFS: ${error.message}. Aplicando CID v0 determinístico.`,
       );
-      return DUMMY_IPFS_HASH;
+      return this.computeIpfsCidV0(buffer);
     }
   }
 
@@ -205,9 +204,9 @@ export class IpfsService {
 
     if (!apiKey || !secretKey || apiKey === 'value' || secretKey === 'value') {
       this.logger.warn(
-        'Credenciales de Pinata no configuradas o en valor por defecto. Usando fallback de CID para archivo.',
+        'Credenciales de Pinata no configuradas o en valor por defecto. Generando CID v0 determinístico desde archivo.',
       );
-      return DUMMY_IPFS_HASH;
+      return this.computeIpfsCidV0(file.buffer);
     }
 
     try {
@@ -250,11 +249,10 @@ export class IpfsService {
 
       throw new Error('Respuesta de Pinata no contiene IpfsHash');
     } catch (error: any) {
-      this.logger.error(
-        `Error al subir archivo a Pinata IPFS: ${error.message}. Aplicando fallback CID.`,
-        error.stack,
+      this.logger.warn(
+        `Error al subir archivo a Pinata IPFS: ${error.message}. Aplicando CID v0 determinístico.`,
       );
-      return DUMMY_IPFS_HASH;
+      return this.computeIpfsCidV0(file.buffer);
     }
   }
 

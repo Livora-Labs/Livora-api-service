@@ -413,12 +413,12 @@ export class AuthService {
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
     const { email } = forgotPasswordDto;
 
-    // 1. Verificar si el usuario existe localmente
+    // 1. Verificar si el usuario existe localmente (mensaje uniforme anti-enumeración)
     const existingUser = await this.usersService.findByEmail(email);
     if (!existingUser) {
-      throw new BadRequestException(
-        'El correo electrónico no se encuentra registrado',
-      );
+      return {
+        message: 'Si el correo electrónico está registrado, recibirás un enlace de recuperación.',
+      };
     }
 
     // 2. Generar token criptográfico único

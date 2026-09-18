@@ -40,6 +40,12 @@
 		file_server
 	}
 
+	# Endpoints de API Admin (prioridad sobre rutas de frontend)
+	@api_admin path /admin/users* /admin/kyc-applications* /admin/blockchain* /admin/audit* /admin/metrics*
+	handle @api_admin {
+		reverse_proxy livora_api:3000
+	}
+
 	# Aplicación Web Frontend (Next.js Standalone)
 	handle /admin* {
 		reverse_proxy frontend:3001

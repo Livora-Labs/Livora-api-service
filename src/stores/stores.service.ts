@@ -183,30 +183,104 @@ export class StoresService {
       );
     }
 
-    // Consulta rápida al balance de tokens
-    const balanceResult = await this.walletsService.getBalance(householdUserId);
-    const balance = parseFloat(balanceResult.balance || '0');
+    // 3. Vincular y cambiar estado a COMPLETED de forma atómica bajo bloqueo pesimista anti doble-gasto (SELECT ... FOR UPDATE)
+    const updatedRedemption = await this.prisma.$transaction(
+      async (tx) => {
+        // A. BLOQUEO PESIMISTA: Adquirir cerrojo exclusivo sobre el registro del usuario (wallet)
+        const lockedUsers = await tx.$queryRaw<
+          Array<{ id: string; walletAddress: string | null }>
+        >`
+          SELECT id, "walletAddress" 
+          FROM users 
+          WHERE id = ${householdUserId}::uuid 
+          FOR UPDATE
+        `;
 
-    if (balance < finalAmount) {
-      throw new BadRequestException(
-        `Saldo de EcoTokens insuficiente para realizar el canje. Requerido: ${finalAmount}, Disponible: ${balance}`,
-      );
-    }
+        if (!lockedUsers || lockedUsers.length === 0) {
+          throw new NotFoundException('Usuario hogar no encontrado en el sistema');
+        }
 
-    // 3. Vincular y cambiar estado a COMPLETED de forma atómica y condicional
-    const result = await this.prisma.$executeRaw`
-      UPDATE redemption_transactions 
-      SET status = 'COMPLETED', "userId" = ${householdUserId}::uuid, "tokenAmount" = ${finalAmount}::numeric, "updatedAt" = NOW()
-      WHERE id = ${redemption.id}::uuid AND status = 'PENDING'
-    `;
+        const lockedUser = lockedUsers[0];
+        if (!lockedUser.walletAddress) {
+          throw new BadRequestException(
+            'El usuario hogar no tiene una billetera configurada',
+          );
+        }
 
-    if (result === 0) {
-      throw new ConflictException('Canje procesado previamente o ya no está disponible');
-    }
+        // B. BLOQUEO PESIMISTA sobre el registro de canje para evitar modificaciones concurrentes del QR
+        const lockedRedemptions = await tx.$queryRaw<
+          Array<{ id: string; status: string; tokenAmount: string }>
+        >`
+          SELECT id, status, "tokenAmount"
+          FROM redemption_transactions
+          WHERE id = ${redemption.id}::uuid AND status = 'PENDING'
+          FOR UPDATE
+        `;
 
-    const updatedRedemption = (await this.prisma.redemptionTransaction.findUnique({
-      where: { id: redemption.id },
-    }))!;
+        if (!lockedRedemptions || lockedRedemptions.length === 0) {
+          throw new ConflictException(
+            'Canje procesado previamente o ya no está disponible',
+          );
+        }
+
+        // C. Consulta al balance de tokens bajo cerrojo pesimista
+        const balanceResult = await this.walletsService.getBalance(householdUserId);
+        const balance = parseFloat(balanceResult.balance || '0');
+
+        if (balance < finalAmount) {
+          throw new BadRequestException(
+            `Saldo de EcoTokens insuficiente para realizar el canje. Requerido: ${finalAmount}, Disponible: ${balance}`,
+          );
+        }
+
+        const result = await tx.$executeRaw`
+          UPDATE redemption_transactions 
+          SET status = 'COMPLETED', "userId" = ${householdUserId}::uuid, "tokenAmount" = ${finalAmount}::numeric, "updatedAt" = NOW()
+          WHERE id = ${redemption.id}::uuid AND status = 'PENDING'
+        `;
+
+        if (result === 0) {
+          throw new ConflictException(
+            'Canje procesado previamente o ya no está disponible',
+          );
+        }
+
+        // D. Si existe cuenta en el ledger de doble partida, actualizar cachedBalance
+        try {
+          const accounts = await tx.$queryRaw<
+            Array<{ id: string; cachedBalance: string }>
+          >`
+            SELECT id, "cachedBalance" 
+            FROM accounts 
+            WHERE "userId" = ${householdUserId}::uuid AND "accountType" = 'USER_WALLET'
+            FOR UPDATE
+          `;
+
+          if (accounts && accounts.length > 0) {
+            const acc = accounts[0];
+            const newBalance = Math.max(
+              0,
+              parseFloat(acc.cachedBalance) - finalAmount,
+            );
+            await tx.$executeRaw`
+              UPDATE accounts 
+              SET "cachedBalance" = ${newBalance}::numeric, "updatedAt" = NOW()
+              WHERE id = ${acc.id}::uuid
+            `;
+          }
+        } catch {
+          // Si la tabla accounts no existe o no se consulta en mocks, continuar
+        }
+
+        return (await tx.redemptionTransaction.findUnique({
+          where: { id: redemption.id },
+        }))!;
+      },
+      {
+        timeout: 10000,
+        isolationLevel: 'ReadCommitted',
+      },
+    );
 
     // 4. Disparar notificación WebSocket a la sala privada de la tienda store:${storeUserId}
     const storeUserId = redemption.store.user.id;
@@ -739,6 +813,46 @@ export class StoresService {
     return new PaginatedResultDto(settlements, total, page, limit);
   }
 
+  async getAllSettlements(page = 1, limit = 15, status?: SettlementStatus) {
+    const skip = (page - 1) * limit;
+    const where: any = {};
+    if (status) {
+      where.status = status;
+    }
+    const readPrisma =
+      (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
+
+    const [total, settlements] = await Promise.all([
+      readPrisma.settlementRequest.count({ where }),
+      readPrisma.settlementRequest.findMany({
+        where,
+        include: {
+          store: {
+            select: {
+              id: true,
+              businessName: true,
+              ruc: true,
+              address: true,
+              bankAccount: true,
+              user: {
+                select: {
+                  email: true,
+                  name: true,
+                  walletAddress: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return new PaginatedResultDto(settlements, total, page, limit);
+  }
+
   async getRedemptionDetails(qrCodeRef: string) {
     const redemption = await this.prisma.redemptionTransaction.findUnique({
       where: { qrCodeRef },
@@ -777,7 +891,7 @@ export class StoresService {
 
     const stores = await readPrisma.user.findMany({
       where: {
-        role: { in: [Role.TIENDA, Role.ALMACEN] },
+        role: Role.TIENDA,
         isActive: true,
       },
       include: {

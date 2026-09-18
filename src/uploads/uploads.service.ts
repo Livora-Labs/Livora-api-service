@@ -7,21 +7,29 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
+import { validateMagicBytes } from './utils/magic-bytes.util';
 
-const BUCKET = 'livora-uploads';
+const DEFAULT_PUBLIC_BUCKET = 'livora-uploads';
+const DEFAULT_KYC_BUCKET = 'livora-kyc-private';
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
-const IMAGE_TYPES = ['image/jpeg', 'image/png'];
-const PURPOSES = ['collection', 'kyc', 'receipt'];
+const PURPOSES = ['collection', 'kyc', 'receipt'] as const;
+type PurposeType = typeof PURPOSES[number];
 
 @Injectable()
 export class UploadsService implements OnModuleInit {
   private readonly logger = new Logger(UploadsService.name);
-  // Cliente DEDICADO con la service key. No se reutiliza el cliente compartido
-  // de auth porque su sesión se contamina con signInWithPassword/getUser y el
-  // header de Authorization deja de ser el service_role → Storage devuelve RLS.
   private readonly client: SupabaseClient;
+  private readonly publicBucket: string;
+  private readonly kycBucket: string;
 
   constructor(private readonly configService: ConfigService) {
+    this.publicBucket =
+      this.configService.get<string>('SUPABASE_STORAGE_BUCKET') ||
+      DEFAULT_PUBLIC_BUCKET;
+    this.kycBucket =
+      this.configService.get<string>('SUPABASE_STORAGE_KYC_BUCKET') ||
+      DEFAULT_KYC_BUCKET;
+
     this.client = createClient(
       this.configService.get<string>('SUPABASE_URL') || '',
       this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY') || '',
@@ -30,74 +38,117 @@ export class UploadsService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    // Crear el bucket público si no existe (idempotente).
+    await this.ensureBucket(this.publicBucket, true);
+    await this.ensureBucket(this.kycBucket, false);
+  }
+
+  private async ensureBucket(bucketName: string, isPublic: boolean) {
     try {
-      const { data } = await this.client.storage.getBucket(BUCKET);
+      const { data } = await this.client.storage.getBucket(bucketName);
       if (!data) {
-        const { error } = await this.client.storage.createBucket(BUCKET, {
-          public: true,
+        const { error } = await this.client.storage.createBucket(bucketName, {
+          public: isPublic,
         });
         if (error && !/already exists/i.test(error.message)) {
-          this.logger.warn(`No se pudo crear el bucket '${BUCKET}': ${error.message}`);
+          this.logger.warn(`No se pudo crear el bucket '${bucketName}': ${error.message}`);
         } else {
-          this.logger.log(`Bucket '${BUCKET}' listo (público)`);
+          this.logger.log(`Bucket '${bucketName}' configurado (public=${isPublic})`);
         }
       }
     } catch (err: any) {
-      this.logger.warn(
-        `No se pudo verificar/crear el bucket '${BUCKET}': ${err.message}`,
-      );
+      this.logger.warn(`Error al verificar/crear bucket '${bucketName}': ${err.message}`);
     }
   }
 
-  async upload(file: Express.Multer.File, purposeRaw?: string) {
-    if (!file) {
+  async upload(file: Express.Multer.File, purposeRaw?: string, userId?: string) {
+    if (!file || !file.buffer) {
       throw new BadRequestException(
-        'No se recibió ningún archivo en el campo "file"',
+        'No se recibió ningún archivo válido en el campo "file"',
       );
     }
 
-    const purpose = PURPOSES.includes(purposeRaw || '')
-      ? (purposeRaw as string)
+    const purpose: PurposeType = PURPOSES.includes(purposeRaw as any)
+      ? (purposeRaw as PurposeType)
       : 'collection';
 
     if (file.size > MAX_BYTES) {
-      throw new BadRequestException('El archivo supera el máximo de 10 MB');
+      throw new BadRequestException('El archivo supera el límite máximo de 10 MB');
     }
 
-    const allowed = [...IMAGE_TYPES];
-    if (purpose === 'kyc') {
-      allowed.push('application/pdf');
-    }
-    if (!allowed.includes(file.mimetype)) {
+    const detected = validateMagicBytes(file.buffer);
+    if (!detected) {
       throw new BadRequestException(
-        `Tipo de archivo no permitido (${file.mimetype}). Permitidos para '${purpose}': ${allowed.join(', ')}`,
+        'Firma binaria no válida. Solo se admiten archivos genuinos PDF, JPEG o PNG.',
       );
     }
 
-    const ext = file.originalname?.includes('.')
-      ? file.originalname.split('.').pop()
-      : file.mimetype.split('/').pop();
-    const path = `${purpose}/${randomUUID()}.${ext}`;
+    if (purpose !== 'kyc' && detected.mime === 'application/pdf') {
+      throw new BadRequestException(
+        'Los archivos PDF solo están permitidos para el propósito KYC.',
+      );
+    }
 
-    const storage = this.client.storage.from(BUCKET);
-    const { error } = await storage.upload(path, file.buffer, {
-      contentType: file.mimetype,
+    const safeFilename = `${randomUUID()}.${detected.extension}`;
+
+    if (purpose === 'kyc') {
+      const path = `${userId || 'general'}/${safeFilename}`;
+      const storage = this.client.storage.from(this.kycBucket);
+
+      const { error: uploadError } = await storage.upload(path, file.buffer, {
+        contentType: detected.mime,
+        upsert: false,
+      });
+
+      if (uploadError) {
+        this.logger.error(`Error subiendo documento KYC a storage privado: ${uploadError.message}`);
+        throw new BadRequestException(`No se pudo almacenar el documento KYC: ${uploadError.message}`);
+      }
+
+      const { data: signedData, error: signedError } = await storage.createSignedUrl(path, 15 * 60);
+      if (signedError || !signedData?.signedUrl) {
+        this.logger.error(`Error generando signed URL: ${signedError?.message}`);
+        throw new BadRequestException('Documento guardado, pero falló la generación de la URL temporal');
+      }
+
+      return {
+        url: signedData.signedUrl,
+        path,
+        purpose,
+        mimeType: detected.mime,
+        size: file.size,
+        expiresIn: 900,
+      };
+    }
+
+    const path = `${purpose}/${safeFilename}`;
+    const storage = this.client.storage.from(this.publicBucket);
+
+    const { error: uploadError } = await storage.upload(path, file.buffer, {
+      contentType: detected.mime,
       upsert: false,
     });
-    if (error) {
-      this.logger.error(`Error subiendo a Supabase Storage: ${error.message}`);
-      throw new BadRequestException(
-        `No se pudo subir el archivo: ${error.message}`,
-      );
+
+    if (uploadError) {
+      this.logger.error(`Error subiendo archivo público: ${uploadError.message}`);
+      throw new BadRequestException(`No se pudo subir el archivo: ${uploadError.message}`);
     }
 
     const { data } = storage.getPublicUrl(path);
     return {
       url: data.publicUrl,
+      path,
       purpose,
-      mimeType: file.mimetype,
+      mimeType: detected.mime,
       size: file.size,
     };
+  }
+
+  async getPresignedKycUrl(path: string, expiresInSeconds = 900): Promise<string> {
+    const storage = this.client.storage.from(this.kycBucket);
+    const { data, error } = await storage.createSignedUrl(path, expiresInSeconds);
+    if (error || !data?.signedUrl) {
+      throw new BadRequestException(`No se pudo generar la URL segura para el documento: ${error?.message}`);
+    }
+    return data.signedUrl;
   }
 }

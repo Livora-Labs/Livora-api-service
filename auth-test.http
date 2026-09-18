@@ -1,4 +1,4 @@
-### 1. Registrar un nuevo usuario (HOGAR / RECOLECTOR / CENTRO_ACOPIO / EMPRESA_B2B / ALMACEN / ADMIN)
+### 1. Registrar un nuevo usuario (HOGAR / RECOLECTOR / CENTRO_ACOPIO / EMPRESA_B2B / TIENDA / ADMIN)
 POST http://localhost:3000/auth/register
 Content-Type: application/json
 

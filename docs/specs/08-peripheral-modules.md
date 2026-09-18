@@ -169,8 +169,8 @@ Bajo la **Regla de Oro** de cero dependencias o servicios externos adicionales:
 | **`GET`** | `/certificates` | `EMPRESA_B2B` | Lista los certificados ESG emitidos para la empresa autenticada. |
 | **`GET`** | `/certificates/:id` | `EMPRESA_B2B` | Consulta el detalle de un certificado ESG por su ID. |
 | **`POST`** | `/certificates` | `ADMIN` | Genera y emite un certificado ESG simulado guardando hash IPFS en BD. |
-| **`GET`** | `/inventory` | `CENTRO_ACOPIO`, `ALMACEN`, `ADMIN` | Consulta el stock físico de materiales en planta/almacén. |
-| **`POST`** | `/inventory/movements` | `CENTRO_ACOPIO`, `ALMACEN` | Registra entrada/salida de inventario y actualiza stock atómicamente. |
+| **`GET`** | `/inventory` | `CENTRO_ACOPIO`, `TIENDA`, `ADMIN` | Consulta el stock físico de materiales o productos en centro/tienda. |
+| **`POST`** | `/inventory/movements` | `CENTRO_ACOPIO`, `TIENDA` | Registra entrada/salida de inventario y actualiza stock atómicamente. |
 | **`GET`** | `/centers/me/reception-pin` | `CENTRO_ACOPIO` | Obtiene el PIN de recepción del centro de acopio actual (se genera si no existe). |
 | **`POST`** | `/centers/me/reception-pin/refresh` | `CENTRO_ACOPIO` | Regenera y actualiza un nuevo PIN de recepción de 4 dígitos. |
 

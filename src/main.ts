@@ -14,6 +14,7 @@ import { RedisIoAdapter } from './websockets/adapters/redis-io.adapter';
 import { DecimalTransformInterceptor } from './common/interceptors/decimal-transform.interceptor';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { CorrelationContext } from './common/context/correlation-context';
+import { AuditLogBufferService } from './common/services/audit-log-buffer.service';
 import * as crypto from 'crypto';
 
 async function bootstrap() {
@@ -53,7 +54,14 @@ async function bootstrap() {
 
   // Configuración estricta de cabeceras de seguridad HTTP con Helmet para Fastify
   await app.register(fastifyHelmet, {
-    contentSecurityPolicy: false, // Permitir Swagger UI
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+      },
+    },
     hsts: {
       maxAge: 31536000,
       includeSubDomains: true,
@@ -88,18 +96,26 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
 
-  // Configuración de CORS restrictiva usando ALLOWED_ORIGINS o CORS_ORIGIN
-  const corsOrigin =
+  // Configuración de CORS restrictiva usando ALLOWED_ORIGINS, CORS_ORIGIN o FRONTEND_URL
+  const configuredOrigins =
     configService.get<string>('ALLOWED_ORIGINS') ||
     configService.get<string>('CORS_ORIGIN');
+  const frontendUrl = configService.get<string>('FRONTEND_URL');
+
+  const defaultOrigins = ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002'];
+  const baseList = configuredOrigins
+    ? configuredOrigins.split(',').map((o) => o.trim())
+    : defaultOrigins;
+
+  const allowedOrigins = [...new Set([...baseList, ...(frontendUrl ? [frontendUrl.trim()] : [])])];
+
   app.enableCors({
-    origin: corsOrigin
-      ? corsOrigin.split(',').map((o) => o.trim())
-      : ['http://localhost:3000', 'http://localhost:3001'],
+    origin: allowedOrigins,
     credentials: true,
   });
 
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  const auditLogBuffer = app.get(AuditLogBufferService, { strict: false });
+  app.useGlobalFilters(new GlobalExceptionFilter(auditLogBuffer));
   app.useGlobalInterceptors(new DecimalTransformInterceptor());
 
   app.useGlobalPipes(

@@ -35,7 +35,7 @@ import { StoresController } from '../src/stores/stores.controller';
 import { StoresService } from '../src/stores/stores.service';
 import { WalletsController } from '../src/wallets/wallets.controller';
 import { WalletsService } from '../src/wallets/wallets.service';
-import { NiubizClient } from '../src/payments/services/niubiz.client';
+import { IzipayClient } from '../src/payments/services/izipay.client';
 import { IpfsService } from '../src/blockchain/services/ipfs.service';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../src/supabase/supabase.service';
@@ -66,7 +66,7 @@ describe('E2E Full Operational & Financial Flow Suite (100% Real, Zero Mocks)', 
 
   // Cryptographic Keypairs generated at runtime dynamically
   const encryptionSecret = 'livora_aes256_' + crypto.randomBytes(8).toString('hex');
-  const webhookSecret = 'niubiz_sec_' + crypto.randomBytes(8).toString('hex');
+  const webhookSecret = 'izipay_sec_' + crypto.randomBytes(8).toString('hex');
   const treasuryKeypair = Keypair.random();
   const workerKeypair = Keypair.random();
 
@@ -121,7 +121,7 @@ describe('E2E Full Operational & Financial Flow Suite (100% Real, Zero Mocks)', 
         BatchesService,
         StoresService,
         WalletsService,
-        NiubizClient,
+        IzipayClient,
         SupabaseService,
         {
           provide: ConfigService,
@@ -143,8 +143,8 @@ describe('E2E Full Operational & Financial Flow Suite (100% Real, Zero Mocks)', 
                 return treasuryKeypair.publicKey();
               if (key === 'WORKER_SECRET_KEY')
                 return workerKeypair.secret();
-              if (key === 'NIUBIZ_WEBHOOK_SECRET' || key === 'PAYMENT_WEBHOOK_SECRET')
-                return webhookSecret;
+              if (key === 'IZIPAY_SHA256_KEY' || key === 'PAYMENT_WEBHOOK_SECRET')
+                return 'VhoR0lSG9MmDZdIuA0nrmJrQOGQOrObXFxWGL1XwjJw72';
               if (key === 'USE_CONTENT_CID')
                 return 'true';
               if (key === 'SUPABASE_URL')
@@ -316,9 +316,9 @@ describe('E2E Full Operational & Financial Flow Suite (100% Real, Zero Mocks)', 
   });
 
   // =========================================================================
-  // 1. MÓDULO DE TARIFARIO Y RECARGA NIUBIZ
+  // 1. MÓDULO DE TARIFARIO Y RECARGA IZIPAY
   // =========================================================================
-  describe('1. Módulo de Tarifario Dinámico y Recarga Niubiz (1 PEN = 1 ECO)', () => {
+  describe('1. Módulo de Tarifario Dinámico y Recarga Izipay (1 PEN = 1 ECO)', () => {
     let rechargePurchaseNumber: string;
 
     it('POST /centers/me/prices: Centro de Acopio registra tarifas en PEN/kg para PET, Cartón y Vidrio', async () => {
@@ -360,18 +360,18 @@ describe('E2E Full Operational & Financial Flow Suite (100% Real, Zero Mocks)', 
       expect(res.body.prices).toHaveLength(3);
     });
 
-    it('POST /payments/niubiz/session: Inicia recarga Fiat y registra transacción PENDING', async () => {
+    it('POST /payments/izipay/session: Inicia recarga Fiat y registra transacción PENDING', async () => {
       currentUser = { id: collectorUser.id, role: Role.RECOLECTOR, email: collectorUser.email };
 
       const res = await request(app.getHttpServer())
-        .post('/payments/niubiz/session')
+        .post('/payments/izipay/session')
         .send({ amount: 20.0 })
         .expect(201);
 
       expect(res.body.amount).toBe(20.0);
       expect(res.body.tokenAmount).toBe(20.0);
-      expect(res.body.purchaseNumber).toBeDefined();
-      rechargePurchaseNumber = res.body.purchaseNumber;
+      expect(res.body.orderId).toBeDefined();
+      rechargePurchaseNumber = res.body.orderId;
 
       // Verificación en PostgreSQL
       const dbPayment = await prisma.paymentTransaction.findUnique({
@@ -381,25 +381,46 @@ describe('E2E Full Operational & Financial Flow Suite (100% Real, Zero Mocks)', 
       expect(dbPayment?.status).toBe(PaymentStatus.PENDING);
     });
 
-    it('POST /payments/niubiz/webhook: Simula webhook con firma criptográfica válida, mintea tokens en Soroban y actualiza saldo en PostgreSQL', async () => {
+    it('POST /payments/izipay-ipn: Simula IPN con firma criptográfica válida, mintea tokens en Soroban y actualiza saldo en PostgreSQL', async () => {
       currentUser = { id: collectorUser.id, role: Role.RECOLECTOR, email: collectorUser.email };
 
-      const validSignature = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(rechargePurchaseNumber)
+      const fakeAnswer = {
+        orderStatus: 'PAID',
+        orderDetails: {
+          orderId: rechargePurchaseNumber,
+          orderTotalAmount: 2000,
+        },
+        transactions: [
+          {
+            transactionDetails: {
+              cardDetails: {
+                effectiveBrand: 'VISA',
+                pan: '411111XXXXXX1111',
+                authorizationResponse: {
+                  authorizationNumber: '987654',
+                },
+              },
+            },
+          },
+        ],
+      };
+
+      const rawAnswer = JSON.stringify(fakeAnswer);
+      const sha256Key = 'VhoR0lSG9MmDZdIuA0nrmJrQOGQOrObXFxWGL1XwjJw72';
+      const validHash = crypto
+        .createHmac('sha256', sha256Key)
+        .update(rawAnswer, 'utf8')
         .digest('hex');
 
       const res = await request(app.getHttpServer())
-        .post('/payments/niubiz/webhook')
+        .post('/payments/izipay-ipn')
         .send({
-          purchaseNumber: rechargePurchaseNumber,
-          transactionToken: `tok_${rechargePurchaseNumber}`,
-          signature: validSignature,
+          'kr-answer': rawAnswer,
+          'kr-hash': validHash,
         })
         .expect(200);
 
-      expect(res.body.status).toBe('COMPLETED');
-      expect(toVal(res.body.amountPen)).toBe(20.0);
+      expect(res.text).toBe('OK');
 
       // Verificación directa en base de datos PostgreSQL
       const updatedPayment = await prisma.paymentTransaction.findUnique({

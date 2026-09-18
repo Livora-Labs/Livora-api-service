@@ -211,7 +211,7 @@ export class SalesService {
         },
         orderBy: { createdAt: 'desc' },
       });
-    } else if (role === 'CENTRO_ACOPIO' || role === 'ALMACEN') {
+    } else if (role === 'CENTRO_ACOPIO') {
       return this.prisma.sale.findMany({
         where: { centerId: userId },
         include: {

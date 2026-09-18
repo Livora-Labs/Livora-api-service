@@ -73,7 +73,7 @@ export class WebsocketsGateway
       // Todos entran a su sala privada
       await client.join(`user:${userId}`);
 
-      if (role === 'CENTRO_ACOPIO' || role === 'ALMACEN') {
+      if (role === 'CENTRO_ACOPIO') {
         await client.join(`center:${userId}`);
       } else if (role === 'RECOLECTOR') {
         await client.join('collectors:active');

@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsObject } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsObject, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsValidWeightRecord } from '../../common/validators/is-valid-weight-record.validator';
 
@@ -16,4 +16,14 @@ export class ReceiveBatchDto {
     },
   )
   materialsActual: Record<string, any>;
+
+  @ApiProperty({ required: false, example: 25.0, description: 'Peso neto útil aceptado en kg' })
+  @IsOptional()
+  @IsNumber()
+  usefulWeightKg?: number;
+
+  @ApiProperty({ required: false, example: 3.5, description: 'Peso de merma / material contaminado en kg' })
+  @IsOptional()
+  @IsNumber()
+  wasteWeightKg?: number;
 }

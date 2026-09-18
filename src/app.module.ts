@@ -30,6 +30,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { RedisModule } from './redis/redis.module';
 import { HealthModule } from './health/health.module';
+import { AuditLogBufferService } from './common/services/audit-log-buffer.service';
 
 @Module({
   imports: [
@@ -151,6 +152,7 @@ import { HealthModule } from './health/health.module';
   controllers: [AppController],
   providers: [
     AppService,
+    AuditLogBufferService,
     {
       provide: APP_GUARD,
       useClass: RoleThrottlerGuard,

@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ThrottlerModule, ThrottlerStorage } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { RoleThrottlerGuard } from './role-throttler.guard';
+import * as jwt from 'jsonwebtoken';
 
 describe('RoleThrottlerGuard', () => {
   let guard: RoleThrottlerGuard;
@@ -89,5 +90,42 @@ describe('RoleThrottlerGuard', () => {
       0,
       'default',
     );
+  });
+
+  it('should resolve JWT in canActivate and isolate users behind identical CGNAT IP', async () => {
+    process.env.SUPABASE_JWT_SECRET = 'test_jwt_secret_key_for_cgnat_test!';
+    const tokenUser1 = jwt.sign(
+      { sub: 'cgnat-user-1', role: Role.HOGAR },
+      process.env.SUPABASE_JWT_SECRET,
+    );
+    const tokenUser2 = jwt.sign(
+      { sub: 'cgnat-user-2', role: Role.ADMIN },
+      process.env.SUPABASE_JWT_SECRET,
+    );
+
+    const cgnatIp = '181.176.50.10';
+
+    // Request 1: User 1
+    const { ctx: ctx1, req: req1 } = createMockContext(undefined, cgnatIp);
+    req1.headers.authorization = `Bearer ${tokenUser1}`;
+    await (guard as any).resolveUserFromAuthHeader(req1);
+
+    expect(req1.user).toBeDefined();
+    expect(req1.user.id).toBe('cgnat-user-1');
+    const tracker1 = await (guard as any).getTracker(req1);
+    expect(tracker1).toBe('user:cgnat-user-1');
+
+    // Request 2: User 2 (same CGNAT IP)
+    const { ctx: ctx2, req: req2 } = createMockContext(undefined, cgnatIp);
+    req2.headers.authorization = `Bearer ${tokenUser2}`;
+    await (guard as any).resolveUserFromAuthHeader(req2);
+
+    expect(req2.user).toBeDefined();
+    expect(req2.user.id).toBe('cgnat-user-2');
+    const tracker2 = await (guard as any).getTracker(req2);
+    expect(tracker2).toBe('user:cgnat-user-2');
+
+    // Ensure trackers are completely distinct despite identical IP
+    expect(tracker1).not.toBe(tracker2);
   });
 });

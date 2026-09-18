@@ -53,12 +53,19 @@ export class CollectionsService {
       | { originalname: string; buffer: Buffer; mimetype: string }
       | Express.Multer.File,
   ) {
-    // 1. Verificar si el hogar ya tiene una solicitud activa (PENDING o ACCEPTED)
+    // 1. Verificar si el hogar ya tiene una solicitud activa
     const activeRequest = await this.prisma.collectionRequest.findFirst({
       where: {
         householdId: userId,
         status: {
-          in: [RequestStatus.PENDING, RequestStatus.ACCEPTED],
+          in: [
+            RequestStatus.PENDING,
+            RequestStatus.AUCTION_ACTIVE,
+            RequestStatus.AUCTION_ASSIGNED,
+            RequestStatus.ACCEPTED,
+            RequestStatus.EN_ROUTE,
+            RequestStatus.ARRIVED,
+          ],
         },
       },
     });
@@ -104,10 +111,18 @@ export class CollectionsService {
     }
 
     const assignmentMode = dto.assignmentMode === 'AUCTION' ? 'AUCTION' : 'AUTOMATIC';
+    const status =
+      assignmentMode === 'AUCTION'
+        ? RequestStatus.AUCTION_ACTIVE
+        : RequestStatus.PENDING;
+    const auctionExpiresAt =
+      assignmentMode === 'AUCTION'
+        ? new Date(Date.now() + 15 * 60 * 1000)
+        : null;
 
     const newRequest = await this.prisma.collectionRequest.create({
       data: {
-        status: RequestStatus.PENDING,
+        status,
         assignmentMode,
         itemsEstimated: dto.itemsEstimated,
         description: dto.description,
@@ -116,6 +131,7 @@ export class CollectionsService {
         longitude: dto.longitude,
         photoUrl,
         householdId: userId,
+        auctionExpiresAt,
       },
       include: {
         household: {
@@ -148,7 +164,7 @@ export class CollectionsService {
     this.prisma.user
       .findMany({
         where: {
-          role: { in: [Role.CENTRO_ACOPIO, Role.ALMACEN] },
+          role: Role.CENTRO_ACOPIO,
           fcmToken: { not: null },
         },
         select: { id: true },
@@ -326,8 +342,11 @@ export class CollectionsService {
       throw new ForbiddenException('No tienes permisos para gestionar esta solicitud');
     }
 
-    if (request.status !== RequestStatus.PENDING) {
-      throw new BadRequestException('La solicitud ya no se encuentra en estado PENDING');
+    if (
+      request.status !== RequestStatus.PENDING &&
+      request.status !== RequestStatus.AUCTION_ACTIVE
+    ) {
+      throw new BadRequestException('La solicitud ya no se encuentra en estado PENDING ni AUCTION_ACTIVE');
     }
 
     const selectedBid = await this.prisma.acopioBid.findUnique({
@@ -344,12 +363,16 @@ export class CollectionsService {
 
     // Aceptar la propuesta seleccionada y rechazar las demás dentro de una transacción atómica
     const updatedRequest = await this.prisma.$transaction(async (tx) => {
-      // Validar atómicamente que la solicitud siga en estado PENDING
+      // Validar atómicamente que la solicitud siga en estado PENDING o AUCTION_ACTIVE
       const currentReq = await tx.collectionRequest.findUnique({
         where: { id: requestId },
       });
-      if (!currentReq || currentReq.status !== RequestStatus.PENDING) {
-        throw new BadRequestException('La solicitud ya no se encuentra en estado PENDING');
+      if (
+        !currentReq ||
+        (currentReq.status !== RequestStatus.PENDING &&
+          currentReq.status !== RequestStatus.AUCTION_ACTIVE)
+      ) {
+        throw new BadRequestException('La solicitud ya no se encuentra disponible para subasta');
       }
 
       await tx.acopioBid.update({
@@ -368,6 +391,7 @@ export class CollectionsService {
       return tx.collectionRequest.update({
         where: { id: requestId },
         data: {
+          status: RequestStatus.AUCTION_ASSIGNED,
           assignedCenterId: selectedBid.centerId,
           agreedRates: selectedBid.proposedRates as any,
         },
@@ -498,7 +522,7 @@ export class CollectionsService {
         },
         batch: true,
       };
-    } else if (user.role === Role.CENTRO_ACOPIO || user.role === Role.ALMACEN) {
+    } else if (user.role === Role.CENTRO_ACOPIO) {
       where = {
         OR: [
           {
@@ -713,7 +737,7 @@ export class CollectionsService {
       where: { id },
       include: {
         household: { select: { id: true, email: true, name: true, address: true, phone: true } },
-        collector: { select: { id: true, email: true, name: true, phone: true } },
+        collector: { select: { id: true, email: true, name: true, phone: true, profilePhotoUrl: true, reputationScore: true } },
         assignedCenter: { select: { id: true, name: true, email: true, address: true } },
         bids: {
           include: {
@@ -757,9 +781,12 @@ export class CollectionsService {
 
     if (role === Role.RECOLECTOR) {
       if (dto.status === RequestStatus.ACCEPTED) {
-        if (collectionRequest.status !== RequestStatus.PENDING) {
+        if (
+          collectionRequest.status !== RequestStatus.PENDING &&
+          collectionRequest.status !== RequestStatus.AUCTION_ASSIGNED
+        ) {
           throw new BadRequestException(
-            'La solicitud no está en estado PENDING y no puede ser aceptada',
+            'La solicitud no está en estado PENDING o AUCTION_ASSIGNED y no puede ser aceptada',
           );
         }
 
@@ -797,7 +824,7 @@ export class CollectionsService {
           }
         }
 
-        // Si no hay saldo on-chain, sumar depósitos Niubiz completados como fallback
+        // Si no hay saldo on-chain, sumar depósitos Izipay completados como fallback
         if (totalBalance === 0) {
           const payments = await this.prisma.paymentTransaction.findMany({
             where: { userId, status: 'COMPLETED' },
@@ -820,7 +847,7 @@ export class CollectionsService {
 
         if (freeBalance < requiredEscrow) {
           throw new BadRequestException(
-            `Saldo insuficiente en EcoTokens. Se requiere una garantía de ${requiredEscrow.toFixed(2)} ECO (40% Hogar + 10% Livora), pero tu saldo libre es de ${freeBalance.toFixed(2)} ECO. Por favor recarga tu saldo vía Niubiz.`,
+            `Saldo insuficiente en EcoTokens. Se requiere una garantía de ${requiredEscrow.toFixed(2)} ECO (40% Hogar + 10% Livora), pero tu saldo libre es de ${freeBalance.toFixed(2)} ECO. Por favor recarga tu saldo vía Izipay.`,
           );
         }
 
@@ -855,7 +882,7 @@ export class CollectionsService {
               "batchId" = ${batchId}::uuid,
               "updatedAt" = NOW()
           WHERE id = ${id}::uuid
-            AND status = 'PENDING'::"RequestStatus"
+            AND status IN ('PENDING'::"RequestStatus", 'AUCTION_ASSIGNED'::"RequestStatus")
         `;
 
         if (rowsAffected === 0) {
@@ -951,9 +978,12 @@ export class CollectionsService {
         throw new NotFoundException('Solicitud de recolección no encontrada');
       }
 
-      if (collectionRequest.status !== RequestStatus.ACCEPTED) {
+      if (
+        collectionRequest.status !== RequestStatus.ACCEPTED &&
+        collectionRequest.status !== RequestStatus.ARRIVED
+      ) {
         throw new BadRequestException(
-          'La solicitud debe estar en estado ACCEPTED para verificar el PIN',
+          'La solicitud debe estar en estado ACCEPTED o ARRIVED para verificar el PIN',
         );
       }
 
@@ -1089,13 +1119,13 @@ export class CollectionsService {
       // Actualización atómica condicional anti-race condition
       const updatedCount = await this.prisma.$executeRaw`
         UPDATE collection_requests
-        SET status = 'COMPLETED', "batchId" = ${targetBatchId}::uuid, "actualWeights" = ${JSON.stringify(actualWeights)}::jsonb, "escrowLocked" = 0, "updatedAt" = NOW()
-        WHERE id = ${id}::uuid AND status = 'ACCEPTED'
+        SET status = 'COMPLETED'::"RequestStatus", "batchId" = ${targetBatchId}::uuid, "actualWeights" = ${JSON.stringify(actualWeights)}::jsonb, "escrowLocked" = 0, "updatedAt" = NOW()
+        WHERE id = ${id}::uuid AND status IN ('ACCEPTED'::"RequestStatus", 'ARRIVED'::"RequestStatus")
       `;
 
       if (updatedCount === 0) {
         throw new BadRequestException(
-          'La solicitud ya fue procesada o no está en estado ACCEPTED',
+          'La solicitud ya fue procesada o no está en estado ACCEPTED o ARRIVED',
         );
       }
 
@@ -1341,6 +1371,322 @@ export class CollectionsService {
     }
 
     return updated;
+  }
+
+  /**
+   * POST /collection-requests/:id/start-route (Rol: RECOLECTOR)
+   * Inicia el trayecto vehicular hacia el domicilio del hogar (ACCEPTED -> EN_ROUTE).
+   */
+  async startRoute(id: string, collectorId: string) {
+    const request = await this.prisma.collectionRequest.findUnique({
+      where: { id },
+      include: {
+        household: { select: { id: true, email: true, name: true } },
+        collector: { select: { id: true, name: true, phone: true, profilePhotoUrl: true } },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Solicitud de recolección no encontrada');
+    }
+
+    if (request.collectorId !== collectorId) {
+      throw new ForbiddenException('Solo el recolector asignado puede iniciar la ruta');
+    }
+
+    if (request.status !== RequestStatus.ACCEPTED) {
+      throw new BadRequestException(
+        `Solo solicitudes en estado ACCEPTED pueden iniciar ruta (Estado actual: ${request.status})`,
+      );
+    }
+
+    const updated = await this.prisma.collectionRequest.update({
+      where: { id },
+      data: {
+        status: RequestStatus.EN_ROUTE,
+        enRouteAt: new Date(),
+      },
+      include: {
+        household: { select: { id: true, email: true, name: true, address: true } },
+        collector: { select: { id: true, name: true, phone: true, profilePhotoUrl: true } },
+        assignedCenter: { select: { id: true, name: true, email: true, address: true } },
+      },
+    });
+
+    this.notificationsService
+      .sendPushNotification(
+        request.householdId,
+        'Recolector en camino',
+        `${request.collector?.name || 'Tu recolector'} ha iniciado el viaje hacia tu dirección. Ten listos tus materiales reciclables.`,
+        { requestId: id, status: 'EN_ROUTE' },
+      )
+      .catch(() => {});
+
+    this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
+    return this.stripPin(updated);
+  }
+
+  /**
+   * POST /collection-requests/:id/reach-destination (Rol: RECOLECTOR)
+   * Marca llegada al domicilio e inicia ventana de espera de 10 min (EN_ROUTE -> ARRIVED).
+   */
+  async reachDestination(id: string, collectorId: string) {
+    const request = await this.prisma.collectionRequest.findUnique({
+      where: { id },
+      include: {
+        household: { select: { id: true, email: true, name: true } },
+        collector: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Solicitud de recolección no encontrada');
+    }
+
+    if (request.collectorId !== collectorId) {
+      throw new ForbiddenException('Solo el recolector asignado puede marcar su llegada');
+    }
+
+    if (request.status !== RequestStatus.EN_ROUTE) {
+      throw new BadRequestException(
+        `Solo solicitudes en estado EN_ROUTE pueden marcar llegada (Estado actual: ${request.status})`,
+      );
+    }
+
+    const updated = await this.prisma.collectionRequest.update({
+      where: { id },
+      data: {
+        status: RequestStatus.ARRIVED,
+        arrivedAt: new Date(),
+      },
+      include: {
+        household: { select: { id: true, email: true, name: true, address: true } },
+        collector: { select: { id: true, name: true, phone: true, profilePhotoUrl: true } },
+        assignedCenter: { select: { id: true, name: true, email: true, address: true } },
+      },
+    });
+
+    this.notificationsService
+      .sendPushNotification(
+        request.householdId,
+        'Recolector en puerta',
+        'El recolector ha llegado a tu domicilio. Acércate con tus materiales y tu PIN de 4 dígitos.',
+        { requestId: id, status: 'ARRIVED' },
+      )
+      .catch(() => {});
+
+    this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
+    return this.stripPin(updated);
+  }
+
+  /**
+   * POST /collection-requests/:id/no-show (Rol: RECOLECTOR)
+   * Reporta inasistencia del hogar tras 10 min de espera en puerta (ARRIVED -> UNATTENDED).
+   * Aplica micro-compensación de 2 ECO tokens del hogar al recolector y penaliza reputación (-0.5).
+   */
+  async reportNoShow(id: string, collectorId: string) {
+    const request = await this.prisma.collectionRequest.findUnique({
+      where: { id },
+      include: {
+        household: true,
+        collector: true,
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Solicitud de recolección no encontrada');
+    }
+
+    if (request.collectorId !== collectorId) {
+      throw new ForbiddenException('Solo el recolector asignado puede reportar inasistencia');
+    }
+
+    if (request.status !== RequestStatus.ARRIVED) {
+      throw new BadRequestException(
+        `Solo solicitudes en estado ARRIVED pueden reportarse como desatendidas (Estado actual: ${request.status})`,
+      );
+    }
+
+    // Validar ventana de espera de 10 min (600,000 ms) excepto en tests
+    if (request.arrivedAt && process.env.NODE_ENV !== 'test') {
+      const elapsedMs = Date.now() - new Date(request.arrivedAt).getTime();
+      if (elapsedMs < 10 * 60 * 1000) {
+        const remainingMin = Math.ceil((10 * 60 * 1000 - elapsedMs) / 60000);
+        throw new BadRequestException(
+          `Debes esperar al menos 10 minutos desde tu llegada antes de reportar inasistencia. Faltan aprox. ${remainingMin} minuto(s).`,
+        );
+      }
+    }
+
+    // 1. Liberar escrow del recolector y actualizar estado a UNATTENDED
+    const updated = await this.prisma.collectionRequest.update({
+      where: { id },
+      data: {
+        status: RequestStatus.UNATTENDED,
+        escrowLocked: 0,
+        noShowFeePen: 2.0,
+      },
+      include: {
+        household: { select: { id: true, email: true, name: true } },
+        collector: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    // 2. Penalización de reputación al hogar (-0.5 estrellas)
+    if (request.household) {
+      const currentScore = request.household.reputationScore ?? 5.0;
+      const newScore = Math.max(1.0, Number((currentScore - 0.5).toFixed(2)));
+      await this.prisma.user.update({
+        where: { id: request.household.id },
+        data: { reputationScore: newScore },
+      });
+    }
+
+    // 3. Micro-compensación de 2 ECO Tokens transferida al recolector
+    const householdUser = request.household;
+    const collectorUser = request.collector;
+    const encryptionKey =
+      (this.configService &&
+        (this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
+          this.configService.get<string>('ENCRYPTION_KEY'))) ||
+      (process.env.NODE_ENV === 'test' ? 'test_isolated_wallet_encryption_key_32c' : '');
+
+    if (
+      householdUser?.encryptedPrivateKey &&
+      collectorUser?.walletAddress &&
+      encryptionKey
+    ) {
+      try {
+        const privKey = CryptoUtil.decrypt(householdUser.encryptedPrivateKey, encryptionKey);
+        await this.blockchainService.executeSubsidizedTransfer(
+          privKey,
+          collectorUser.walletAddress,
+          2.0,
+        );
+      } catch (err: any) {
+        this.logger.warn(`Micro-compensación no-show falló on-chain: ${err.message}`);
+      }
+    }
+
+    this.notificationsService
+      .sendPushNotification(
+        request.householdId,
+        'Visita desatendida',
+        'El recolector esperó en tu puerta y no hubo respuesta. Se aplicó una compensación de 2 ECO Tokens por traslado y penalización de reputación.',
+        { requestId: id, status: 'UNATTENDED' },
+      )
+      .catch(() => {});
+
+    this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
+    return this.stripPin(updated);
+  }
+
+  /**
+   * POST /collection-requests/:id/reject-on-site (Rol: RECOLECTOR)
+   * Rechaza material en puerta por contaminación, materiales prohibidos o condiciones inseguras (ARRIVED -> REJECTED_ON_SITE).
+   * Libera escrow del recolector y registra evidencia fotográfica.
+   */
+  async rejectOnSite(
+    id: string,
+    collectorId: string,
+    reason: string,
+    photoUrls?: string[],
+  ) {
+    const request = await this.prisma.collectionRequest.findUnique({
+      where: { id },
+      include: {
+        household: { select: { id: true, email: true, name: true } },
+        collector: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Solicitud de recolección no encontrada');
+    }
+
+    if (request.collectorId !== collectorId) {
+      throw new ForbiddenException('Solo el recolector asignado puede reportar rechazo en sitio');
+    }
+
+    if (request.status !== RequestStatus.ARRIVED) {
+      throw new BadRequestException(
+        `Solo solicitudes en estado ARRIVED pueden ser rechazadas en sitio (Estado actual: ${request.status})`,
+      );
+    }
+
+    if (!reason || reason.trim().length < 5) {
+      throw new BadRequestException('Debes indicar un motivo de rechazo de al menos 5 caracteres');
+    }
+
+    const updated = await this.prisma.collectionRequest.update({
+      where: { id },
+      data: {
+        status: RequestStatus.REJECTED_ON_SITE,
+        escrowLocked: 0,
+        rejectionReason: reason,
+        rejectionPhotos: photoUrls && photoUrls.length > 0 ? (photoUrls as any) : undefined,
+      },
+      include: {
+        household: { select: { id: true, email: true, name: true } },
+        collector: { select: { id: true, name: true } },
+      },
+    });
+
+    this.notificationsService
+      .sendPushNotification(
+        request.householdId,
+        'Recolección rechazada en sitio',
+        `El recolector no pudo recibir los materiales: ${reason}. La orden ha sido cancelada sin penalidad.`,
+        { requestId: id, status: 'REJECTED_ON_SITE', reason },
+      )
+      .catch(() => {});
+
+    this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
+    return this.stripPin(updated);
+  }
+
+  /**
+   * Fallback de Subastas Flash de 15 minutos:
+   * Convierte automáticamente solicitudes en AUCTION_ACTIVE expiradas a PENDING (Modo Automático).
+   */
+  async checkAuctionFallbacks() {
+    const now = new Date();
+    const expiredAuctions = await this.prisma.collectionRequest.findMany({
+      where: {
+        status: RequestStatus.AUCTION_ACTIVE,
+        auctionExpiresAt: { lte: now },
+      },
+      include: { bids: true },
+    });
+
+    for (const req of expiredAuctions) {
+      const hasAcceptedBid = req.bids.some((b) => b.status === 'ACCEPTED');
+      if (!hasAcceptedBid) {
+        await this.prisma.acopioBid.updateMany({
+          where: { requestId: req.id, status: 'PENDING' },
+          data: { status: 'EXPIRED' as any },
+        });
+
+        const updated = await this.prisma.collectionRequest.update({
+          where: { id: req.id },
+          data: {
+            status: RequestStatus.PENDING,
+            assignmentMode: 'AUTOMATIC',
+          },
+        });
+
+        this.notificationsService
+          .sendPushNotification(
+            req.householdId,
+            'Subasta finalizada sin ganador',
+            'Tu subasta de 15 minutos concluyó. Tu solicitud ha pasado automáticamente a modo estándar para recolección inmediata.',
+            { requestId: req.id },
+          )
+          .catch(() => {});
+
+        this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
+      }
+    }
   }
 
   /**

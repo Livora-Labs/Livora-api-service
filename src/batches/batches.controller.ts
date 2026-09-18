@@ -46,10 +46,10 @@ export class BatchesController {
    * Devuelve el historial de lotes paginado con forzado de seguridad por rol.
    */
   @Get()
-  @Roles(Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @Roles(Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ADMIN)
   @ApiOperation({
     summary:
-      'Listar historial de lotes paginado (Rol: RECOLECTOR / CENTRO_ACOPIO / ALMACEN / ADMIN)',
+      'Listar historial de lotes paginado (Rol: RECOLECTOR / CENTRO_ACOPIO / ADMIN)',
   })
   async findAll(@CurrentUser() user: any, @Query() query: FindBatchesQueryDto) {
     return this.batchesService.findAll(user.id, user.role, query);
@@ -77,7 +77,7 @@ export class BatchesController {
    * Obtiene el detalle completo de un lote por su ID.
    */
   @Get(':id')
-  @Roles(Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @Roles(Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ADMIN)
   @ApiOperation({
     summary: 'Consultar detalle de un lote por ID',
   })
@@ -107,7 +107,7 @@ export class BatchesController {
   }
 
   /**
-   * POST /batches/:id/receive (Rol: CENTRO_ACOPIO / ALMACEN)
+   * POST /batches/:id/receive (Rol: CENTRO_ACOPIO)
    * Endpoint crítico de pesaje industrial y patrón HTTP 202 con Idempotencia en Redis.
    */
   @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
@@ -115,10 +115,10 @@ export class BatchesController {
   @RequireIdempotency()
   @Post(':id/receive')
   @HttpCode(HttpStatus.ACCEPTED)
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.CENTRO_ACOPIO)
   @ApiOperation({
     summary:
-      'Recepción del lote en Centro de Acopio / Almacén (Dispara procesador Blockchain / BullMQ - HTTP 202)',
+      'Recepción del lote en Centro de Acopio (Dispara procesador Blockchain / BullMQ - HTTP 202)',
   })
   @ApiResponse({
     status: 202,
@@ -178,15 +178,15 @@ export class BatchesController {
   }
 
   /**
-   * POST /batches/:id/fiat-settlement (Rol: CENTRO_ACOPIO, ALMACEN)
+   * POST /batches/:id/fiat-settlement (Rol: CENTRO_ACOPIO)
    * Asienta contablemente el pago en efectivo (Soles) por el material físico.
    */
   @Post(':id/fiat-settlement')
   @HttpCode(HttpStatus.OK)
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.CENTRO_ACOPIO)
   @ApiOperation({
     summary:
-      'Registrar cierre de pago fiduciario en efectivo (fiat) al recolector por material recibido (Rol: CENTRO_ACOPIO / ALMACEN)',
+      'Registrar cierre de pago fiduciario en efectivo (fiat) al recolector por material recibido (Rol: CENTRO_ACOPIO)',
   })
   async fiatSettlement(
     @Param('id', ParseUUIDPipe) id: string,
@@ -237,6 +237,33 @@ export class BatchesController {
       id,
       materialsActual,
       resolutionNote,
+    );
+  }
+
+  /**
+   * POST /batches/:id/reroute (Rol: RECOLECTOR)
+   * Redirección de contingencia en ruta hacia centro de acopio alternativo.
+   */
+  @Post(':id/reroute')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.RECOLECTOR)
+  @ApiOperation({
+    summary:
+      'Redirigir lote en tránsito hacia un centro de acopio alternativo por contingencia operativa (Rol: RECOLECTOR)',
+  })
+  async rerouteBatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') collectorId: string,
+    @Body('newCenterId', ParseUUIDPipe) newCenterId: string,
+    @Body('reason') reason?: string,
+    @Body('proofPhotoUrl') proofPhotoUrl?: string,
+  ) {
+    return this.batchesService.rerouteBatch(
+      id,
+      collectorId,
+      newCenterId,
+      reason,
+      proofPhotoUrl,
     );
   }
 }

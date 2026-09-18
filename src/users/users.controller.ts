@@ -85,7 +85,7 @@ export class UsersController {
     @CurrentUser('id') userId: string,
     @Body() dto: ChangePasswordDto,
   ) {
-    return this.usersService.changePassword(userId, dto.newPassword);
+    return this.usersService.changePassword(userId, dto.newPassword, dto.currentPassword);
   }
 
   @Patch('fcm-token')

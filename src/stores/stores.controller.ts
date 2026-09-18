@@ -36,8 +36,8 @@ export class StoresController {
   constructor(private readonly storesService: StoresService) {}
 
   @Post('profile')
-  @Roles(Role.TIENDA, Role.ALMACEN)
-  @ApiOperation({ summary: 'Crear perfil de tienda (Rol: TIENDA / ALMACEN)' })
+  @Roles(Role.TIENDA)
+  @ApiOperation({ summary: 'Crear perfil de tienda (Rol: TIENDA)' })
   async createProfile(
     @CurrentUser() user: any,
     @Body() dto: CreateStoreProfileDto,
@@ -46,8 +46,8 @@ export class StoresController {
   }
 
   @Patch('profile')
-  @Roles(Role.TIENDA, Role.ALMACEN)
-  @ApiOperation({ summary: 'Actualizar perfil de tienda (Rol: TIENDA / ALMACEN)' })
+  @Roles(Role.TIENDA)
+  @ApiOperation({ summary: 'Actualizar perfil de tienda (Rol: TIENDA)' })
   async updateProfile(
     @CurrentUser('id') userId: string,
     @Body() dto: CreateStoreProfileDto,
@@ -56,9 +56,9 @@ export class StoresController {
   }
 
   @Get('profile')
-  @Roles(Role.TIENDA, Role.ALMACEN)
+  @Roles(Role.TIENDA)
   @ApiOperation({
-    summary: 'Obtener perfil de tienda del usuario autenticado (Rol: TIENDA / ALMACEN)',
+    summary: 'Obtener perfil de tienda del usuario autenticado (Rol: TIENDA)',
   })
   async getProfile(@CurrentUser('id') userId: string) {
     return this.storesService.getProfile(userId);
@@ -98,9 +98,9 @@ export class StoresController {
 
   @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('redemptions/qr')
-  @Roles(Role.TIENDA, Role.ALMACEN)
+  @Roles(Role.TIENDA)
   @ApiOperation({
-    summary: 'Generar código QR para canje de EcoTokens (Rol: TIENDA / ALMACEN)',
+    summary: 'Generar código QR para canje de EcoTokens (Rol: TIENDA)',
   })
   async generateQrRedemption(
     @CurrentUser() user: any,
@@ -155,7 +155,7 @@ export class StoresController {
 
   @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('redemptions/:id/refund')
-  @Roles(Role.TIENDA, Role.ALMACEN)
+  @Roles(Role.TIENDA)
   @ApiOperation({
     summary:
       'Anular canje en punto de venta y devolver EcoTokens al hogar dentro de las 24 horas (Rol: TIENDA)',
@@ -169,10 +169,10 @@ export class StoresController {
 
   @Throttle({ web3_transactions: { limit: 10, ttl: 60000 } })
   @Post('settlements')
-  @Roles(Role.TIENDA, Role.ALMACEN)
+  @Roles(Role.TIENDA)
   @ApiOperation({
     summary:
-      'Solicitar liquidación de EcoTokens acumulados a FIAT (Rol: TIENDA / ALMACEN)',
+      'Solicitar liquidación de EcoTokens acumulados a FIAT (Rol: TIENDA)',
   })
   async requestSettlement(
     @CurrentUser() user: any,
@@ -209,9 +209,9 @@ export class StoresController {
   }
 
   @Get('redemptions')
-  @Roles(Role.TIENDA, Role.ALMACEN)
+  @Roles(Role.TIENDA)
   @ApiOperation({
-    summary: 'Obtener historial de canjes de la tienda (Rol: TIENDA / ALMACEN)',
+    summary: 'Obtener historial de canjes de la tienda (Rol: TIENDA)',
   })
   async getRedemptions(
     @CurrentUser('id') userId: string,
@@ -226,9 +226,9 @@ export class StoresController {
   }
 
   @Get('settlements/history')
-  @Roles(Role.TIENDA, Role.ALMACEN)
+  @Roles(Role.TIENDA)
   @ApiOperation({
-    summary: 'Obtener historial de liquidaciones de la tienda (Rol: TIENDA / ALMACEN)',
+    summary: 'Obtener historial de liquidaciones de la tienda (Rol: TIENDA)',
   })
   async getSettlements(
     @CurrentUser('id') userId: string,
@@ -239,6 +239,23 @@ export class StoresController {
       userId,
       page ? Number(page) : 1,
       limit ? Number(limit) : 15,
+    );
+  }
+
+  @Get('settlements/admin')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Listar todas las solicitudes de liquidación de tiendas (Rol: ADMIN)',
+  })
+  async getAllSettlements(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('status') status?: any,
+  ) {
+    return this.storesService.getAllSettlements(
+      page ? Number(page) : 1,
+      limit ? Number(limit) : 15,
+      status,
     );
   }
 }

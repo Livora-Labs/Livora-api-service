@@ -63,8 +63,8 @@ export class BatchesService {
     if (role === Role.RECOLECTOR) {
       // Forzar por seguridad que solo consulte sus propios lotes
       where.collectorId = userId;
-    } else if (role === Role.CENTRO_ACOPIO || role === Role.ALMACEN) {
-      // Forzar por seguridad que solo consulte los lotes destinados a su centro de acopio o almacén
+    } else if (role === Role.CENTRO_ACOPIO) {
+      // Forzar por seguridad que solo consulte los lotes destinados a su centro de acopio
       where.destinationCenterId = userId;
     } else if (role === Role.ADMIN) {
       // Admin tiene visibilidad global de todos los lotes
@@ -212,13 +212,9 @@ export class BatchesService {
       where: { id: dto.destinationCenterId },
     });
 
-    if (
-      !destinationCenter ||
-      (destinationCenter.role !== Role.CENTRO_ACOPIO &&
-        destinationCenter.role !== Role.ALMACEN)
-    ) {
+    if (!destinationCenter || destinationCenter.role !== Role.CENTRO_ACOPIO) {
       throw new BadRequestException(
-        'El centro de acopio o almacén especificado no existe o no posee un rol autorizado',
+        'El centro de acopio especificado no existe o no posee un rol autorizado',
       );
     }
 
@@ -350,14 +346,19 @@ export class BatchesService {
     }
 
     // Transacción Asíncrona:
-    // a) Actualiza el estado del lote a PROCESSING, guarda los pesos industriales en materialsActual
+    // a) Actualiza el estado del lote a PROCESSING o PARTIALLY_ACCEPTED si hubo merma
+    const isPartial = dto.wasteWeightKg !== undefined && Number(dto.wasteWeightKg) > 0;
+    const targetStatus = isPartial ? BatchStatus.PARTIALLY_ACCEPTED : BatchStatus.PROCESSING;
+
     const updatedBatch = await this.prisma.batch.update({
       where: { id },
       data: {
-        status: BatchStatus.PROCESSING,
+        status: targetStatus,
         materialsActual: dto.materialsActual,
         hasDiscrepancy: false,
-        discrepancyNote: null,
+        discrepancyNote: isPartial
+          ? `Aceptado parcialmente con merma: ${dto.wasteWeightKg} kg descartados. Peso neto útil: ${dto.usefulWeightKg ?? 'N/A'} kg.`
+          : null,
       },
     });
 
@@ -725,4 +726,97 @@ export class BatchesService {
 
     return updated;
   }
+
+  /**
+   * POST /batches/:id/reroute (Rol: RECOLECTOR)
+   * Redirige un lote en tránsito hacia un centro de acopio alternativo por contingencia operativa.
+   */
+  async rerouteBatch(
+    batchId: string,
+    collectorId: string,
+    newCenterId: string,
+    reason?: string,
+    proofPhotoUrl?: string,
+  ) {
+    const batch = await this.prisma.batch.findUnique({
+      where: { id: batchId },
+      include: { destinationCenter: true },
+    });
+
+    if (!batch) {
+      throw new NotFoundException('Lote no encontrado');
+    }
+
+    if (batch.collectorId !== collectorId) {
+      throw new ForbiddenException('Solo el recolector a cargo del lote puede redirigirlo');
+    }
+
+    if (batch.status !== BatchStatus.OPEN && batch.status !== BatchStatus.IN_TRANSIT) {
+      throw new BadRequestException(
+        `Solo lotes en estado OPEN o IN_TRANSIT pueden ser redirigidos (Estado actual: ${batch.status})`,
+      );
+    }
+
+    if (batch.destinationCenterId === newCenterId) {
+      throw new BadRequestException('El nuevo centro de acopio no puede ser idéntico al actual');
+    }
+
+    const newCenter = await this.prisma.user.findUnique({
+      where: { id: newCenterId },
+    });
+
+    if (!newCenter || newCenter.role !== Role.CENTRO_ACOPIO) {
+      throw new BadRequestException('El centro de acopio destino no existe o no posee un rol autorizado');
+    }
+
+    const oldCenterId = batch.destinationCenterId;
+
+    const updatedBatch = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.batch.update({
+        where: { id: batchId },
+        data: {
+          status: BatchStatus.REROUTED,
+          destinationCenterId: newCenterId,
+        },
+        include: {
+          destinationCenter: { select: { id: true, name: true, email: true, address: true } },
+        },
+      });
+
+      await tx.disputeCase.create({
+        data: {
+          batchId,
+          openedById: collectorId,
+          status: 'OPENED',
+          collectorStatement: reason || 'Centro de acopio de destino original no disponible o cerrado. Redirección por contingencia en ruta.',
+          collectorPhotos: proofPhotoUrl ? [proofPhotoUrl] : [],
+        },
+      });
+
+      return updated;
+    });
+
+    if (oldCenterId) {
+      this.notificationsService
+        ?.sendPushNotification(
+          oldCenterId,
+          'Lote redirigido a otro centro',
+          `El lote ${batchId} fue desviado por el recolector debido a contingencia en ruta.`,
+          { batchId },
+        )
+        .catch(() => {});
+    }
+
+    this.notificationsService
+      ?.sendPushNotification(
+        newCenterId,
+        'Nuevo lote redirigido en camino',
+        `Un recolector ha redirigido un lote hacia tu centro de acopio por contingencia en ruta.`,
+        { batchId },
+      )
+      .catch(() => {});
+
+    return updatedBatch;
+  }
 }
+

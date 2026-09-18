@@ -45,9 +45,13 @@ export interface ProblemDetails {
   [key: string]: any;
 }
 
+import { AuditLogBufferService } from '../services/audit-log-buffer.service';
+
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
+
+  constructor(private readonly auditBuffer?: AuditLogBufferService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -183,6 +187,25 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     if (invalidParams && invalidParams.length > 0) {
       problemDetails.invalid_params = invalidParams;
+    }
+
+    if (this.auditBuffer) {
+      const correlationId =
+        (request as any)?.correlationId ||
+        (request.headers && (request.headers['x-correlation-id'] as string));
+      this.auditBuffer.add({
+        level: status >= 500 ? 'ERROR' : 'WARN',
+        context: 'GlobalExceptionFilter',
+        message: `${request.method || 'GET'} ${instance} -> ${status} ${title}: ${detail}`,
+        correlationId,
+        data: {
+          status,
+          errorCode: cleanErrorCode,
+          detail,
+          invalidParams,
+          ip: request.ip,
+        },
+      });
     }
 
     response

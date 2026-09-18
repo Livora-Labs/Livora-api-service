@@ -219,9 +219,9 @@ describe('UsersService', () => {
       // 4. Complaints anonymization
       expect(mockPrismaService.complaint.updateMany).toHaveBeenCalledWith({
         where: { userId: 'user-1234-5678' },
-        data: expect.objectContaining({
-          subject: 'Queja Anonimizada',
-        }),
+        data: {
+          userId: null,
+        },
       });
 
       // 5. Notifications wipe
@@ -297,6 +297,69 @@ describe('UsersService', () => {
         where: { userId: 'user-1' },
         orderBy: { consentedAt: 'desc' },
       });
+    });
+  });
+
+  describe('Startup Master Encryption Key Guard', () => {
+    it('should throw "FATAL: ENCRYPTION_MASTER_KEY must be configured" on module init if key is missing', () => {
+      const configServiceMock = {
+        get: jest.fn().mockReturnValue(undefined),
+      };
+      const testService = new UsersService(
+        mockPrismaService,
+        configServiceMock as any,
+        mockSupabaseService,
+      );
+
+      expect(() => testService.onModuleInit()).toThrow(
+        'FATAL: ENCRYPTION_MASTER_KEY must be configured',
+      );
+    });
+
+    it('should throw "FATAL: ENCRYPTION_MASTER_KEY must be configured" on module init if key is empty', () => {
+      const configServiceMock = {
+        get: jest.fn().mockReturnValue('   '),
+      };
+      const testService = new UsersService(
+        mockPrismaService,
+        configServiceMock as any,
+        mockSupabaseService,
+      );
+
+      expect(() => testService.onModuleInit()).toThrow(
+        'FATAL: ENCRYPTION_MASTER_KEY must be configured',
+      );
+    });
+
+    it('should throw "FATAL: ENCRYPTION_MASTER_KEY must be configured" if key is the historical default fallback', () => {
+      const configServiceMock = {
+        get: jest.fn().mockReturnValue('default-secret-key-32-chars-long!!'),
+      };
+      const testService = new UsersService(
+        mockPrismaService,
+        configServiceMock as any,
+        mockSupabaseService,
+      );
+
+      expect(() => testService.onModuleInit()).toThrow(
+        'FATAL: ENCRYPTION_MASTER_KEY must be configured',
+      );
+    });
+
+    it('should succeed on module init when a valid key is provided via ENCRYPTION_MASTER_KEY', () => {
+      const configServiceMock = {
+        get: jest.fn((k: string) => {
+          if (k === 'ENCRYPTION_MASTER_KEY') return 'c25210c447b932517a185cbfd94951b9910fbb316a66539b9bb52955162ff099';
+          return undefined;
+        }),
+      };
+      const testService = new UsersService(
+        mockPrismaService,
+        configServiceMock as any,
+        mockSupabaseService,
+      );
+
+      expect(() => testService.onModuleInit()).not.toThrow();
     });
   });
 });

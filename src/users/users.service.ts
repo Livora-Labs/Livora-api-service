@@ -5,6 +5,7 @@ import {
   NotFoundException,
   BadRequestException,
   Optional,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,7 +20,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
 
 @Injectable()
-export class UsersService {
+export class UsersService implements OnModuleInit {
   private readonly logger = new Logger(UsersService.name);
 
   constructor(
@@ -29,6 +30,40 @@ export class UsersService {
     @Optional()
     private readonly walletsService?: WalletsService,
   ) {}
+
+  onModuleInit() {
+    this.getMasterEncryptionKey();
+  }
+
+  getMasterEncryptionKey(): string {
+    const key =
+      this.configService.get<string>('ENCRYPTION_MASTER_KEY') ||
+      this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
+      this.configService.get<string>('ENCRYPTION_KEY');
+
+    const invalidFallbacks = new Set([
+      'default-secret-key-32-chars-long!!',
+      'test_isolated_wallet_encryption_key_32c',
+      'livora_wallet_aes256_secret!',
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      'd7a5e8f1c3b2a49018e7d6c5b4a39281f0e1d2c3b4a596877869504132231405',
+      'your_32_byte_wallet_encryption_key',
+      'your_64_character_hex_encryption_master_key_here',
+      'default_fallback',
+    ]);
+
+    if (
+      !key ||
+      key.trim() === '' ||
+      invalidFallbacks.has(key.trim()) ||
+      key.trim().toLowerCase().includes('fallback') ||
+      key.trim().toLowerCase().includes('default-secret')
+    ) {
+      throw new Error('FATAL: ENCRYPTION_MASTER_KEY must be configured');
+    }
+
+    return key.trim();
+  }
 
   async findByEmail(email: string): Promise<User | null> {
     return this.prisma.user.findUnique({
@@ -130,11 +165,7 @@ export class UsersService {
       const walletAddress = pair.publicKey();
       const privateKey = pair.secret();
 
-      const encryptionKey =
-        this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
-        this.configService.get<string>('ENCRYPTION_KEY') ||
-        'test_isolated_wallet_encryption_key_32c';
-
+      const encryptionKey = this.getMasterEncryptionKey();
       const encryptedPrivateKey = CryptoUtil.encrypt(privateKey, encryptionKey);
 
       // 5. Create user record in PostgreSQL
@@ -212,19 +243,11 @@ export class UsersService {
     const walletAddress = pair.publicKey();
     const privateKey = pair.secret();
 
-    // Obtener la clave secreta de encriptación
-    const encryptionKey =
-      this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
-      this.configService.get<string>('ENCRYPTION_KEY');
-    if (!encryptionKey && process.env.NODE_ENV !== 'test') {
-      throw new Error(
-        'CRITICAL SECURITY ERROR: La variable WALLET_ENCRYPTION_KEY es obligatoria para la custodia de claves Web3.',
-      );
-    }
-    const finalKey = encryptionKey || 'test_isolated_wallet_encryption_key_32c';
+    // Obtener la clave secreta de encriptación y validar
+    const encryptionKey = this.getMasterEncryptionKey();
 
     // Encriptar clave privada con AES-256-GCM
-    const encryptedPrivateKey = CryptoUtil.encrypt(privateKey, finalKey);
+    const encryptedPrivateKey = CryptoUtil.encrypt(privateKey, encryptionKey);
 
     // Guardar usuario en PostgreSQL utilizando el id retornado por Supabase
     const createdUser = await this.prisma.user.create({
@@ -304,24 +327,12 @@ export class UsersService {
         },
       });
 
-      // 4. Anonimizar integralmente reclamos / quejas (Cumplimiento Ley 29733 - ANPD & Indecopi)
+      // 4. Disociar reclamos / quejas del usuario sin destruir el expediente legal
+      // (Cumplimiento de obligación legal de custodia por 2 años ante Indecopi D.S. 011-2011-PCM y Art. 13.1 Ley 29733 de bloqueo de datos)
       await tx.complaint.updateMany({
         where: { userId: id },
         data: {
-          documentNumber: '00000000',
-          fullName: 'USUARIO ANONIMIZADO (ARCO)',
-          address: 'ANONIMO',
-          phone: '000000000',
-          email: 'anonimo@anon.livora.pe',
-          representativeName: null,
-          representativeDoc: null,
-          claimDetail:
-            'Contenido suprimido por solicitud de cancelación ARCO (Ley 29733)',
-          consumerRequest:
-            'Contenido suprimido por solicitud de cancelación ARCO (Ley 29733)',
-          subject: 'Queja Anonimizada',
-          description:
-            'Contenido suprimido por solicitud de cancelación ARCO (Ley 29733)',
+          userId: null,
         },
       });
 
@@ -377,6 +388,22 @@ export class UsersService {
     if (!user || !user.isActive || user.deletedAt) {
       throw new NotFoundException('Usuario no encontrado');
     }
+
+    if (dto.marketingAccepted !== undefined && dto.marketingAccepted !== user.marketingAccepted) {
+      await this.prisma.consentAudit.create({
+        data: {
+          userId: id,
+          termsVersion: '2.0.0',
+          privacyVersion: '2.0.0',
+          marketingAccepted: dto.marketingAccepted,
+          documentHash: 'update-consent-profile',
+          ipAddress: 'profile-update',
+          userAgent: 'LivoraApp/Client',
+          consentedAt: new Date(),
+        },
+      });
+    }
+
     return this.prisma.user.update({
       where: { id },
       data: {
@@ -390,12 +417,24 @@ export class UsersService {
     });
   }
 
-  async changePassword(id: string, newPassword: string) {
+  async changePassword(id: string, newPassword: string, currentPassword?: string) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user || !user.isActive || user.deletedAt) {
       throw new NotFoundException('Usuario no encontrado');
     }
+
     const supabaseClient = this.supabaseService.getClient();
+
+    if (currentPassword) {
+      const { error: verifyErr } = await supabaseClient.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+      if (verifyErr) {
+        throw new BadRequestException('La contraseña actual es incorrecta.');
+      }
+    }
+
     const { error } = await supabaseClient.auth.admin.updateUserById(id, {
       password: newPassword,
     });

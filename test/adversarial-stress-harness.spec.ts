@@ -158,6 +158,8 @@ describe('Adversarial Stress & Edge Case Harness (Challenger 1)', () => {
           return { count: initialLen - dbBetaSignups.length };
         }),
       },
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn().mockResolvedValue([]),
       $transaction: jest.fn(async (cb: (tx: any) => Promise<any>) => {
         return cb(mockPrismaService);
       }),
@@ -618,8 +620,8 @@ describe('Adversarial Stress & Edge Case Harness (Challenger 1)', () => {
       expect(kyc.status).toBe('REJECTED');
 
       const complaint = dbComplaints.find((c) => c.id === 'comp-1');
-      expect(complaint.subject).toBe('Queja Anonimizada');
-      expect(complaint.description).toContain('Ley 29733');
+      expect(complaint.userId).toBeNull();
+      expect(complaint.subject).toBe('Reclamo original');
 
       expect(dbNotifications.length).toBe(0);
       expect(dbBetaSignups.length).toBe(0);

@@ -1,4 +1,4 @@
-﻿# INFORME DE ARQUITECTURA DE SOFTWARE (arc42) — LIVORA API SERVICE
+# INFORME DE ARQUITECTURA DE SOFTWARE (arc42) — LIVORA API SERVICE
 
 **Proyecto:** Livora — Plataforma de Reciclaje Trazable con Incentivos Web3 en Stellar  
 **Sistema:** `Livora-api-service` (API Gateway, Core Monolith & Blockchain Worker)  
@@ -15,7 +15,7 @@
 **Livora** es un ecosistema digital de reciclaje circular que transforma cada kilogramo de residuo reciclable en un hecho verificable en la blockchain de **Stellar (Soroban)** y en una recompensa económica líquida (**EcoTokens - ECO**).
 
 El backend `Livora-api-service` actúa como el motor central que orquesta:
-- El registro e identidad de actores (Hogares, Recolectores, Centros de Acopio, Tiendas Aliadas, Empresas B2B, Almacenes y Administradores).
+- El registro e identidad de actores (Hogares, Recolectores, Centros de Acopio, Tiendas Aliadas, Empresas B2B y Administradores).
 - La trazabilidad física y logística de los residuos mediante geolocalización PostGIS y validación con PINs de seguridad.
 - La ingesta de pesajes industriales en báscula y el cálculo transparente on-chain de incentivos (80% para hogares generadores, 20% para recolectores).
 - El minteo y transferencia de tokens en el contrato inteligente **`EcoBatchRegistry`** (Rust/WASM) compatible con el estándar **SEP-41**.

@@ -23,5 +23,3 @@ export const MATERIAL_RATES: Record<string, number> = {
 };
 
 export const DEFAULT_MATERIAL_RATE = 5;
-
-export const DUMMY_IPFS_HASH = 'QmDummyIpfsHashForTestingPurposesOnly123456';

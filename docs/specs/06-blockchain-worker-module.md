@@ -1,4 +1,4 @@
-﻿# Especificación Técnica y Arquitectura: Módulo Worker de Blockchain (`BlockchainModule`)
+# Especificación Técnica y Arquitectura: Módulo Worker de Blockchain (`BlockchainModule`)
 
 **Proyecto:** Livora Backend (NestJS Monorepo)  
 **Versión:** 2.0.0 (Stellar Soroban Testnet)  
@@ -75,7 +75,7 @@ El **Módulo Worker de Blockchain (`BlockchainModule`)** es el componente asínc
 STELLAR_RPC_URL=https://soroban-testnet.stellar.org
 STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
 STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
-WORKER_SECRET_KEY="SAGXFNNNDT6VNRDIEZ3Z5RXYYPX6ZGXSTNCFNVEY6MOZJURQBUR7ERAZ"
+WORKER_SECRET_KEY="SXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 ECOTOKEN_CONTRACT_ID="CDTSHH6HOZZ76PNILNWCR63PAM5UDS7FGA3QWZOBP6UYN2WU4PC6GLOJ"
 PINATA_API_KEY=tu_pinata_key
 PINATA_SECRET_KEY=tu_pinata_secret

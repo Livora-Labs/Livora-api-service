@@ -63,6 +63,8 @@ describe('Libro de Reclamaciones Virtual - Complaints API (E2E Suite)', () => {
     const mockPrisma: any = {
       getReadClient: () => mockPrisma,
       $transaction: jest.fn(async (cb: any) => cb(mockPrisma)),
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn().mockResolvedValue([]),
       complaint: {
         findMany: jest.fn(
           ({
@@ -340,14 +342,39 @@ describe('Libro de Reclamaciones Virtual - Complaints API (E2E Suite)', () => {
     expect(body.status).toBe(404);
   });
 
-  it('7. GET /complaints/correlative/:correlativeNumber: returns complaint data by official correlative', async () => {
+  it('7. POST /complaints/track: validates dual factors and returns masked PII (Anti-IDOR / Ley 29733)', async () => {
+    // 7.1 Mismatched documentNumber returns 404
+    await request(app.getHttpServer())
+      .post('/complaints/track')
+      .send({
+        correlativeNumber: createdCorrelative,
+        documentNumber: '99999999',
+      })
+      .expect(404);
+
+    // 7.2 Matching documentNumber returns 200 with masked PII
     const res = await request(app.getHttpServer())
-      .get(`/complaints/correlative/${createdCorrelative}`)
+      .post('/complaints/track')
+      .send({
+        correlativeNumber: createdCorrelative,
+        documentNumber: '10293847',
+      })
       .expect(200);
 
-    const body = res.body as MockComplaintRecord;
+    const body = res.body as any;
     expect(body.correlativeNumber).toBe(createdCorrelative);
-    expect(body.fullName).toBe('Carlos Rodriguez Silva');
+    expect(body.fullName).toBe('C****s R*******z S***a');
+    expect(body.email).toBe('c****z@gmail.com');
+    expect(body.documentNumberMasked).toBe('******47');
+    // Ensure sensitive cleartext PII (address, phone) are NOT exposed in public track response
+    expect(body.address).toBeUndefined();
+    expect(body.phone).toBeUndefined();
+
+    // 7.3 Admin can access full details via protected GET /complaints/correlative/:id
+    const adminRes = await request(app.getHttpServer())
+      .get(`/complaints/correlative/${createdCorrelative}`)
+      .expect(200);
+    expect(adminRes.body.fullName).toBe('Carlos Rodriguez Silva');
   });
 
   it('8. GET /complaints/:id/pdf: downloads PDF binary stream for the complaint', async () => {

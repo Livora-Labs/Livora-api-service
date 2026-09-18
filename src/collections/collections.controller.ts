@@ -26,6 +26,7 @@ import { SelectBidDto } from './dto/select-bid.dto';
 import { AvailableCollectionsQueryDto } from './dto/available-collections-query.dto';
 import { RateCollectionDto } from './dto/rate-collection.dto';
 import { EditCollectionRequestDto } from './dto/edit-collection-request.dto';
+import { UpdateCollectionDto } from './dto/update-collection.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -150,7 +151,7 @@ export class CollectionsController {
   }
 
   @Get()
-  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ADMIN)
   @ApiOperation({
     summary: 'Listar solicitudes de recolección',
   })
@@ -175,7 +176,7 @@ export class CollectionsController {
   }
 
   @Get(':id')
-  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ADMIN)
   @ApiOperation({
     summary: 'Obtener detalle de una solicitud de recolección por ID',
   })
@@ -187,7 +188,7 @@ export class CollectionsController {
   }
 
   @Post(':id/bids')
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.CENTRO_ACOPIO)
   @ApiOperation({
     summary: 'Enviar propuesta/postulación de tarifas a una solicitud en subasta (Rol: CENTRO_ACOPIO)',
   })
@@ -200,7 +201,7 @@ export class CollectionsController {
   }
 
   @Delete(':id/bids/:bidId')
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.CENTRO_ACOPIO)
   @ApiOperation({
     summary: 'Retirar propuesta de subasta antes de ser seleccionada (Rol: CENTRO_ACOPIO)',
   })
@@ -226,7 +227,7 @@ export class CollectionsController {
   }
 
   @Post(':id/claim-automatic')
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.CENTRO_ACOPIO)
   @ApiOperation({
     summary: 'Centro de Acopio toma directamente una solicitud en modo Automático (Rol: CENTRO_ACOPIO)',
   })
@@ -260,7 +261,7 @@ export class CollectionsController {
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
-    @Body() body: any,
+    @Body() body: UpdateCollectionDto,
   ) {
     if (
       user.role === Role.HOGAR &&
@@ -268,13 +269,15 @@ export class CollectionsController {
     ) {
       return this.collectionsService.editCollectionRequest(user.id, id, body);
     }
-    return this.collectionsService.updateStatus(id, user.id, user.role, body);
+    return this.collectionsService.updateStatus(id, user.id, user.role, {
+      status: body.status!,
+    });
   }
 
   async updateRequest(
     id: string,
     user: AuthenticatedUser,
-    body: any,
+    body: UpdateCollectionDto,
   ) {
     return this.updateStatus(id, user, body);
   }
@@ -322,6 +325,62 @@ export class CollectionsController {
     @Body('reason') reason?: string,
   ) {
     return this.collectionsService.abandonCollectionRequest(id, collectorId, reason);
+  }
+
+  @Post(':id/start-route')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.RECOLECTOR)
+  @ApiOperation({
+    summary: 'Iniciar trayecto vehicular hacia el domicilio (ACCEPTED -> EN_ROUTE) (Rol: RECOLECTOR)',
+  })
+  async startRoute(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') collectorId: string,
+  ) {
+    return this.collectionsService.startRoute(id, collectorId);
+  }
+
+  @Post(':id/reach-destination')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.RECOLECTOR)
+  @ApiOperation({
+    summary: 'Marcar llegada al domicilio del hogar (EN_ROUTE -> ARRIVED) (Rol: RECOLECTOR)',
+  })
+  async reachDestination(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') collectorId: string,
+  ) {
+    return this.collectionsService.reachDestination(id, collectorId);
+  }
+
+  @Post(':id/no-show')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.RECOLECTOR)
+  @ApiOperation({
+    summary:
+      'Reportar inasistencia del hogar tras 10 min de espera con compensación de 2 ECO (ARRIVED -> UNATTENDED) (Rol: RECOLECTOR)',
+  })
+  async reportNoShow(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') collectorId: string,
+  ) {
+    return this.collectionsService.reportNoShow(id, collectorId);
+  }
+
+  @Post(':id/reject-on-site')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.RECOLECTOR)
+  @ApiOperation({
+    summary:
+      'Rechazar material en sitio por contaminación o condiciones inseguras (ARRIVED -> REJECTED_ON_SITE) (Rol: RECOLECTOR)',
+  })
+  async rejectOnSite(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') collectorId: string,
+    @Body('reason') reason: string,
+    @Body('photoUrls') photoUrls?: string[],
+  ) {
+    return this.collectionsService.rejectOnSite(id, collectorId, reason, photoUrls);
   }
 
   @Post(':id/verify')

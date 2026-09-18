@@ -22,7 +22,7 @@ export class InventoryService {
 
   /**
    * POST /inventory/movements
-   * Registra un movimiento de entrada/salida y actualiza el stock actual de la planta/almacén.
+   * Registra un movimiento de entrada/salida y actualiza el stock actual del centro/tienda.
    */
   async createMovement(centerId: string, dto: CreateMovementDto) {
     const existingItem = await this.prisma.inventoryItem.findFirst({

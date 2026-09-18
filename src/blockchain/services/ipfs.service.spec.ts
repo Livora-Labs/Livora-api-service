@@ -2,7 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { Readable } from 'stream';
 import { IpfsService } from './ipfs.service';
-import { DUMMY_IPFS_HASH } from '../blockchain.constants';
 
 describe('IpfsService (Stream Upload & Gateway Formatting)', () => {
   let service: IpfsService;
@@ -46,15 +45,19 @@ describe('IpfsService (Stream Upload & Gateway Formatting)', () => {
     );
   });
 
-  it('should return fallback dummy hash when Pinata credentials are not set', async () => {
+  it('should return computed deterministic CID v0 when Pinata credentials are not set', async () => {
     (configService.get as jest.Mock).mockReturnValue(null);
 
-    const res = await service.uploadJson({ test: 123 }, 'test-manifest');
-    expect(res).toBe(DUMMY_IPFS_HASH);
+    const payload = { test: 123 };
+    const res = await service.uploadJson(payload, 'test-manifest');
+    expect(res).toBe(service.computeIpfsCidV0(payload));
+    expect(res.startsWith('Qm')).toBe(true);
+    expect(res.length).toBe(46);
 
     const stream = Readable.from(['{"test": 123}']);
     const streamRes = await service.uploadStream(stream, 'test.json');
-    expect(streamRes).toBe(DUMMY_IPFS_HASH);
+    expect(streamRes).toBe(service.computeIpfsCidV0(Buffer.from('{"test": 123}')));
+    expect(streamRes.startsWith('Qm')).toBe(true);
   });
 
   it('should upload stream to Pinata successfully when fetch returns 200 with IpfsHash', async () => {

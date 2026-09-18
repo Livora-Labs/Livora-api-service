@@ -17,7 +17,7 @@ export class MailService {
     );
     this.senderName = this.configService.get<string>(
       'BREVO_SENDER_NAME',
-      'Libora',
+      'Livora',
     );
 
     if (apiKey && apiKey !== 'xkeysib-placeholder') {
@@ -321,6 +321,114 @@ export class MailService {
     `;
 
     await this.sendMail(toEmail, subject, htmlContent);
+  }
+
+  /**
+   * Notificación administrativa sobre retraso o fallo en acreditación de saldo.
+   */
+  async sendAccreditationAlertToAdmin(params: {
+    adminEmail: string;
+    purchaseNumber: string;
+    userEmail: string;
+    userName: string;
+    amountPen: number;
+    tokenAmount: number;
+    cardBrand?: string;
+    errorMessage?: string;
+  }): Promise<void> {
+    const subject = `[ALERTA OPERATIVA] Acreditación de saldo pendiente · Pedido ${params.purchaseNumber}`;
+    const year = new Date().getFullYear();
+    const logoUrl = this.configService.get<string>(
+      'EMAIL_LOGO_URL',
+      'https://52.200.2.107.sslip.io/assets/livora-logo.png',
+    );
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="es">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Alerta de Acreditación · Livora</title>
+      </head>
+      <body style="margin:0;padding:0;background-color:#F8FAFC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F8FAFC;padding:32px 16px;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:540px;background-color:#FFFFFF;border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
+                <tr>
+                  <td style="padding:24px 32px;background-color:#14532D;border-bottom:1px solid #166534;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td>
+                          <span style="font-size:20px;font-weight:700;color:#FFFFFF;letter-spacing:0.5px;">LIVORA</span>
+                          <span style="font-size:12px;color:#86EFAC;margin-left:8px;font-weight:500;">Operaciones & Finanzas</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:32px;">
+                    <h2 style="margin:0 0 12px;font-size:18px;font-weight:700;color:#0F172A;">Acreditación de saldo pendiente de confirmación</h2>
+                    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#475569;">
+                      Se ha confirmado un pago fiduciario vía pasarela Izipay, pero la acreditación de saldo en la cuenta del usuario requiere atención operativa o reintento administrativo.
+                    </p>
+
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F1F5F9;border-radius:8px;padding:16px;margin-bottom:24px;">
+                      <tr>
+                        <td style="padding:6px 0;font-size:13px;color:#64748B;">Nro. Pedido:</td>
+                        <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0F172A;text-align:right;">${params.purchaseNumber}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;font-size:13px;color:#64748B;">Usuario:</td>
+                        <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0F172A;text-align:right;">${params.userName} (${params.userEmail})</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;font-size:13px;color:#64748B;">Importe Cobrado:</td>
+                        <td style="padding:6px 0;font-size:13px;font-weight:600;color:#14532D;text-align:right;">S/ ${params.amountPen.toFixed(2)} PEN</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;font-size:13px;color:#64748B;">EcoTokens a Acreditar:</td>
+                        <td style="padding:6px 0;font-size:13px;font-weight:600;color:#16A34A;text-align:right;">${params.tokenAmount.toFixed(2)} ECO</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;font-size:13px;color:#64748B;">Método de Pago:</td>
+                        <td style="padding:6px 0;font-size:13px;font-weight:500;color:#0F172A;text-align:right;">Izipay (${params.cardBrand || 'Tarjeta'})</td>
+                      </tr>
+                      ${params.errorMessage ? `
+                      <tr>
+                        <td style="padding:6px 0;font-size:12px;color:#991B1B;">Detalle Técnico:</td>
+                        <td style="padding:6px 0;font-size:12px;color:#991B1B;text-align:right;">${params.errorMessage}</td>
+                      </tr>
+                      ` : ''}
+                    </table>
+
+                    <p style="margin:0 0 24px;font-size:13px;line-height:1.5;color:#64748B;">
+                      El usuario visualiza en su aplicación móvil el estado <strong>"Pago Confirmado - Recarga en proceso"</strong>. Puede reintentar la acreditación directamente desde el panel de administración.
+                    </p>
+
+                    <div style="text-align:center;">
+                      <a href="https://livora.pe/admin/payments" style="display:inline-block;background-color:#14532D;color:#FFFFFF;font-size:13px;font-weight:600;text-decoration:none;padding:12px 24px;border-radius:6px;">
+                        Gestionar en Panel de Administración
+                      </a>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:16px 32px;background-color:#F8FAFC;border-top:1px solid #E2E8F0;text-align:center;font-size:11px;color:#94A3B8;">
+                    Notificación del sistema · Livora © ${year}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+
+    await this.sendMail(params.adminEmail, subject, htmlContent);
   }
 
   /**

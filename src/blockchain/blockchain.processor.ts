@@ -114,8 +114,8 @@ export class BlockchainProcessor extends WorkerHost {
           return this.processRedemptionTransfer(job);
         case 'settlement-transfer':
           return this.processSettlementTransfer(job);
-        case 'niubiz-mint-tokens':
-          return this.processNiubizMintTokens(job);
+        case 'izipay-mint-tokens':
+          return this.processIzipayMintTokens(job);
         case 'redemption-refund-transfer':
           return this.processRedemptionRefundTransfer(job);
         default:
@@ -127,10 +127,10 @@ export class BlockchainProcessor extends WorkerHost {
     });
   }
 
-  private async processNiubizMintTokens(job: Job<any>): Promise<any> {
+  private async processIzipayMintTokens(job: Job<any>): Promise<any> {
     const { userId, walletAddress, amount, purchaseNumber } = job.data;
     this.logger.log(
-      `Procesando minteo Niubiz de ${amount} ECO para usuario ${userId} (${walletAddress}), compra: ${purchaseNumber}`,
+      `Procesando minteo Izipay de ${amount} ECO para usuario ${userId} (${walletAddress}), compra: ${purchaseNumber}`,
     );
 
     try {
@@ -571,49 +571,36 @@ export class BlockchainProcessor extends WorkerHost {
           })
         : null;
 
-      if (user?.encryptedPrivateKey) {
-        const secretKey =
-          this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
-          'livora_wallet_aes256_secret!';
-        const decryptedSecret = CryptoUtil.decrypt(
-          user.encryptedPrivateKey,
-          secretKey,
+      if (!user?.encryptedPrivateKey) {
+        throw new Error(
+          `El usuario de tienda ${fromStoreUserId} no posee una clave privada registrada para liquidación`,
         );
-        if (!decryptedSecret) {
-          throw new Error(
-            `No se pudo descifrar la clave privada del usuario de tienda ${fromStoreUserId}`,
-          );
-        }
-
-        const receipt = await this.blockchainService.executeSubsidizedTransfer(
-          decryptedSecret,
-          toWallet,
-          Number(tokenAmount),
-        );
-        if (!receipt?.hash) {
-          throw new Error(
-            `No se obtuvo hash de transacción para la liquidación ${settlementId}`,
-          );
-        }
-        txHash = receipt.hash;
-      } else {
-        const nonceVal =
-          await this.blockchainService.getNonceOnChain(fromWallet);
-        const receipt = await this.blockchainService.executeDelegatedTransfer(
-          fromWallet,
-          toWallet,
-          tokenAmount.toString(),
-          Number(nonceVal),
-          Buffer.alloc(32),
-          Buffer.alloc(64),
-        );
-        if (!receipt?.hash) {
-          throw new Error(
-            `No se obtuvo hash de transacción para la liquidación ${settlementId}`,
-          );
-        }
-        txHash = receipt.hash;
       }
+
+      const secretKey =
+        this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
+        'livora_wallet_aes256_secret!';
+      const decryptedSecret = CryptoUtil.decrypt(
+        user.encryptedPrivateKey,
+        secretKey,
+      );
+      if (!decryptedSecret) {
+        throw new Error(
+          `No se pudo descifrar la clave privada del usuario de tienda ${fromStoreUserId}`,
+        );
+      }
+
+      const receipt = await this.blockchainService.executeSubsidizedTransfer(
+        decryptedSecret,
+        toWallet,
+        Number(tokenAmount),
+      );
+      if (!receipt?.hash) {
+        throw new Error(
+          `No se obtuvo hash de transacción para la liquidación ${settlementId}`,
+        );
+      }
+      txHash = receipt.hash;
 
       const explorerUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
       this.logger.log(
@@ -658,23 +645,30 @@ export class BlockchainProcessor extends WorkerHost {
           })
         : null;
 
-      if (storeUser?.encryptedPrivateKey && toWallet) {
-        const secretKey =
-          this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
-          'livora_wallet_aes256_secret!';
-        const decryptedSecret = CryptoUtil.decrypt(
-          storeUser.encryptedPrivateKey,
-          secretKey,
+      if (!storeUser?.encryptedPrivateKey || !toWallet) {
+        throw new Error(
+          'No se puede reembolsar: la tienda no posee clave privada registrada o la billetera de destino es inválida',
         );
-        const receipt = await this.blockchainService.executeSubsidizedTransfer(
-          decryptedSecret,
-          toWallet,
-          Number(tokenAmount),
-        );
-        txHash = receipt?.hash || `REFUND-${Date.now()}`;
-      } else {
-        txHash = `TX-REFUND-${crypto.randomBytes(16).toString('hex')}`;
       }
+
+      const secretKey =
+        this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
+        'livora_wallet_aes256_secret!';
+      const decryptedSecret = CryptoUtil.decrypt(
+        storeUser.encryptedPrivateKey,
+        secretKey,
+      );
+      const receipt = await this.blockchainService.executeSubsidizedTransfer(
+        decryptedSecret,
+        toWallet,
+        Number(tokenAmount),
+      );
+      if (!receipt?.hash) {
+        throw new Error(
+          'No se obtuvo hash de transacción de Soroban para el reembolso',
+        );
+      }
+      txHash = receipt.hash;
 
       await this.prisma.redemptionTransaction.update({
         where: { id: redemptionId },

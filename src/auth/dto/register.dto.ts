@@ -37,7 +37,7 @@ export class RegisterDto {
   @ApiProperty({
     enum: Role,
     example: Role.HOGAR,
-    description: 'Rol del usuario: HOGAR, RECOLECTOR o CENTRO_ACOPIO',
+    description: 'Rol del usuario: HOGAR, RECOLECTOR, CENTRO_ACOPIO, EMPRESA_B2B, TIENDA o ADMIN',
   })
   @IsEnum(Role, { message: 'El rol especificado no es válido' })
   role: Role;

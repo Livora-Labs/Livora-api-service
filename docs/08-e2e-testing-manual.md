@@ -62,8 +62,8 @@ Ejecuta `POST /auth/register` con los siguientes JSONs:
 // 4. Rol EMPRESA_B2B
 { "email": "b2b.e2e@livora.io", "password": "Password123!", "role": "EMPRESA_B2B" }
 
-// 5. Rol ALMACEN
-{ "email": "almacen.e2e@livora.io", "password": "Password123!", "role": "ALMACEN" }
+// 5. Rol TIENDA
+{ "email": "tienda.e2e@livora.io", "password": "Password123!", "role": "TIENDA" }
 
 // 6. Rol ADMIN
 { "email": "admin.e2e@livora.io", "password": "Password123!", "role": "ADMIN" }
@@ -164,9 +164,9 @@ Inicia sesión como **CENTRO_ACOPIO**:
 
 ---
 
-## 🏬 7. Acto 6: Comercio B2B, Certificados ESG e Inventario (Rol: CENTRO_ACOPIO / EMPRESA_B2B / ALMACEN / ADMIN)
+## 🏬 7. Acto 6: Comercio B2B, Certificados ESG e Inventario (Rol: CENTRO_ACOPIO / EMPRESA_B2B / TIENDA / ADMIN)
 
-1. **Registrar Movimiento de Inventario (`POST /inventory/movements` - CENTRO_ACOPIO / ALMACEN):**
+1. **Registrar Movimiento de Inventario (`POST /inventory/movements` - CENTRO_ACOPIO / TIENDA):**
    ```json
    { "type": "IN", "quantityKg": 500, "materialType": "PET" }
    ```

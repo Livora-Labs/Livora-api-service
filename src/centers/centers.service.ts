@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 
@@ -79,7 +80,7 @@ export class CentersService {
   async findAll() {
     return this.prisma.user.findMany({
       where: {
-        role: { in: ['CENTRO_ACOPIO', 'ALMACEN'] },
+        role: Role.CENTRO_ACOPIO,
         deletedAt: null,
       },
       select: {
@@ -114,7 +115,7 @@ export class CentersService {
           ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography
         ) AS distance
       FROM users
-      WHERE role IN ('CENTRO_ACOPIO', 'ALMACEN')
+      WHERE role = 'CENTRO_ACOPIO'
         AND "deletedAt" IS NULL
         AND "latitude" IS NOT NULL 
         AND "longitude" IS NOT NULL
@@ -138,7 +139,7 @@ export class CentersService {
       where: { id: centerId },
     });
 
-    if (!center || (center.role !== 'CENTRO_ACOPIO' && center.role !== 'ALMACEN')) {
+    if (!center || center.role !== Role.CENTRO_ACOPIO) {
       throw new NotFoundException('Centro de acopio no encontrado');
     }
 
@@ -197,7 +198,7 @@ export class CentersService {
   async getAllPriceLists() {
     return this.prisma.user.findMany({
       where: {
-        role: { in: ['CENTRO_ACOPIO', 'ALMACEN'] },
+        role: Role.CENTRO_ACOPIO,
         deletedAt: null,
       },
       select: {

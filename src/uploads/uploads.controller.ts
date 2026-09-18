@@ -59,6 +59,6 @@ export class UploadsController {
         'No se recibió ningún archivo. Envía la imagen en el campo "file" como multipart/form-data.',
       );
     }
-    return this.uploadsService.upload(file, purpose);
+    return this.uploadsService.upload(file, purpose, (req as any).user?.id);
   }
 }

@@ -45,7 +45,7 @@ POST /auth/register
 ```json
 { "message": "Código de verificación enviado al correo electrónico", "email": "hogar1@livora.com" }
 ```
-- `role` ∈ `HOGAR` · `RECOLECTOR` · `CENTRO_ACOPIO` (también `ALMACEN`, `TIENDA`, `EMPRESA_B2B`, `ADMIN`).
+- `role` ∈ `HOGAR` · `RECOLECTOR` · `CENTRO_ACOPIO` (también `TIENDA`, `EMPRESA_B2B`, `ADMIN`).
 - ⚠️ **Política de contraseña (esto es lo que más frustra en el alta):** mínimo 8 caracteres **y además** al menos **una mayúscula, una minúscula, un número y un símbolo**. Ej. válido: `Password123!`. Si falla, el motivo llega en `error.details`.
 
 **Paso 2 — Verificar OTP** → **HTTP 200**, aquí sí viene el token **y el objeto `user`**:
@@ -152,7 +152,7 @@ El JWT se valida contra `SUPABASE_JWT_SECRET`. Sin token → el server desconect
 |---|---|---|
 | Todos | `user:<userId>` | eventos directos al usuario |
 | RECOLECTOR | `collectors:active` | `collection:created` |
-| CENTRO_ACOPIO / ALMACEN | `center:<userId>` | `batch:completed` |
+| CENTRO_ACOPIO | `center:<userId>` | `batch:completed` |
 | TIENDA | `store:<userId>` | `redemption:completed`, `settlement:paid` |
 
 > 🔧 **Corregido (2 bugs):** (1) el gateway validaba el JWT con `jwt.verify` HS256, pero Supabase emite **ES256** → la verificación fallaba siempre y **cortaba toda conexión** (con o sin token). Ahora usa `supabase.auth.getUser(token)` como el guard HTTP. (2) el rol se leía del JWT (`role: "authenticated"`); ahora se resuelve desde PostgreSQL. **Ya funciona** — mete `socket_io_client`, escucha `connected` + los eventos de sala; no más polling.

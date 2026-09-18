@@ -23,10 +23,10 @@ export class ConsolidatedBatchesController {
   constructor(private readonly batchesService: BatchesService) {}
 
   @Post()
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.CENTRO_ACOPIO)
   @ApiOperation({
     summary:
-      'Consolidar múltiples lotes recibidos (Rol: CENTRO_ACOPIO / ALMACEN)',
+      'Consolidar múltiples lotes recibidos (Rol: CENTRO_ACOPIO)',
   })
   @ApiResponse({
     status: 201,

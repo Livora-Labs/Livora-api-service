@@ -32,9 +32,9 @@ export class CentersController {
   constructor(private readonly centersService: CentersService) {}
 
   @Post('me/prices')
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.CENTRO_ACOPIO)
   @ApiOperation({
-    summary: 'Registrar o actualizar tarifario por material (Rol: CENTRO_ACOPIO / ALMACEN)',
+    summary: 'Registrar o actualizar tarifario por material (Rol: CENTRO_ACOPIO)',
   })
   @ApiResponse({
     status: 200,
@@ -48,7 +48,7 @@ export class CentersController {
   }
 
   @Get('prices/all')
-  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ADMIN)
   @ApiOperation({
     summary: 'Listar tarifarios vigentes de todos los centros de acopio',
   })
@@ -57,7 +57,7 @@ export class CentersController {
   }
 
   @Get(':id/prices')
-  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ADMIN)
   @ApiOperation({
     summary: 'Consultar tarifario por kg de un centro de acopio específico',
   })
@@ -66,9 +66,9 @@ export class CentersController {
   }
 
   @Get('me/reception-pin')
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.CENTRO_ACOPIO)
   @ApiOperation({
-    summary: 'Obtener PIN de recepción actual (Rol: CENTRO_ACOPIO / ALMACEN)',
+    summary: 'Obtener PIN de recepción actual (Rol: CENTRO_ACOPIO)',
   })
   @ApiResponse({
     status: 200,
@@ -80,9 +80,9 @@ export class CentersController {
 
   @HttpCode(HttpStatus.OK)
   @Post('me/reception-pin/refresh')
-  @Roles(Role.CENTRO_ACOPIO, Role.ALMACEN)
+  @Roles(Role.CENTRO_ACOPIO)
   @ApiOperation({
-    summary: 'Regenerar nuevo PIN de recepción (Rol: CENTRO_ACOPIO / ALMACEN)',
+    summary: 'Regenerar nuevo PIN de recepción (Rol: CENTRO_ACOPIO)',
   })
   @ApiResponse({
     status: 200,
@@ -93,7 +93,7 @@ export class CentersController {
   }
 
   @Get('nearby')
-  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @Roles(Role.HOGAR, Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ADMIN)
   @ApiOperation({
     summary: 'Buscar centros de acopio cercanos por coordenadas GPS (PostGIS GiST)',
   })
@@ -114,10 +114,10 @@ export class CentersController {
   }
 
   @Get()
-  @Roles(Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ALMACEN, Role.ADMIN)
+  @Roles(Role.RECOLECTOR, Role.CENTRO_ACOPIO, Role.ADMIN)
   @ApiOperation({
     summary:
-      'Listar todos los Centros (Rol: RECOLECTOR / CENTRO_ACOPIO / ALMACEN / ADMIN)',
+      'Listar todos los Centros (Rol: RECOLECTOR / CENTRO_ACOPIO / ADMIN)',
   })
   @ApiResponse({
     status: 200,

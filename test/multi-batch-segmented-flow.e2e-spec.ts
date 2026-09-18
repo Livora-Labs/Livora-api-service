@@ -28,7 +28,7 @@ import { BatchesController } from '../src/batches/batches.controller';
 import { BatchesService } from '../src/batches/batches.service';
 import { IpfsService } from '../src/blockchain/services/ipfs.service';
 import { SupabaseService } from '../src/supabase/supabase.service';
-import { NiubizClient } from '../src/payments/services/niubiz.client';
+import { IzipayClient } from '../src/payments/services/izipay.client';
 import { ConfigService } from '@nestjs/config';
 import { CryptoUtil } from '../src/common/utils/crypto.util';
 import { BlockchainProcessor } from '../src/blockchain/blockchain.processor';
@@ -95,7 +95,7 @@ describe('E2E Real Process Suite: Lotes Segmentados por Acopio (Multi-Batch Coll
         CollectionsService,
         BatchesService,
         SupabaseService,
-        NiubizClient,
+        IzipayClient,
         {
           provide: ConfigService,
           useValue: {
@@ -201,7 +201,7 @@ describe('E2E Real Process Suite: Lotes Segmentados por Acopio (Multi-Batch Coll
       },
     });
 
-    // Fondear al recolector con EcoTokens vía recarga Niubiz para garantizar el escrow del 50%
+    // Fondear al recolector con EcoTokens vía recarga Izipay para garantizar el escrow del 50%
     await prisma.paymentTransaction.create({
       data: {
         userId: collectorUser.id,

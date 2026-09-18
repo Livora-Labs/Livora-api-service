@@ -109,42 +109,11 @@ describe('ComplaintsService', () => {
           },
         ),
       },
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn().mockResolvedValue([]),
       // Mock de $transaction: ejecuta el callback pasándole el propio mock como tx
       $transaction: jest.fn((callback: (tx: any) => Promise<any>) =>
-        callback({
-          complaint: {
-            findMany: jest.fn(
-              ({
-                where,
-              }: {
-                where?: {
-                  correlativeNumber?: { startsWith?: string; endsWith?: string };
-                };
-              }) => {
-                const results = mockComplaintsTable.filter((c) => {
-                  if (
-                    where?.correlativeNumber?.startsWith &&
-                    !c.correlativeNumber.startsWith(
-                      where.correlativeNumber.startsWith,
-                    )
-                  ) {
-                    return false;
-                  }
-                  if (
-                    where?.correlativeNumber?.endsWith &&
-                    !c.correlativeNumber.endsWith(
-                      where.correlativeNumber.endsWith,
-                    )
-                  ) {
-                    return false;
-                  }
-                  return true;
-                });
-                return Promise.resolve(results);
-              },
-            ),
-          },
-        })
+        callback(prismaMock),
       ),
     };
 

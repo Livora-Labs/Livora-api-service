@@ -43,6 +43,16 @@ describe('StoresService', () => {
         findUnique: jest.fn(),
       },
       $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn().mockResolvedValue([
+        {
+          id: 'household-uuid',
+          walletAddress:
+            'GBG4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5UP4O5',
+          status: 'PENDING',
+          tokenAmount: '15.5',
+        },
+      ]),
+      $transaction: jest.fn(async (cb) => cb(prismaMock)),
     };
 
     walletsMock = {

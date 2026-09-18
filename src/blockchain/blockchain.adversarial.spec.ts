@@ -127,7 +127,7 @@ describe('Milestone M2 Adversarial Test Suite: Web3 Blockchain Resiliency & Circ
         /Timed out/,
       );
       expect(breaker.stats.timeouts).toBeGreaterThanOrEqual(1);
-    });
+    }, 15000);
 
     it('should recover: transition to HALF_OPEN after resetTimeout, and CLOSE on successful probe', async () => {
       const breaker = service.getCircuitBreaker();

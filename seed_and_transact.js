@@ -43,8 +43,11 @@ function encryptPrivateKey(text, secretKey) {
 const RPC_URL = process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org';
 const HORIZON_URL = process.env.STELLAR_HORIZON_URL || 'https://horizon-testnet.stellar.org';
 const NETWORK_PASSPHRASE = process.env.STELLAR_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015';
-const CONTRACT_ID = process.env.ECOTOKEN_CONTRACT_ID || 'CDTSHH6HOZZ76PNILNWCR63PAM5UDS7FGA3QWZOBP6UYN2WU4PC6GLOJ';
-const WORKER_SECRET = process.env.WORKER_SECRET_KEY || 'SAGXFNNNDT6VNRDIEZ3Z5RXYYPX6ZGXSTNCFNVEY6MOZJURQBUR7ERAZ';
+const WORKER_SECRET = process.env.WORKER_SECRET_KEY;
+if (!WORKER_SECRET || WORKER_SECRET.startsWith('SXXXX')) {
+  console.error('FATAL: WORKER_SECRET_KEY environment variable must be configured with a valid Stellar secret key (not placeholder SXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX).');
+  process.exit(1);
+}
 const ENCRYPTION_KEY = process.env.WALLET_ENCRYPTION_KEY || 'livora_wallet_aes256_secret!';
 
 const rpc = new StellarRpc.Server(RPC_URL);
@@ -521,8 +524,7 @@ function getPanelPath(role) {
     case 'ADMIN': return '/admin';
     case 'HOGAR': return '/hogar';
     case 'RECOLECTOR': return '/recolector';
-    case 'CENTRO_ACOPIO':
-    case 'ALMACEN': return '/centro';
+    case 'CENTRO_ACOPIO': return '/centro';
     case 'EMPRESA_B2B': return '/company';
     case 'TIENDA': return '/tienda';
     default: return '/';

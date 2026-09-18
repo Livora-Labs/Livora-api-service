@@ -14,12 +14,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BlockchainService } from '../blockchain/services/blockchain.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WebsocketsService } from '../websockets/websockets.service';
-import { NiubizClient } from './services/niubiz.client';
+import { IzipayClient } from './services/izipay.client';
 import { CreatePaymentSessionDto } from './dto/create-payment-session.dto';
-import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
-import { ProcessPaymentWebhookDto } from './dto/process-payment-webhook.dto';
+import { IzipayIpnDto } from './dto/izipay-ipn.dto';
 import { BLOCKCHAIN_QUEUE } from '../blockchain/blockchain.constants';
-import * as crypto from 'crypto';
+
+import { MailService } from '../common/services/mail.service';
 
 @Injectable()
 export class PaymentsService {
@@ -27,193 +27,207 @@ export class PaymentsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly niubizClient: NiubizClient,
+    private readonly izipayClient: IzipayClient,
     private readonly configService: ConfigService,
     private readonly blockchainService: BlockchainService,
     private readonly notificationsService: NotificationsService,
     private readonly websocketsService: WebsocketsService,
+    @Optional() private readonly mailService?: MailService,
     @Optional()
     @InjectQueue(BLOCKCHAIN_QUEUE)
     private readonly blockchainQueue?: Queue,
   ) {}
 
   /**
-   * Genera una sesión de pago con Niubiz exclusiva para HOGAR y RECOLECTOR
+   * Genera una sesión de recarga Izipay (Krypton V4) para RECOLECTOR y TIENDA
    */
   async createSession(
     userId: string,
     dto: CreatePaymentSessionDto,
-    clientIp?: string,
   ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { kycApplications: { take: 1, orderBy: { createdAt: 'desc' } } },
     });
 
     if (!user) {
       throw new NotFoundException('Usuario no encontrado');
     }
 
-    // Regla de arquitectura: Exclusividad para HOGAR y RECOLECTOR
-    if (user.role !== Role.HOGAR && user.role !== Role.RECOLECTOR) {
+    // Regla de negocio: Exclusividad para RECOLECTOR y TIENDA
+    if (user.role !== Role.RECOLECTOR && user.role !== Role.TIENDA) {
       throw new ForbiddenException(
-        'El rol actual no opera con recargas fiduciarias vía pasarela',
+        'El rol actual no opera con recargas fiduciarias de EcoTokens vía pasarela Izipay',
       );
     }
 
-    // Purchase number correlativo único de 12 dígitos
-    const purchaseNumber = `${Date.now()}`.slice(-12);
+    const effectiveAmount = dto.getEffectiveAmount();
+    if (effectiveAmount < 10.0) {
+      throw new BadRequestException('El monto mínimo de recarga es de S/ 10.00 Soles');
+    }
+    if (effectiveAmount > 500.0) {
+      throw new BadRequestException('El monto máximo de recarga por operación es de S/ 500.00 Soles');
+    }
 
-    // Registrar transacción en estado PENDING con subestado blockchain PENDING
+    // Regla de control financiero: Límite diario acumulado de S/ 500.00 PEN en las últimas 24 horas
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const dailyAgg = await this.prisma.paymentTransaction.aggregate({
+      where: {
+        userId,
+        status: 'COMPLETED',
+        createdAt: { gte: since24h },
+      },
+      _sum: {
+        amountPen: true,
+      },
+    });
+
+    const currentDailyTotal = Number(dailyAgg._sum.amountPen || 0);
+    if (currentDailyTotal + effectiveAmount > 500.0) {
+      throw new BadRequestException(
+        `Límite diario de recarga excedido. Tu acumulado en las últimas 24 horas es S/ ${currentDailyTotal.toFixed(2)} PEN. El monto máximo permitido es S/ 500.00 PEN por día.`,
+      );
+    }
+
+    // Identificador único de orden para Izipay (alfanumérico)
+    const orderId = `ECO-${Date.now()}-${user.id.slice(0, 4).toUpperCase()}`;
+
+    // Registrar transacción en estado PENDING
     const transaction = await this.prisma.paymentTransaction.create({
       data: {
         userId,
-        amountPen: dto.amount,
-        tokenAmount: dto.amount, // 1 PEN = 1 EcoToken
-        purchaseNumber,
+        amountPen: effectiveAmount,
+        tokenAmount: effectiveAmount, // 1 PEN = 1 EcoToken
+        purchaseNumber: orderId,
         status: 'PENDING',
         blockchainStatus: 'PENDING',
       },
     });
 
-    const kycStatus = user.kycApplications?.[0]?.status || 'UNVERIFIED';
+    const email = dto.customerEmail || user.email;
+    const wallet = dto.userWalletAddress || user.walletAddress || undefined;
 
-    const session = await this.niubizClient.createSession({
-      amount: dto.amount,
-      purchaseNumber,
-      clientIp: clientIp || '190.236.10.15',
-      userEmail: user.email,
+    const izipayRes = await this.izipayClient.createPaymentToken({
+      amountInSoles: effectiveAmount,
+      orderId,
+      customerEmail: email,
+      userWalletAddress: wallet,
       userId: user.id,
-      kycStatus,
     });
 
     await this.prisma.paymentTransaction.update({
       where: { id: transaction.id },
       data: {
-        transactionToken: session.sessionToken,
+        transactionToken: izipayRes.formToken,
       },
     });
 
     return {
+      success: true,
       transactionId: transaction.id,
-      purchaseNumber,
-      amount: dto.amount,
-      tokenAmount: dto.amount,
-      sessionToken: session.sessionToken,
-      merchantId: session.merchantId,
+      orderId,
+      purchaseNumber: orderId,
+      amount: effectiveAmount,
+      tokenAmount: effectiveAmount,
+      formToken: izipayRes.formToken,
     };
   }
 
   /**
-   * Confirmación autenticada invocada desde la app móvil con transactionToken
+   * Procesa la notificación instantánea de pago (IPN / Webhook) enviada por Izipay
    */
-  async confirmPayment(userId: string, dto: ConfirmPaymentDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-    });
+  async processIzipayIpn(dto: IzipayIpnDto | Record<string, any>): Promise<string> {
+    const krAnswerRaw = dto['kr-answer'];
+    const krHash = dto['kr-hash'];
 
-    if (!user) {
-      throw new NotFoundException('Usuario no encontrado');
+    if (!krAnswerRaw || !krHash) {
+      this.logger.error('[Izipay IPN] Payload inválido: faltan kr-answer o kr-hash');
+      throw new BadRequestException('Faltan parámetros requeridos de firma Izipay (kr-answer, kr-hash)');
     }
 
-    if (user.role !== Role.HOGAR && user.role !== Role.RECOLECTOR) {
-      throw new ForbiddenException(
-        'El rol actual no opera con recargas fiduciarias vía pasarela',
-      );
+    // 1. Verificación Criptográfica HMAC-SHA256
+    const hashKeyType = dto['kr-hash-key'];
+    const isSignatureValid = this.izipayClient.verifyHmac(krAnswerRaw, krHash, hashKeyType);
+    if (!isSignatureValid) {
+      this.logger.error('[Izipay IPN] Fallo de autenticación: Firma HMAC-SHA256 no coincide');
+      throw new BadRequestException('Firma HMAC-SHA256 inválida');
+    }
+
+    const krAnswer =
+      typeof krAnswerRaw === 'string' ? JSON.parse(krAnswerRaw) : krAnswerRaw;
+
+    // 2. Extraer identificadores
+    const orderId =
+      krAnswer.orderDetails?.orderId ||
+      krAnswer.orderId ||
+      krAnswer.transactions?.[0]?.transactionDetails?.parentTransactionUuid;
+
+    if (!orderId) {
+      this.logger.error('[Izipay IPN] kr-answer no incluye orderDetails.orderId');
+      throw new BadRequestException('No se pudo identificar el orderId de la transacción');
     }
 
     const transaction = await this.prisma.paymentTransaction.findUnique({
-      where: { purchaseNumber: dto.purchaseNumber },
+      where: { purchaseNumber: orderId },
       include: { user: true },
     });
 
     if (!transaction) {
-      throw new NotFoundException(
-        `Transacción con número de compra ${dto.purchaseNumber} no encontrada`,
-      );
+      this.logger.warn(`[Izipay IPN] Transacción con orderId ${orderId} no encontrada en BD`);
+      throw new NotFoundException(`Transacción ${orderId} no encontrada`);
     }
 
-    if (transaction.userId !== userId) {
-      throw new ForbiddenException('La transacción no pertenece al usuario autenticado');
-    }
-
+    // 3. Idempotencia: Si ya fue completada, responder OK
     if (transaction.status === 'COMPLETED') {
-      return {
-        status: 'COMPLETED',
-        message: 'La transacción ya había sido confirmada previamente',
-        transactionId: transaction.id,
-        purchaseNumber: transaction.purchaseNumber,
-        amountPen: Number(transaction.amountPen),
-        tokenAmount: Number(transaction.tokenAmount),
-      };
+      this.logger.log(`[Izipay IPN] Transacción ${orderId} ya procesada previamente (Idempotencia)`);
+      return 'OK';
     }
 
-    if (transaction.status === 'FAILED') {
-      throw new BadRequestException('Esta transacción ya fue rechazada previamente');
-    }
+    // 4. Validar estado reportado por Izipay
+    const orderStatus = krAnswer.orderStatus;
+    const isPaid = orderStatus === 'PAID';
 
-    // Autorización directa y sin bypass ante Niubiz
-    const authResult = await this.niubizClient.authorizeTransaction(
-      dto.transactionToken,
-      transaction.purchaseNumber,
-      Number(transaction.amountPen),
-    );
+    const firstTx = krAnswer.transactions?.[0];
+    const cardDetails = firstTx?.transactionDetails?.cardDetails;
+    const cardBrand = cardDetails?.effectiveBrand || cardDetails?.paymentMethodType || 'CARD';
+    const cardPanMasked = cardDetails?.pan || null;
+    const authorizationCode =
+      cardDetails?.authorizationResponse?.authorizationNumber ||
+      firstTx?.uuid ||
+      null;
 
-    if (!authResult.authorized) {
-      await this.prisma.$executeRaw`
-        UPDATE payment_transactions
-        SET status = 'FAILED'::"PaymentStatus",
-            "actionCode" = ${authResult.actionCode || '999'},
-            "gatewayResponse" = ${JSON.stringify(authResult.raw || {})}::jsonb,
-            "updatedAt" = NOW()
-        WHERE id = ${transaction.id}::uuid AND status = 'PENDING'::"PaymentStatus"
-      `;
-      throw new BadRequestException(
-        `Autorización de pago denegada: ${authResult.description || 'Tarjeta rechazada o fondos insuficientes'}`,
-      );
-    }
-
-    // Cálculo contable de comisión Niubiz (~3.45% + 18% IGV sobre comisión)
-    const amountNum = Number(transaction.amountPen);
-    const commissionPen = parseFloat((amountNum * 0.0345).toFixed(2));
-    const igvPen = parseFloat((commissionPen * 0.18).toFixed(2));
-
-    // Transición atómica SQL anti-TOCTOU PENDING -> COMPLETED
-    const rowsAffected = await this.prisma.$executeRaw`
-      UPDATE payment_transactions
-      SET status = 'COMPLETED'::"PaymentStatus",
-          "cardBrand" = ${authResult.cardBrand || null},
-          "cardPanMasked" = ${authResult.cardPanMasked || null},
-          "authorizationCode" = ${authResult.authorizationCode || null},
-          "actionCode" = ${authResult.actionCode || '000'},
-          "traceNumber" = ${authResult.traceNumber || null},
-          "commissionPen" = ${commissionPen},
-          "igvPen" = ${igvPen},
-          "gatewayResponse" = ${JSON.stringify(authResult.raw || {})}::jsonb,
-          "updatedAt" = NOW()
-      WHERE id = ${transaction.id}::uuid AND status = 'PENDING'::"PaymentStatus"
-    `;
-
-    if (rowsAffected === 0) {
+    if (!isPaid) {
       this.logger.warn(
-        `[ANTI-TOCTOU] Transacción ${transaction.purchaseNumber} ya fue procesada concurrentemente`,
+        `[Izipay IPN] Orden ${orderId} recibida con estado no pagado: ${orderStatus}`,
       );
-      return {
-        status: 'COMPLETED',
-        message: 'La transacción ya había sido confirmada previamente',
-        transactionId: transaction.id,
-      };
+      await this.prisma.paymentTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: 'FAILED',
+          gatewayResponse: krAnswer,
+        },
+      });
+      return 'OK';
     }
 
-    // Encolar minteo asíncrono en BullMQ con reintentos exponenciales
-    let txHash: string | null = null;
-    const targetUser = transaction.user;
+    // 5. Marcar como COMPLETED en BD
+    await this.prisma.paymentTransaction.update({
+      where: { id: transaction.id },
+      data: {
+        status: 'COMPLETED',
+        cardBrand,
+        cardPanMasked,
+        authorizationCode,
+        gatewayResponse: krAnswer,
+      },
+    });
 
+    // 6. Ejecutar o encolar Minteo on-chain en Stellar/Soroban
+    const targetUser = transaction.user;
     if (targetUser.walletAddress) {
       try {
         if (this.blockchainQueue) {
-          const job = await this.blockchainQueue.add(
-            'niubiz-mint-tokens',
+          await this.blockchainQueue.add(
+            'izipay-mint-tokens',
             {
               userId: targetUser.id,
               walletAddress: targetUser.walletAddress,
@@ -225,164 +239,117 @@ export class PaymentsService {
               backoff: { type: 'exponential', delay: 2000 },
             },
           );
-          txHash = `job-${job.id}`;
+          this.logger.log(
+            `[Izipay IPN] Minteo on-chain encolado en BullMQ para ${targetUser.walletAddress} (${transaction.tokenAmount} ECO)`,
+          );
         } else {
-          // Ejecución directa si no hay cola activa
+          // Si no hay BullMQ en el entorno de ejecución, minteo directo
           const receipt = await this.blockchainService.mintEcoTokens(
             targetUser.walletAddress,
             Number(transaction.tokenAmount),
           );
-          txHash = receipt?.hash || null;
+          if (receipt?.hash) {
+            await this.prisma.paymentTransaction.update({
+              where: { id: transaction.id },
+              data: { txHash: receipt.hash, blockchainStatus: 'MINTED' },
+            });
+            this.logger.log(
+              `[Izipay IPN] Minteo on-chain directo completado. Hash: ${receipt.hash}`,
+            );
+          }
         }
       } catch (mintErr: any) {
         this.logger.error(
-          `Error al mintear tokens para recarga ${transaction.purchaseNumber}: ${mintErr.message}`,
+          `[Izipay IPN] Error al procesar acreditación de saldo para ${orderId}: ${mintErr.message}`,
         );
+        await this.prisma.paymentTransaction.update({
+          where: { id: transaction.id },
+          data: { blockchainStatus: 'FAILED_BLOCKCHAIN' },
+        }).catch(() => {});
+
+        // Notificar al Administrador sobre la acreditación pendiente
+        if (this.mailService) {
+          await this.mailService.sendAccreditationAlertToAdmin({
+            adminEmail: 'danielarmando023@gmail.com',
+            purchaseNumber: transaction.purchaseNumber,
+            userEmail: targetUser.email,
+            userName: targetUser.name || 'Usuario Livora',
+            amountPen: Number(transaction.amountPen),
+            tokenAmount: Number(transaction.tokenAmount),
+            cardBrand,
+            errorMessage: mintErr.message,
+          }).catch(() => {});
+        }
+      }
+    } else {
+      this.logger.warn(
+        `[Izipay IPN] Usuario ${targetUser.id} no posee dirección de cuenta configurada. Acreditación en espera.`,
+      );
+      if (this.mailService) {
+        await this.mailService.sendAccreditationAlertToAdmin({
+          adminEmail: 'danielarmando023@gmail.com',
+          purchaseNumber: transaction.purchaseNumber,
+          userEmail: targetUser.email,
+          userName: targetUser.name || 'Usuario Livora',
+          amountPen: Number(transaction.amountPen),
+          tokenAmount: Number(transaction.tokenAmount),
+          cardBrand,
+          errorMessage: 'El usuario no tiene una cuenta de monedero vinculada para acreditar saldo.',
+        }).catch(() => {});
       }
     }
 
-    if (txHash) {
-      await this.prisma.paymentTransaction.update({
-        where: { id: transaction.id },
-        data: { txHash, blockchainStatus: 'MINTED' },
-      });
-    }
-
-    // Notificar al usuario
+    // 7. Notificación Push al usuario (vocabulario fintech familiar sin jerga Web3)
     this.notificationsService
       .sendPushNotification(
         targetUser.id,
-        'Recarga de EcoTokens exitosa',
-        `Se han acreditado ${Number(transaction.tokenAmount).toFixed(2)} EcoTokens en tu monedero tras tu pago de S/ ${Number(transaction.amountPen).toFixed(2)} PEN.`,
+        'Pago confirmado · Recarga en proceso',
+        `Se ha confirmado tu pago de S/ ${Number(transaction.amountPen).toFixed(2)} PEN. Tus ${Number(transaction.tokenAmount).toFixed(2)} EcoTokens se reflejarán en tu saldo disponible en unos instantes.`,
         { purchaseNumber: transaction.purchaseNumber },
       )
       .catch(() => {});
 
-    return {
-      status: 'COMPLETED',
-      amountPen: Number(transaction.amountPen),
-      tokenAmount: Number(transaction.tokenAmount),
-      purchaseNumber: transaction.purchaseNumber,
-      authorizationCode: authResult.authorizationCode,
-      cardBrand: authResult.cardBrand,
-      cardPanMasked: authResult.cardPanMasked,
-      txHash,
-    };
+    // Notificación en tiempo real vía WebSocket
+    if (this.websocketsService) {
+      this.websocketsService.emitUserEvent(targetUser.id, 'payment:updated', {
+        orderId: transaction.purchaseNumber,
+        amountPen: Number(transaction.amountPen),
+        tokenAmount: Number(transaction.tokenAmount),
+        status: 'Pago Confirmado - Recarga en proceso',
+      });
+    }
+
+    return 'OK';
   }
 
   /**
-   * Procesa el webhook server-to-server firmado con HMAC-SHA256
+   * Genera la vista HTML responsiva con Krypton JS (V4) para el WebView móvil
    */
-  async processWebhook(dto: ProcessPaymentWebhookDto) {
-    const webhookSecret =
-      this.configService.get<string>('PAYMENT_WEBHOOK_SECRET') ||
-      'livora_niubiz_webhook_secret_2026';
-
-    const expectedSignature = crypto
-      .createHmac('sha256', webhookSecret)
-      .update(dto.purchaseNumber)
-      .digest('hex');
-
-    const signatureBuffer = Buffer.from(dto.signature || '', 'utf8');
-    const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
-
-    if (
-      signatureBuffer.length === 0 ||
-      signatureBuffer.length !== expectedBuffer.length ||
-      !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
-    ) {
-      this.logger.error(
-        `Firma de webhook inválida para compra ${dto.purchaseNumber}. Firma recibida: ${dto.signature}`,
-      );
-      throw new BadRequestException('Firma HMAC de webhook Niubiz inválida');
-    }
-
+  async renderCheckoutPage(orderId: string): Promise<string> {
     const transaction = await this.prisma.paymentTransaction.findUnique({
-      where: { purchaseNumber: dto.purchaseNumber },
-      include: { user: true },
-    });
-
-    if (!transaction) {
-      throw new NotFoundException(
-        `Transacción con número de compra ${dto.purchaseNumber} no encontrada`,
-      );
-    }
-
-    if (transaction.status === 'COMPLETED') {
-      return {
-        status: 'COMPLETED',
-        message: 'La transacción ya había sido procesada previamente',
-        transactionId: transaction.id,
-      };
-    }
-
-    // Si el webhook provee transactionToken y está PENDING, autorizar con Niubiz
-    if (dto.transactionToken && transaction.status === 'PENDING') {
-      const authResult = await this.niubizClient.authorizeTransaction(
-        dto.transactionToken,
-        transaction.purchaseNumber,
-        Number(transaction.amountPen),
-      );
-
-      if (!authResult.authorized) {
-        await this.prisma.$executeRaw`
-          UPDATE payment_transactions
-          SET status = 'FAILED'::"PaymentStatus",
-              "actionCode" = ${authResult.actionCode || '999'},
-              "gatewayResponse" = ${JSON.stringify(authResult.raw || {})}::jsonb,
-              "updatedAt" = NOW()
-          WHERE id = ${transaction.id}::uuid AND status = 'PENDING'::"PaymentStatus"
-        `;
-        throw new BadRequestException('Autorización de pago denegada por Niubiz');
-      }
-
-      await this.prisma.$executeRaw`
-        UPDATE payment_transactions
-        SET status = 'COMPLETED'::"PaymentStatus",
-            "cardBrand" = ${authResult.cardBrand || null},
-            "cardPanMasked" = ${authResult.cardPanMasked || null},
-            "authorizationCode" = ${authResult.authorizationCode || null},
-            "actionCode" = ${authResult.actionCode || '000'},
-            "traceNumber" = ${authResult.traceNumber || null},
-            "gatewayResponse" = ${JSON.stringify(authResult.raw || {})}::jsonb,
-            "updatedAt" = NOW()
-        WHERE id = ${transaction.id}::uuid AND status = 'PENDING'::"PaymentStatus"
-      `;
-    }
-
-    return {
-      status: 'COMPLETED',
-      purchaseNumber: transaction.purchaseNumber,
-      amountPen: transaction.amountPen,
-    };
-  }
-
-  /**
-   * Genera la vista HTML responsiva para el Checkout de Niubiz embebido en Flutter
-   */
-  async renderCheckoutPage(purchaseNumber: string): Promise<string> {
-    const transaction = await this.prisma.paymentTransaction.findUnique({
-      where: { purchaseNumber },
+      where: { purchaseNumber: orderId },
     });
 
     if (!transaction || transaction.status !== 'PENDING') {
       return `
         <!DOCTYPE html>
         <html lang="es">
-        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Sesión Expirada</title>
-        <style>body{font-family:sans-serif;text-align:center;padding:40px;background:#fef2f2;color:#991b1b;}</style></head>
-        <body><h3>Sesión de pago no válida o ya procesada</h3><p>Por favor regresa a la app Livora para reintentar.</p></body></html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Sesión Expirada - Livora</title>
+          <style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:40px;background:#FEF2F2;color:#991B1B;}</style>
+        </head>
+        <body>
+          <h3>Sesión de pago no válida o ya procesada</h3>
+          <p>Por favor regresa a la app Livora para reintentar la operación.</p>
+        </body>
+        </html>
       `;
     }
 
-    const isSandbox =
-      this.configService.get<string>('NIUBIZ_ENV', 'sandbox') === 'sandbox';
-    const scriptUrl = isSandbox
-      ? 'https://static-content-qas.vnforapps.com/v2/js/checkout.js'
-      : 'https://static-content.vnforapps.com/v2/js/checkout.js';
-
-    const merchantId = this.niubizClient.getMerchantId();
-    const sessionToken = transaction.transactionToken || '';
+    const publicKey = this.izipayClient.getPublicKey();
+    const formToken = transaction.transactionToken || '';
     const amountFormatted = Number(transaction.amountPen).toFixed(2);
 
     return `
@@ -391,8 +358,17 @@ export class PaymentsService {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Niubiz Pago Seguro - Livora</title>
-  <script src="${scriptUrl}"></script>
+  <title>Izipay Pago Seguro - Livora</title>
+  
+  <!-- Estilos Neon y SDK de Krypton V4 de Izipay -->
+  <link rel="stylesheet" href="https://static.micuentaweb.pe/static/js/krypton-client/V4.0/ext/neon-reset.min.css">
+  <script type="text/javascript" src="https://static.micuentaweb.pe/static/js/krypton-client/V4.0/ext/neon.js"></script>
+  <script type="text/javascript"
+    src="https://static.micuentaweb.pe/static/js/krypton-client/V4.0/stable/kr-payment-form.min.js"
+    kr-public-key="${publicKey}"
+    kr-post-url-success="/pago-exitoso">
+  </script>
+
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -402,17 +378,17 @@ export class PaymentsService {
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-start;
       min-height: 100vh;
-      padding: 16px;
+      padding: 16px 12px;
     }
     .container {
       background: #FFFFFF;
       border-radius: 20px;
-      padding: 24px;
-      max-width: 380px;
+      padding: 20px 16px;
+      max-width: 400px;
       width: 100%;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
       border: 1px solid #E2E8F0;
       text-align: center;
     }
@@ -426,14 +402,14 @@ export class PaymentsService {
     .subtitle {
       font-size: 13px;
       color: #64748B;
-      margin-bottom: 20px;
+      margin-bottom: 16px;
     }
     .card-amount {
       background: #F0FDF4;
       border: 1px solid #BBF7D0;
       border-radius: 14px;
-      padding: 16px;
-      margin-bottom: 24px;
+      padding: 14px;
+      margin-bottom: 18px;
     }
     .amount-value {
       font-size: 26px;
@@ -446,107 +422,77 @@ export class PaymentsService {
       color: #16A34A;
       margin-top: 4px;
     }
-    .btn-pay {
-      background: #0284C7;
-      color: #FFFFFF;
-      border: none;
-      border-radius: 14px;
-      padding: 15px;
-      font-size: 15px;
-      font-weight: 700;
+    .kr-smart-form {
+      margin-top: 8px;
       width: 100%;
-      cursor: pointer;
-      box-shadow: 0 4px 14px rgba(2, 132, 199, 0.25);
-      transition: background 0.2s ease;
     }
-    .btn-pay:hover { background: #0369A1; }
     .footer-note {
       font-size: 11px;
       color: #94A3B8;
-      margin-top: 20px;
+      margin-top: 16px;
       line-height: 1.4;
-    }
-    .status-msg {
-      margin-top: 14px;
-      font-size: 12px;
-      color: #0284C7;
-      font-weight: 600;
-      display: none;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="brand">Livora</div>
-    <div class="subtitle">Pasarela de Pago Segura Niubiz</div>
-    
+    <div class="subtitle">Pasarela de Pago Segura Izipay</div>
+
     <div class="card-amount">
       <div class="amount-value">S/ ${amountFormatted} PEN</div>
       <div class="token-value">Acredita: ${amountFormatted} EcoTokens (1 PEN = 1 ECO)</div>
     </div>
 
-    <button id="btnPay" class="btn-pay" onclick="openNiubizCheckout()">
-      Abrir Pasarela de Pago
-    </button>
-    <div id="statusMsg" class="status-msg">Iniciando formulario seguro de pago...</div>
+    <!-- Contenedor del Formulario Inteligente Krypton V4 de Izipay -->
+    <div class="kr-smart-form" kr-form-token="${formToken}"></div>
 
     <div class="footer-note">
-      Cifrado bancario seguro PCI-DSS con autenticación 3D Secure 2.0.
+      Transacción protegida por Izipay con estándares internacionales PCI-DSS y 3D-Secure.
     </div>
   </div>
 
   <script>
     function notifyFlutter(payload) {
-      if (window.NiubizBridge && window.NiubizBridge.postMessage) {
-        window.NiubizBridge.postMessage(JSON.stringify(payload));
-      } else {
+      try {
+        if (window.IzipayBridge && window.IzipayBridge.postMessage) {
+          window.IzipayBridge.postMessage(JSON.stringify(payload));
+        } else {
+          window.location.href = 'livora://payment-callback?data=' + encodeURIComponent(JSON.stringify(payload));
+        }
+      } catch (e) {
         window.location.href = 'livora://payment-callback?data=' + encodeURIComponent(JSON.stringify(payload));
       }
     }
 
-    function openNiubizCheckout() {
-      const statusEl = document.getElementById('statusMsg');
-      if (statusEl) statusEl.style.display = 'block';
-
-      try {
-        if (typeof VisanetCheckout === 'undefined') {
-          notifyFlutter({ event: 'error', message: 'No se pudo cargar la librería de Niubiz Checkout' });
-          return;
-        }
-
-        VisanetCheckout.configure({
-          sessiontoken: '${sessionToken}',
-          channel: 'web',
-          merchantid: '${merchantId}',
-          purchasenumber: '${purchaseNumber}',
-          amount: '${amountFormatted}',
-          expirationminutes: '20',
-          timeouturl: 'about:blank',
-          merchantlogo: 'https://livora.pe/icon.png',
-          formbuttoncolor: '#0284C7',
-          complete: function(params) {
-            if (params && params.transactionToken) {
-              notifyFlutter({
-                event: 'success',
-                purchaseNumber: '${purchaseNumber}',
-                transactionToken: params.transactionToken
-              });
-            } else {
-              notifyFlutter({
-                event: 'error',
-                message: 'No se recibió token de transacción de Niubiz'
-              });
-            }
+    window.addEventListener('DOMContentLoaded', function() {
+      if (typeof KR !== 'undefined') {
+        KR.onSubmit(function(response) {
+          if (response.clientAnswer && response.clientAnswer.orderStatus === 'PAID') {
+            notifyFlutter({
+              event: 'success',
+              orderId: '${orderId}',
+              clientAnswer: response.clientAnswer
+            });
+            return false;
+          } else {
+            notifyFlutter({
+              event: 'error',
+              orderId: '${orderId}',
+              message: 'El pago no pudo ser completado'
+            });
+            return false;
           }
         });
-        VisanetCheckout.open();
-      } catch (err) {
-        notifyFlutter({ event: 'error', message: err.message || 'Error al desplegar formulario Niubiz' });
-      }
-    }
 
-    window.addEventListener('load', function() {
-      setTimeout(openNiubizCheckout, 300);
+        KR.onError(function(error) {
+          notifyFlutter({
+            event: 'error',
+            orderId: '${orderId}',
+            message: error.errorMessage || 'Error al procesar el pago con Izipay'
+          });
+        });
+      }
     });
   </script>
 </body>
@@ -555,7 +501,7 @@ export class PaymentsService {
   }
 
   /**
-   * Historial de recargas de un usuario (exclusivo HOGAR / RECOLECTOR)
+   * Historial de recargas de un usuario (exclusivo RECOLECTOR / TIENDA)
    */
   async getUserTransactions(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -566,13 +512,13 @@ export class PaymentsService {
       throw new NotFoundException('Usuario no encontrado');
     }
 
-    if (user.role !== Role.HOGAR && user.role !== Role.RECOLECTOR) {
+    if (user.role !== Role.RECOLECTOR && user.role !== Role.TIENDA) {
       throw new ForbiddenException(
         'El rol actual no opera con recargas fiduciarias vía pasarela',
       );
     }
 
-    return this.prisma.paymentTransaction.findMany({
+    const txs = await this.prisma.paymentTransaction.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       select: {
@@ -588,6 +534,23 @@ export class PaymentsService {
         txHash: true,
         createdAt: true,
       },
+    });
+
+    return txs.map((tx) => {
+      let friendlyStatus = 'Pendiente';
+      if (tx.status === 'COMPLETED') {
+        friendlyStatus =
+          tx.blockchainStatus === 'MINTED'
+            ? 'Completado'
+            : 'Pago Confirmado - Recarga en proceso';
+      } else if (tx.status === 'FAILED') {
+        friendlyStatus = 'Rechazado';
+      }
+
+      return {
+        ...tx,
+        friendlyStatus,
+      };
     });
   }
 }
