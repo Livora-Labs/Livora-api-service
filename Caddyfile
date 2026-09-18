@@ -47,6 +47,9 @@
 	}
 
 	# Aplicación Web Frontend (Next.js Standalone)
+	handle /login* {
+		reverse_proxy frontend:3001
+	}
 	handle /admin* {
 		reverse_proxy frontend:3001
 	}
