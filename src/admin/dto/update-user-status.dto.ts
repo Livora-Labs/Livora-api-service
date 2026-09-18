@@ -1,12 +1,21 @@
-import { IsBoolean, IsNotEmpty } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsBoolean, IsEnum, IsOptional } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { UserStatus } from '@prisma/client';
 
 export class UpdateUserStatusDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: true,
     description: 'Estado activo o deshabilitado del usuario',
   })
-  @IsNotEmpty({ message: 'isActive es requerido' })
+  @IsOptional()
   @IsBoolean({ message: 'isActive debe ser un valor booleano' })
-  isActive: boolean;
+  isActive?: boolean;
+
+  @ApiPropertyOptional({
+    enum: UserStatus,
+    description: 'Estado operativo del usuario en el ciclo de vida de la cuenta',
+  })
+  @IsOptional()
+  @IsEnum(UserStatus, { message: 'userStatus debe ser un estado válido de UserStatus' })
+  userStatus?: UserStatus;
 }

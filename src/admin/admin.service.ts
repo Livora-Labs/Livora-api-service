@@ -281,11 +281,33 @@ export class AdminService {
       throw new NotFoundException('Usuario no encontrado');
     }
 
+    if (user.role === 'ADMIN' && dto.isActive === false) {
+      throw new BadRequestException('No es posible suspender una cuenta con rol de Administrador.');
+    }
+
+    const dataToUpdate: any = {};
+    if (dto.isActive !== undefined) {
+      dataToUpdate.isActive = dto.isActive;
+    }
+    if (dto.userStatus !== undefined) {
+      dataToUpdate.userStatus = dto.userStatus;
+    } else if (dto.isActive === false && user.userStatus === 'ACTIVE') {
+      dataToUpdate.userStatus = 'SUSPENDED_FRAUD';
+    } else if (dto.isActive === true && user.userStatus !== 'ACTIVE') {
+      dataToUpdate.userStatus = 'ACTIVE';
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: dataToUpdate,
+    });
+
     return {
-      userId: user.id,
-      email: user.email,
-      isActive: dto.isActive,
-      updatedAt: new Date().toISOString(),
+      userId: updatedUser.id,
+      email: updatedUser.email,
+      isActive: updatedUser.isActive,
+      userStatus: updatedUser.userStatus,
+      updatedAt: updatedUser.updatedAt.toISOString(),
     };
   }
 
