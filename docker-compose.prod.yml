@@ -25,13 +25,16 @@ services:
     build:
       context: ../Livora-frontend
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=https://${DOMAIN:-grupolivoralabs.com}
+        - NEXT_PUBLIC_API_BASE_URL=https://${DOMAIN:-grupolivoralabs.com}
     container_name: livora_frontend
     restart: always
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - NEXT_PUBLIC_API_URL=https://${DOMAIN:-52.200.2.107.sslip.io}
-      - NEXT_PUBLIC_API_BASE_URL=https://${DOMAIN:-52.200.2.107.sslip.io}
+      - NEXT_PUBLIC_API_URL=https://${DOMAIN:-grupolivoralabs.com}
+      - NEXT_PUBLIC_API_BASE_URL=https://${DOMAIN:-grupolivoralabs.com}
     depends_on:
       livora_api:
         condition: service_healthy
