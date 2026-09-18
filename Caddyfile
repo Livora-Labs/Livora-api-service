@@ -3,6 +3,12 @@
 }
 
 (livora_routes) {
+	# Favicon y archivos de marca estáticos
+	handle /favicon.ico {
+		root * /srv/public
+		file_server
+	}
+
 	# Landing y archivos estáticos públicos
 	handle / {
 		root * /srv/public
