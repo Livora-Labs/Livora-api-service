@@ -431,7 +431,7 @@ export class StoresService {
       this.notificationsService
         ?.sendPushNotification(
           redemption.userId,
-          '↩️ Canje anulado y reembolsado',
+          'Canje anulado y reembolsado',
           `Tu canje por ${redemption.tokenAmount} EcoTokens en ${storeProfile.businessName} ha sido anulado. Los tokens han sido devueltos a tu saldo.`,
           { redemptionId: updatedRedemption.id, status: 'REFUNDED' },
         )
