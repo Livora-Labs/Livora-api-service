@@ -100,7 +100,7 @@ async function main() {
       encryptedPrivateKey: encryptedPrivateKey,
       accounts: {
         create: {
-          accountType: 'PRIMARY',
+          accountType: 'USER_WALLET',
           currency: 'LIVORA',
           cachedBalance: 0,
         },
