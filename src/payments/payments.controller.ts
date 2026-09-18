@@ -60,7 +60,18 @@ export class PaymentsController {
     @Res() res: FastifyReply,
   ) {
     const html = await this.paymentsService.renderCheckoutPage(orderId);
-    res.type('text/html; charset=utf-8').send(html);
+    res
+      .header(
+        'Content-Security-Policy',
+        "default-src 'self' https: data: 'unsafe-inline' 'unsafe-eval'; " +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.micuentaweb.pe; " +
+          "style-src 'self' 'unsafe-inline' https://static.micuentaweb.pe; " +
+          "connect-src 'self' https://api.micuentaweb.pe https://static.micuentaweb.pe https:; " +
+          "frame-src 'self' https://static.micuentaweb.pe https://api.micuentaweb.pe; " +
+          "img-src 'self' data: https: https://static.micuentaweb.pe;",
+      )
+      .type('text/html; charset=utf-8')
+      .send(html);
   }
 
   @HttpCode(HttpStatus.OK)

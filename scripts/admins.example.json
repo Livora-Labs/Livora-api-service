@@ -1,0 +1,16 @@
+[
+  {
+    "email": "admin1@livora.pe",
+    "password": "PasswordSeguro2026!*",
+    "name": "Admin Principal",
+    "phone": "+51987654321",
+    "address": "Lima, Perú"
+  },
+  {
+    "email": "operaciones@livora.pe",
+    "password": "PasswordOperaciones2026!*",
+    "name": "Administrador de Operaciones",
+    "phone": "+51987654322",
+    "address": "Arequipa, Perú"
+  }
+]

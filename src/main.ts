@@ -57,9 +57,11 @@ async function bootstrap() {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'https:'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://static.micuentaweb.pe'],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://static.micuentaweb.pe'],
+        connectSrc: ["'self'", 'https://api.micuentaweb.pe', 'https://static.micuentaweb.pe'],
+        frameSrc: ["'self'", 'https://static.micuentaweb.pe', 'https://api.micuentaweb.pe'],
+        imgSrc: ["'self'", 'data:', 'https:', 'https://static.micuentaweb.pe'],
       },
     },
     hsts: {
