@@ -68,6 +68,15 @@
 	handle /_next/* {
 		reverse_proxy frontend:3001
 	}
+	handle /images/* {
+		reverse_proxy frontend:3001
+	}
+	handle /icon* {
+		reverse_proxy frontend:3001
+	}
+	handle /manifest.json {
+		reverse_proxy frontend:3001
+	}
 	handle /cookies* {
 		reverse_proxy frontend:3001
 	}
