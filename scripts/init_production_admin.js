@@ -1,4 +1,4 @@
-﻿const { PrismaClient } = require('@prisma/client');
+const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const { createClient } = require('@supabase/supabase-js');
 const { Keypair } = require('@stellar/stellar-sdk');
@@ -91,13 +91,11 @@ async function main() {
     data: {
       id: authUserId,
       email: adminEmail,
-      fullName: 'Daniel Armando',
+      name: 'Daniel Armando',
       phone: '+51987654321',
       address: 'Lima, Perú',
       role: 'ADMIN',
-      status: 'ACTIVE',
-      isEmailVerified: true,
-      kycStatus: 'APPROVED',
+      userStatus: 'ACTIVE',
       walletAddress: keypair.publicKey(),
       encryptedPrivateKey: encryptedPrivateKey,
       accounts: {
