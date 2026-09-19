@@ -562,8 +562,6 @@ export class BlockchainProcessor extends WorkerHost {
     );
 
     try {
-      let txHash: string;
-
       const user = fromStoreUserId
         ? await this.prisma.user.findUnique({
             where: { id: fromStoreUserId },
@@ -600,7 +598,7 @@ export class BlockchainProcessor extends WorkerHost {
           `No se obtuvo hash de transacción para la liquidación ${settlementId}`,
         );
       }
-      txHash = receipt.hash;
+      const txHash = receipt.hash;
 
       const explorerUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
       this.logger.log(
@@ -636,8 +634,6 @@ export class BlockchainProcessor extends WorkerHost {
     );
 
     try {
-      let txHash: string;
-
       const storeUser = fromStoreUserId
         ? await this.prisma.user.findUnique({
             where: { id: fromStoreUserId },
@@ -668,7 +664,7 @@ export class BlockchainProcessor extends WorkerHost {
           'No se obtuvo hash de transacción de Soroban para el reembolso',
         );
       }
-      txHash = receipt.hash;
+      const txHash = receipt.hash;
 
       await this.prisma.redemptionTransaction.update({
         where: { id: redemptionId },

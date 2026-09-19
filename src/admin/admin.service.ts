@@ -525,7 +525,7 @@ export class AdminService {
       dlqCount: 0,
     };
 
-    let failedJobs: Array<{
+    const failedJobs: Array<{
       id: string | undefined;
       name: string;
       data: any;

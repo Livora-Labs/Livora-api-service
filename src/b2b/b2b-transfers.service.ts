@@ -180,9 +180,9 @@ export class B2bTransfersService {
 
     // Ejecución atómica con bloqueo pesimista de filas en PostgreSQL
     return await this.prisma.$transaction(async (tx) => {
-      let inventoryMap = new Map<string, { id: string; stockKg: number }>();
-      let totalsIn = new Map<string, number>();
-      let totalsOut = new Map<string, number>();
+      const inventoryMap = new Map<string, { id: string; stockKg: number }>();
+      const totalsIn = new Map<string, number>();
+      const totalsOut = new Map<string, number>();
 
       if (typeof tx.$queryRaw === 'function') {
         try {
@@ -473,7 +473,7 @@ export class B2bTransfersService {
     const materialNames = Array.from(requestedMap.keys());
 
     return await this.prisma.$transaction(async (tx) => {
-      let inventoryMap = new Map<string, { id: string; stockKg: number }>();
+      const inventoryMap = new Map<string, { id: string; stockKg: number }>();
       for (const normMaterial of materialNames) {
         const invItem = await tx.inventoryItem.findFirst({
           where: {
