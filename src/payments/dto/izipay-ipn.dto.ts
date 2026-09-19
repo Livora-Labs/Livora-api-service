@@ -28,4 +28,12 @@ export class IzipayIpnDto {
   @IsOptional()
   @IsString()
   'kr-hash-key'?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tipo de respuesta reportado por Izipay (Payment, Subscription, etc.)',
+  })
+  @IsOptional()
+  @IsString()
+  'kr-answer-type'?: string;
 }
+

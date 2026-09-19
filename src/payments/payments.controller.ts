@@ -9,6 +9,8 @@ import {
   Req,
   Res,
   UseGuards,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -76,6 +78,13 @@ export class PaymentsController {
 
   @HttpCode(HttpStatus.OK)
   @Post(['izipay-ipn', '/api/pagos/izipay-ipn'])
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: false,
+      forbidNonWhitelisted: false,
+      transform: false,
+    }),
+  )
   @ApiOperation({
     summary:
       'Notificación de Pago Instantánea (IPN / Webhook) de Izipay verificada con HMAC-SHA256',
