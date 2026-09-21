@@ -229,7 +229,7 @@ export class StoresService {
 
         if (balance < finalAmount) {
           throw new BadRequestException(
-            `Saldo de EcoTokens insuficiente para realizar el canje. Requerido: ${finalAmount}, Disponible: ${balance}`,
+            `Saldo de LIVOs insuficiente para realizar el canje. Requerido: ${finalAmount}, Disponible: ${balance}`,
           );
         }
 
@@ -377,7 +377,7 @@ export class StoresService {
 
     if (storeBalance < refundAmount) {
       throw new BadRequestException(
-        `Saldo insuficiente de EcoTokens en la tienda para revertir el canje. Requerido: ${refundAmount} ECO, Saldo disponible: ${storeBalance} ECO.`,
+        `Saldo insuficiente de LIVOs en la tienda para revertir el canje. Requerido: ${refundAmount} LIVO, Saldo disponible: ${storeBalance} LIVO.`,
       );
     }
 
@@ -432,7 +432,7 @@ export class StoresService {
         ?.sendPushNotification(
           redemption.userId,
           'Canje anulado y reembolsado',
-          `Tu canje por ${redemption.tokenAmount} EcoTokens en ${storeProfile.businessName} ha sido anulado. Los tokens han sido devueltos a tu saldo.`,
+          `Tu canje por ${redemption.tokenAmount} LIVOs en ${storeProfile.businessName} ha sido anulado. Los LIVOs han sido devueltos a tu saldo.`,
           { redemptionId: updatedRedemption.id, status: 'REFUNDED' },
         )
         .catch(() => {});
@@ -486,7 +486,7 @@ export class StoresService {
 
     if (availableBalance < dto.tokenAmount) {
       throw new BadRequestException(
-        `Saldo insuficiente de EcoTokens. Solicitas liquidar ${dto.tokenAmount} ECO, pero tu saldo disponible es de ${availableBalance.toFixed(2)} ECO (Saldo total: ${totalBalance.toFixed(2)} ECO, Retenido en liquidación previa: ${alreadyPendingAmount.toFixed(2)} ECO).`,
+        `Saldo insuficiente de LIVOs. Solicitas liquidar ${dto.tokenAmount} LIVO, pero tu saldo disponible es de ${availableBalance.toFixed(2)} LIVO (Saldo total: ${totalBalance.toFixed(2)} LIVO, Retenido en liquidación previa: ${alreadyPendingAmount.toFixed(2)} LIVO).`,
       );
     }
 
@@ -914,9 +914,9 @@ export class StoresService {
         longitude: u.longitude || -77.0298,
         phone: u.phone || '+51 956789012',
         email: u.email,
-        discount: 'Canje 1 ECO = S/ 1.00 PEN',
+        discount: 'Canje 1 LIVO = S/ 1.00 PEN',
         description:
-          'Comercio eco-amigable aliado al ecosistema Livora para canje de EcoTokens.',
+          'Comercio eco-amigable aliado al ecosistema Livora para canje de LIVOs.',
         walletAddress: u.walletAddress,
         logoUrl: sp?.logoUrl,
         ruc: sp?.ruc,

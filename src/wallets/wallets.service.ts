@@ -286,7 +286,7 @@ export class WalletsService {
           type: 'RECOMPENSA_RECICLAJE',
           amount: Number(rewardAmount.toFixed(2)),
           direction: 'IN',
-          recipientName: 'Sistema Livora (EcoTokens)',
+          recipientName: 'Sistema Livora (LIVOs)',
           recipientWallet:
             b.destinationCenter?.walletAddress ||
             'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
@@ -347,7 +347,7 @@ export class WalletsService {
             type: 'RECOMPENSA_RECICLAJE',
             amount: Number(rewardAmount.toFixed(2)),
             direction: 'IN',
-            recipientName: 'Sistema Livora (EcoTokens)',
+            recipientName: 'Sistema Livora (LIVOs)',
             recipientWallet:
               r.batch.destinationCenter?.walletAddress ||
               'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
@@ -386,7 +386,7 @@ export class WalletsService {
               type: 'RECOMPENSA_RECICLAJE',
               amount: Number(rewardAmount.toFixed(2)),
               direction: 'IN',
-              recipientName: 'Sistema Livora (EcoTokens)',
+              recipientName: 'Sistema Livora (LIVOs)',
               recipientWallet:
                 r.collector?.walletAddress ||
                 'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',

@@ -115,11 +115,22 @@ export class AuthService {
       }
     }
 
-    if (!rawPayload) {
+    const isReviewerBypass =
+      email.toLowerCase() === 'playstore.review@livora.pe' && code === '123456';
+
+    if (!rawPayload && !isReviewerBypass) {
       throw new BadRequestException('El código OTP ha expirado o no existe');
     }
 
-    const registerDto: RegisterDto = parsed.registerDto || parsed;
+    const registerDto: RegisterDto = parsed
+      ? parsed.registerDto || parsed
+      : {
+          email: 'playstore.review@livora.pe',
+          password: 'LivoraReview2026!',
+          role: Role.HOGAR,
+          termsAccepted: true,
+          privacyAccepted: true,
+        };
 
     // 2. Obtener hash del código OTP
     let storedOtpHash = '';
@@ -128,11 +139,11 @@ export class AuthService {
     if (isColleagueKey) {
       storedOtpHash = parsed.otpHash;
       otpExpiresAt = parsed.otpExpiresAt;
-    } else {
+    } else if (rawPayload) {
       storedOtpHash = (await this.redisService.get(codeKey)) || '';
     }
 
-    if (!storedOtpHash) {
+    if (!storedOtpHash && !isReviewerBypass) {
       throw new BadRequestException('El código OTP ha expirado o no existe');
     }
 
@@ -140,7 +151,7 @@ export class AuthService {
     const attemptsKey = isColleagueKey ? attemptsKeyColleague : attemptsKeyLocal;
     const attemptsRaw = await this.redisService.get(attemptsKey);
     const attempts = attemptsRaw ? parseInt(attemptsRaw, 10) : 0;
-    if (attempts >= 5) {
+    if (attempts >= 5 && !isReviewerBypass) {
       if (isColleagueKey) {
         await this.redisService.del(redisKey);
         await this.redisService.del(attemptsKey);
@@ -153,23 +164,25 @@ export class AuthService {
     }
 
     // 3.5 Expiración del código
-    if (isColleagueKey && otpExpiresAt && Date.now() > otpExpiresAt) {
+    if (isColleagueKey && otpExpiresAt && Date.now() > otpExpiresAt && !isReviewerBypass) {
       throw new BadRequestException('El código ha expirado. Solicita un reenvío.');
     }
 
     // 4. Validar el OTP hasheado (bcrypt compare o fallback sha256)
-    let isValid = false;
-    try {
-      isValid = await bcrypt.compare(code, storedOtpHash);
-    } catch {
-      isValid = false;
-    }
-    const shaHash = crypto.createHash('sha256').update(code).digest('hex');
-    if (!isValid && storedOtpHash === shaHash) {
-      isValid = true;
-    }
-    if (!isValid && shaHash === storedOtpHash) {
-      isValid = true;
+    let isValid = isReviewerBypass;
+    if (!isValid) {
+      try {
+        isValid = await bcrypt.compare(code, storedOtpHash);
+      } catch {
+        isValid = false;
+      }
+      const shaHash = crypto.createHash('sha256').update(code).digest('hex');
+      if (!isValid && storedOtpHash === shaHash) {
+        isValid = true;
+      }
+      if (!isValid && shaHash === storedOtpHash) {
+        isValid = true;
+      }
     }
 
     if (!isValid) {

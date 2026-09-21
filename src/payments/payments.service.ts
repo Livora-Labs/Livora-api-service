@@ -56,7 +56,7 @@ export class PaymentsService {
     // Regla de negocio: Exclusividad para RECOLECTOR y TIENDA
     if (user.role !== Role.RECOLECTOR && user.role !== Role.TIENDA) {
       throw new ForbiddenException(
-        'El rol actual no opera con recargas fiduciarias de EcoTokens vía pasarela Izipay',
+        'El rol actual no opera con recargas fiduciarias de LIVOs vía pasarela Izipay',
       );
     }
 
@@ -304,7 +304,7 @@ export class PaymentsService {
       .sendPushNotification(
         targetUser.id,
         'Pago confirmado · Recarga en proceso',
-        `Se ha confirmado tu pago de S/ ${Number(transaction.amountPen).toFixed(2)} PEN. Tus ${Number(transaction.tokenAmount).toFixed(2)} EcoTokens se reflejarán en tu saldo disponible en unos instantes.`,
+        `Se ha confirmado tu pago de S/ ${Number(transaction.amountPen).toFixed(2)} PEN. Tus ${Number(transaction.tokenAmount).toFixed(2)} LIVOs se reflejarán en tu saldo disponible en unos instantes.`,
         { purchaseNumber: transaction.purchaseNumber },
       )
       .catch(() => {});
@@ -441,7 +441,7 @@ export class PaymentsService {
 
     <div class="card-amount">
       <div class="amount-value">S/ ${amountFormatted} PEN</div>
-      <div class="token-value">Acredita: ${amountFormatted} EcoTokens (1 PEN = 1 ECO)</div>
+      <div class="token-value">Acredita: ${amountFormatted} LIVOs (1 PEN = 1 LIVO)</div>
     </div>
 
     <!-- Contenedor del Formulario Inteligente Krypton V4 de Izipay -->

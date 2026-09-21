@@ -392,8 +392,8 @@ export class BlockchainProcessor extends WorkerHost {
           this.notificationsService
             ?.sendPushNotification(
               hhId,
-              'EcoTokens acreditados',
-              'El material de tu entrega ha sido pesado y procesado. Tus EcoTokens han sido acreditados.',
+              'LIVOs acreditados',
+              'El material de tu entrega ha sido pesado y procesado. Tus LIVOs han sido acreditados.',
               { batchId, txHash },
             )
             ?.catch(() => {});

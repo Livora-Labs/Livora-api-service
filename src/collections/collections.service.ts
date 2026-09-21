@@ -549,17 +549,27 @@ export class CollectionsService {
         },
       };
     } else if (user.role === Role.RECOLECTOR) {
-      where = {
-        OR: [
-          {
-            status: RequestStatus.PENDING,
-            assignedCenterId: { not: null },
-          },
-          {
-            collectorId: user.id,
-          },
-        ],
-      };
+      if (query.status) {
+        where = {
+          status: query.status,
+          ...(query.status === RequestStatus.PENDING
+            ? { assignedCenterId: { not: null }, collectorId: null }
+            : { collectorId: user.id }),
+        };
+      } else {
+        where = {
+          OR: [
+            {
+              status: RequestStatus.PENDING,
+              assignedCenterId: { not: null },
+              collectorId: null,
+            },
+            {
+              collectorId: user.id,
+            },
+          ],
+        };
+      }
       include = {
         household: { select: { id: true, email: true, name: true, address: true } },
         assignedCenter: { select: { id: true, name: true, email: true, address: true } },
@@ -702,6 +712,7 @@ export class CollectionsService {
       LEFT JOIN users ac ON ac.id = cr."assignedCenterId"
       WHERE cr.status = 'PENDING'
         AND cr."assignedCenterId" IS NOT NULL
+        AND cr."collectorId" IS NULL
         AND (
           6371000 * 2 * ASIN(SQRT(
             POWER(SIN(RADIANS(cr.latitude - ${lat}) / 2), 2) +
@@ -785,8 +796,8 @@ export class CollectionsService {
           collectionRequest.status !== RequestStatus.PENDING &&
           collectionRequest.status !== RequestStatus.AUCTION_ASSIGNED
         ) {
-          throw new BadRequestException(
-            'La solicitud no está en estado PENDING o AUCTION_ASSIGNED y no puede ser aceptada',
+          throw new ConflictException(
+            'Esta solicitud ya no está disponible para recolección',
           );
         }
 
@@ -887,7 +898,7 @@ export class CollectionsService {
 
         if (rowsAffected === 0) {
           throw new ConflictException(
-            'La solicitud ya fue tomada por otro recolector o ya no se encuentra en estado pendiente',
+            'Esta solicitud ya no está disponible para recolección',
           );
         }
 
