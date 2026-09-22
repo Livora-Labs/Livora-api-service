@@ -145,4 +145,16 @@ export class CreateCollectionDto {
   })
   @IsOptional()
   image?: any;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Indica si la solicitud se procesa como Donación Solidaria (0 LIVOs al hogar)',
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return value;
+  })
+  isDonation?: boolean;
 }

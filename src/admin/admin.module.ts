@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
@@ -9,6 +10,7 @@ import { BLOCKCHAIN_QUEUE, BLOCKCHAIN_DLQ } from '../blockchain/blockchain.const
 
 @Module({
   imports: [
+    ConfigModule,
     PrismaModule,
     BlockchainModule,
     BullModule.registerQueue(

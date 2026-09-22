@@ -1,5 +1,6 @@
 export const BLOCKCHAIN_QUEUE = 'blockchain-queue';
 export const BLOCKCHAIN_DLQ = 'blockchain-dlq';
+export const STELLAR_MAINTENANCE_QUEUE = 'stellar-maintenance-queue';
 
 
 /**

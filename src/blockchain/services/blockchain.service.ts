@@ -924,6 +924,107 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Patrocina y activa la cuenta Stellar de un usuario utilizando Sponsored Reserves (CAP-0033).
+   * Livora (Worker) financia la reserva mínima de 1 XLM sin regalarla; el XLM sigue perteneciendo
+   * a Livora y puede ser desvinculado si la cuenta se cierra.
+   */
+  async sponsorAccountCreation(
+    userPublicKey: string,
+    userPrivateKey?: string,
+  ): Promise<{ hash: string; sponsored: boolean }> {
+    this.logger.log(
+      `Iniciando patrocinio de cuenta Stellar para ${userPublicKey}...`,
+    );
+
+    // 1. Verificar si la cuenta ya existe en Stellar
+    try {
+      await this.getAccountFromRpc(userPublicKey);
+      this.logger.log(`La cuenta ${userPublicKey} ya existe en Stellar.`);
+      return { hash: 'ALREADY_EXISTS', sponsored: true };
+    } catch {
+      // Significa que la cuenta aún no existe on-chain
+    }
+
+    // 2. Si estamos en Testnet, intentar activar primero vía Friendbot de forma ágil
+    if (this.networkPassphrase.toLowerCase().includes('test')) {
+      try {
+        const friendbotUrl = `https://friendbot.stellar.org?addr=${userPublicKey}`;
+        const axios = require('axios');
+        const fbRes = await axios.get(friendbotUrl, { timeout: 10000 });
+        if (fbRes.data?.successful || fbRes.data?.hash) {
+          this.logger.log(
+            `Cuenta ${userPublicKey} activada en Stellar Testnet vía Friendbot. Tx: ${fbRes.data.hash}`,
+          );
+          return { hash: fbRes.data.hash, sponsored: true };
+        }
+      } catch (fbErr: any) {
+        this.logger.warn(
+          `Friendbot no disponible para ${userPublicKey} (${fbErr.message}). Continuando con patrocinio nativo Worker...`,
+        );
+      }
+    }
+
+    // 3. Ejecutar patrocinio nativo con el Worker de Livora
+    const executeSponsorship = async (signerKeypair: Keypair) => {
+      const sourceAccount = await this.getSourceAccount(signerKeypair.publicKey());
+      const txBuilder = new TransactionBuilder(sourceAccount, {
+        fee: '1000',
+        networkPassphrase: this.networkPassphrase,
+      });
+
+      if (userPrivateKey) {
+        const userKeypair = Keypair.fromSecret(userPrivateKey);
+        txBuilder
+          .addOperation(
+            Operation.beginSponsoringFutureReserves({
+              sponsoredId: userPublicKey,
+            }),
+          )
+          .addOperation(
+            Operation.createAccount({
+              destination: userPublicKey,
+              startingBalance: '0',
+            }),
+          )
+          .addOperation(
+            Operation.endSponsoringFutureReserves({
+              source: userPublicKey,
+            }),
+          );
+
+        const tx = txBuilder.setTimeout(30).build();
+        tx.sign(signerKeypair);
+        tx.sign(userKeypair);
+
+        const res = await this.sendTxFromRpc(tx);
+        return { hash: res.hash || '', sponsored: true };
+      } else {
+        txBuilder.addOperation(
+          Operation.createAccount({
+            destination: userPublicKey,
+            startingBalance: '1',
+          }),
+        );
+        const tx = txBuilder.setTimeout(30).build();
+        const res = await this.sendTransaction(tx, signerKeypair);
+        return { hash: res.hash || '', sponsored: true };
+      }
+    };
+
+    try {
+      if (this.sequenceManager) {
+        return await this.sequenceManager.withChannelAccount(executeSponsorship);
+      }
+      return await executeSponsorship(this.workerKeypair);
+    } catch (error: any) {
+      this.logger.error(
+        `Error al patrocinar cuenta Stellar para ${userPublicKey}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
   private lastRpcHealth: { status: boolean; timestamp: number } | null = null;
 
   async checkConnection(): Promise<boolean> {

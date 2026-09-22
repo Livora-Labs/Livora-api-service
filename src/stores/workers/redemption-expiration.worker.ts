@@ -10,17 +10,17 @@ export class RedemptionExpirationWorker {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Tarea periódica horaria para expirar transacciones de canje (QR) pendientes
-   * que tengan más de 24 horas de antigüedad. Ejecutada exclusivamente en livora_worker.
+   * Tarea periódica de alta frecuencia (cada minuto) para expirar códigos QR de canje
+   * que tengan más de 15 minutos de antigüedad sin confirmación. Ejecutada en livora_worker.
    */
-  @Cron(CronExpression.EVERY_HOUR)
+  @Cron(CronExpression.EVERY_MINUTE)
   async handleExpirePendingRedemptions() {
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
     const result = await this.prisma.redemptionTransaction.updateMany({
       where: {
         status: RedemptionStatus.PENDING,
         createdAt: {
-          lt: twentyFourHoursAgo,
+          lt: fifteenMinutesAgo,
         },
       },
       data: {
@@ -30,7 +30,7 @@ export class RedemptionExpirationWorker {
 
     if (result.count > 0) {
       this.logger.log(
-        `[CRON REDEMPTIONS] Se marcaron ${result.count} códigos QR pendientes como EXPIRED (>24h).`,
+        `[CRON REDEMPTIONS] Se marcaron ${result.count} códigos QR pendientes como EXPIRED (>15m).`,
       );
     }
   }

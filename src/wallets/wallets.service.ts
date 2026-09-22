@@ -113,10 +113,11 @@ export class WalletsService {
             (r.actualWeights as Record<string, number>) ||
             (r.itemsEstimated as Record<string, number>) ||
             {};
+          const agreedRates = (r.agreedRates as Record<string, number>) || {};
           let reqTotal = 0;
           for (const [mat, rawWt] of Object.entries(actualWeights)) {
             const wt = typeof rawWt === 'number' ? rawWt : parseFloat(String(rawWt)) || 0;
-            const rate = await this.blockchainService.getMaterialRate(mat);
+            const rate = agreedRates[mat] || agreedRates[mat.toUpperCase()] || (await this.blockchainService.getMaterialRate(mat));
             reqTotal += wt * rate;
           }
           totalEarned += reqTotal * 0.40;
@@ -248,6 +249,19 @@ export class WalletsService {
       });
     }
 
+    const defaultRates: Record<string, number> = {
+      PET: 1.0,
+      PAPEL: 0.5,
+      CARTON: 0.5,
+      'CARTÓN': 0.5,
+      VIDRIO: 0.3,
+      PLASTICO: 1.0,
+      'PLÁSTICO': 1.0,
+      ALUMINIO: 1.5,
+      TETRAPAK: 0.4,
+      HDPE: 1.0,
+    };
+
     // 2. Fetch rewards from received batches
     if (user.role === 'RECOLECTOR') {
       const batches = await this.prisma.batch.findMany({
@@ -262,17 +276,7 @@ export class WalletsService {
         const mats = (b.materialsActual as Record<string, number>) || {};
         let batchTotal = 0;
         for (const [mat, wt] of Object.entries(mats)) {
-          const rate =
-            {
-              PET: 10,
-              CARTON: 5,
-              CARTÓN: 5,
-              VIDRIO: 3,
-              PLASTICO: 10,
-              PLÁSTICO: 10,
-              ALUMINIO: 15,
-              HDPE: 10,
-            }[mat.toUpperCase()] || 5;
+          const rate = defaultRates[mat.toUpperCase()] || 1.0;
           batchTotal += wt * rate;
         }
 
@@ -317,22 +321,17 @@ export class WalletsService {
       });
 
       for (const r of reqs) {
+        const agreedRates = (r.agreedRates as Record<string, number>) || {};
         if (r.batch?.status === 'RECEIVED') {
           const mats =
             (r.batch.materialsActual as Record<string, number>) || {};
           let batchTotal = 0;
           for (const [mat, wt] of Object.entries(mats)) {
             const rate =
-              {
-                PET: 10,
-                CARTON: 5,
-                CARTÓN: 5,
-                VIDRIO: 3,
-                PLASTICO: 10,
-                PLÁSTICO: 10,
-                ALUMINIO: 15,
-                HDPE: 10,
-              }[mat.toUpperCase()] || 5;
+              agreedRates[mat] ||
+              agreedRates[mat.toUpperCase()] ||
+              defaultRates[mat.toUpperCase()] ||
+              1.0;
             batchTotal += wt * rate;
           }
 
@@ -351,7 +350,7 @@ export class WalletsService {
             recipientWallet:
               r.batch.destinationCenter?.walletAddress ||
               'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
-            txHash: r.batch.txHash || null,
+            txHash: (r as any).txHash || r.batch.txHash || null,
             ipfsCid: r.batch.ipfsCid || null,
             createdAt: r.batch.updatedAt,
           });
@@ -367,30 +366,29 @@ export class WalletsService {
                 ? rawWt
                 : parseFloat(String(rawWt)) || 0;
             const rate =
-              {
-                PET: 10,
-                CARTON: 5,
-                CARTÓN: 5,
-                VIDRIO: 3,
-                PLASTICO: 10,
-                PLÁSTICO: 10,
-                ALUMINIO: 15,
-                HDPE: 10,
-              }[mat.toUpperCase()] || 5;
+              agreedRates[mat] ||
+              agreedRates[mat.toUpperCase()] ||
+              defaultRates[mat.toUpperCase()] ||
+              1.0;
             reqTotal += wt * rate;
           }
-          const rewardAmount = reqTotal * 0.4;
-          if (rewardAmount > 0) {
+          const isDonation = (r as any).isDonation;
+          const rewardAmount = isDonation
+            ? 0
+            : Number((r as any).householdRewardEarned) || reqTotal * 0.4;
+          if (rewardAmount > 0 || isDonation) {
             txs.push({
               id: r.id,
-              type: 'RECOMPENSA_RECICLAJE',
+              type: isDonation ? 'DONACION_ECOLOGICA' : 'RECOMPENSA_RECICLAJE',
               amount: Number(rewardAmount.toFixed(2)),
               direction: 'IN',
-              recipientName: 'Sistema Livora (LIVOs)',
+              recipientName: isDonation
+                ? 'Donación Ecológica (0 LIVOs)'
+                : 'Sistema Livora (LIVOs)',
               recipientWallet:
                 r.collector?.walletAddress ||
                 'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB',
-              txHash: null,
+              txHash: (r as any).txHash || null,
               ipfsCid: null,
               createdAt: r.updatedAt,
             });

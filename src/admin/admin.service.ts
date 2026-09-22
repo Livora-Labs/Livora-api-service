@@ -5,6 +5,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,7 +13,9 @@ import {
   BLOCKCHAIN_QUEUE,
   BLOCKCHAIN_DLQ,
 } from '../blockchain/blockchain.constants';
+import { BlockchainService } from '../blockchain/services/blockchain.service';
 import { StellarRpcManagerService } from '../blockchain/services/stellar-rpc-manager.service';
+import { CryptoUtil } from '../common/utils/crypto.util';
 import {
   AuditLogBufferService,
   AuditLogQueryParams,
@@ -42,15 +45,23 @@ export class AdminService {
     private readonly stellarRpcManager?: StellarRpcManagerService,
     @Optional()
     private readonly auditLogBuffer?: AuditLogBufferService,
+    @Optional()
+    private readonly blockchainService?: BlockchainService,
+    @Optional()
+    private readonly configService?: ConfigService,
   ) {}
 
   async createKycApplication(userId: string, dto: CreateKycApplicationDto) {
-    if (dto.selfieUrl) {
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { profilePhotoUrl: dto.selfieUrl },
-      }).catch(() => {});
-    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        profilePhotoUrl: dto.selfieUrl ?? undefined,
+        dniDocumentNumber: dto.documentNumber ?? undefined,
+        dniPhotoUrl: dto.documentUrl ?? undefined,
+        selfiePhotoUrl: dto.selfieUrl ?? undefined,
+        kycStatus: 'PENDING',
+      },
+    }).catch(() => {});
 
     return this.prisma.kycApplication.create({
       data: {
@@ -215,13 +226,15 @@ export class AdminService {
       include: { user: true },
     });
 
-    if (!kycApp) {
-      throw new NotFoundException(
-        'Solicitud KYC no encontrada para este usuario',
-      );
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
     }
 
-    const currentRetry = kycApp.retryCount ?? 0;
+    const currentRetry = kycApp?.retryCount ?? 0;
     let newStatus = dto.status;
     let incrementRetry = currentRetry;
 
@@ -232,32 +245,72 @@ export class AdminService {
       }
     }
 
-    const updatedApp = await this.prisma.kycApplication.update({
-      where: { id: kycApp.id },
-      data: {
-        status: newStatus,
-        observationNotes: dto.observationNotes ?? kycApp.observationNotes,
-        retryCount: incrementRetry,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            role: true,
-            isActive: true,
+    let updatedApp: any = null;
+    if (kycApp) {
+      updatedApp = await this.prisma.kycApplication.update({
+        where: { id: kycApp.id },
+        data: {
+          status: newStatus,
+          observationNotes: dto.observationNotes ?? kycApp.observationNotes,
+          retryCount: incrementRetry,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              role: true,
+              isActive: true,
+            },
           },
         },
-      },
-    });
+      });
+    }
 
-    // Activar o suspender usuario según el estado KYC
+    // Activar o suspender usuario según el estado KYC y patrocinar cuenta en Stellar
     if (newStatus === 'APPROVED') {
-      const updateData: any = { isActive: true };
-      if (kycApp.user?.role === 'RECOLECTOR' && kycApp.selfieUrl) {
+      const updateData: any = {
+        isActive: true,
+        kycStatus: 'APPROVED',
+        kycVerifiedAt: new Date(),
+      };
+      if (user.role === 'RECOLECTOR' && kycApp?.selfieUrl) {
         updateData.profilePhotoUrl = kycApp.selfieUrl;
       }
+
+      // Patrocinar cuenta Stellar (Sponsored Reserves CAP-0033)
+      if (user.walletAddress && !user.isWalletSponsored && this.blockchainService) {
+        try {
+          let decryptedSecret: string | undefined;
+          if (user.encryptedPrivateKey) {
+            const encryptionKey =
+              this.configService?.get<string>('WALLET_ENCRYPTION_KEY') ||
+              this.configService?.get<string>('ENCRYPTION_KEY') ||
+              process.env.WALLET_ENCRYPTION_KEY ||
+              process.env.ENCRYPTION_KEY;
+            if (encryptionKey) {
+              decryptedSecret = CryptoUtil.decrypt(
+                user.encryptedPrivateKey,
+                encryptionKey,
+              );
+            }
+          }
+          this.logger.log(
+            `Patrocinando cuenta Stellar para usuario ${user.id} (${user.walletAddress})...`,
+          );
+          await this.blockchainService.sponsorAccountCreation(
+            user.walletAddress,
+            decryptedSecret,
+          );
+          updateData.isWalletSponsored = true;
+        } catch (sponsorErr: any) {
+          this.logger.error(
+            `Error al patrocinar cuenta Stellar para usuario ${userId}: ${sponsorErr.message}`,
+          );
+        }
+      }
+
       await this.prisma.user.update({
         where: { id: userId },
         data: updateData,
@@ -265,11 +318,25 @@ export class AdminService {
     } else if (newStatus === 'REJECTED') {
       await this.prisma.user.update({
         where: { id: userId },
-        data: { isActive: false },
+        data: {
+          isActive: user.role === 'RECOLECTOR' ? false : user.isActive,
+          kycStatus: 'REJECTED',
+          kycRejectionReason:
+            dto.observationNotes || 'Rechazado en revisión administrativa',
+        },
+      });
+    } else if (newStatus === 'OBSERVED') {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          kycStatus: 'OBSERVED',
+          kycRejectionReason:
+            dto.observationNotes || 'Observado en revisión administrativa',
+        },
       });
     }
 
-    return updatedApp;
+    return updatedApp || { userId, status: newStatus };
   }
 
   async updateUserStatus(userId: string, dto: UpdateUserStatusDto) {

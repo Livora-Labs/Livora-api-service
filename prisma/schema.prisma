@@ -30,6 +30,13 @@ model User {
   email               String     @unique
   role                Role
   userStatus          UserStatus @default(ACTIVE)
+  kycStatus           KycStatus  @default(UNVERIFIED)
+  dniDocumentNumber   String?
+  dniPhotoUrl         String?
+  selfiePhotoUrl      String?
+  kycRejectionReason  String?
+  kycVerifiedAt       DateTime?
+  isWalletSponsored   Boolean    @default(false)
   profilePhotoUrl     String?
   walletAddress       String?    @unique
   encryptedPrivateKey String?
@@ -122,11 +129,14 @@ model CollectionRequest {
   arrivedAt          DateTime?
   cancellationFeePen Decimal?       @db.Decimal(12, 2)
   noShowFeePen       Decimal?       @db.Decimal(12, 2)
-  rejectionReason    String?
-  rejectionPhotos    Json?
-  auctionExpiresAt   DateTime?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  rejectionReason       String?
+  rejectionPhotos       Json?
+  auctionExpiresAt      DateTime?
+  isDonation            Boolean        @default(false)
+  householdRewardEarned Decimal        @default(0.0000) @db.Decimal(14, 4)
+  txHash                String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
   household      User        @relation("HouseholdRequests", fields: [householdId], references: [id])
   collector      User?       @relation("CollectorRequests", fields: [collectorId], references: [id])
@@ -233,6 +243,7 @@ model ConsolidatedBatch {
 }
 
 enum KycStatus {
+  UNVERIFIED
   PENDING
   OBSERVED
   IN_REVIEW
@@ -773,5 +784,6 @@ model DisputeCase {
   @@index([status])
   @@map("dispute_cases")
 }
+
 
 

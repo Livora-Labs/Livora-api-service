@@ -419,6 +419,7 @@ export class AuthService {
         email: data.user.email,
         role: userProfile?.role,
         walletAddress: userProfile?.walletAddress,
+        kycStatus: userProfile?.kycStatus || 'UNVERIFIED',
       },
     };
   }
@@ -523,6 +524,7 @@ export class AuthService {
             email: data.user.email,
             role: userProfile?.role,
             walletAddress: userProfile?.walletAddress,
+            kycStatus: userProfile?.kycStatus || 'UNVERIFIED',
           }
         : null,
     };

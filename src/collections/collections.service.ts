@@ -26,6 +26,7 @@ import { AvailableCollectionsQueryDto } from './dto/available-collections-query.
 import { RateCollectionDto } from './dto/rate-collection.dto';
 import { EditCollectionRequestDto } from './dto/edit-collection-request.dto';
 import { BatchStatus, RequestStatus, Role, Prisma } from '@prisma/client';
+import { Keypair } from '@stellar/stellar-sdk';
 import { PaginatedResultDto } from '../common/dto/paginated-result.dto';
 
 @Injectable()
@@ -110,6 +111,14 @@ export class CollectionsService {
       photoUrl = this.ipfsService.getGatewayUrl(photoUrl);
     }
 
+    const householdUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, kycStatus: true },
+    });
+    const isDonation =
+      (dto as any).isDonation === true ||
+      householdUser?.kycStatus !== 'APPROVED';
+
     const assignmentMode = dto.assignmentMode === 'AUCTION' ? 'AUCTION' : 'AUTOMATIC';
     const status =
       assignmentMode === 'AUCTION'
@@ -132,6 +141,7 @@ export class CollectionsService {
         photoUrl,
         householdId: userId,
         auctionExpiresAt,
+        isDonation,
       },
       include: {
         household: {
@@ -807,59 +817,70 @@ export class CollectionsService {
           );
         }
 
-        // Calcular garantía requerida en EcoTokens: 50% del valor estimado total (40% Hogar + 10% Livora)
-        const agreedRates = (collectionRequest.agreedRates as Record<string, number>) || {};
-        const items = (collectionRequest.itemsEstimated as Record<string, number>) || {};
-        let totalEstimatedPenn = 0;
-
-        for (const [mat, rawWeight] of Object.entries(items)) {
-          const weight = typeof rawWeight === 'number' ? rawWeight : parseFloat(String(rawWeight)) || 0;
-          const rate = agreedRates[mat] || agreedRates[mat.toUpperCase()] || 1.0;
-          totalEstimatedPenn += weight * rate;
-        }
-
-        const requiredEscrow = parseFloat((totalEstimatedPenn * 0.50).toFixed(2));
-
-        // Consultar saldo disponible del recolector
-        let totalBalance = 0;
+        // Verificar que el recolector tenga KYC aprobado antes de salir a ruta
         const collector = await this.prisma.user.findUnique({
           where: { id: userId },
         });
 
-        if (collector?.walletAddress) {
-          try {
-            const balStr = await this.blockchainService.getBalance(collector.walletAddress);
-            totalBalance = parseFloat(balStr) || 0;
-          } catch {
-            totalBalance = 0;
-          }
-        }
-
-        // Si no hay saldo on-chain, sumar depósitos Izipay completados como fallback
-        if (totalBalance === 0) {
-          const payments = await this.prisma.paymentTransaction.findMany({
-            where: { userId, status: 'COMPLETED' },
-            select: { tokenAmount: true },
-          });
-          totalBalance = payments.reduce((sum, p) => sum + Number(p.tokenAmount), 0);
-        }
-
-        // Sumar garantías activas actualmente retenidas
-        const activeEscrows = await this.prisma.collectionRequest.aggregate({
-          where: {
-            collectorId: userId,
-            status: RequestStatus.ACCEPTED,
-          },
-          _sum: { escrowLocked: true },
-        });
-
-        const currentLocked = Number(activeEscrows._sum.escrowLocked || 0);
-        const freeBalance = Math.max(0, totalBalance - currentLocked);
-
-        if (freeBalance < requiredEscrow) {
-          throw new BadRequestException(
-            `Saldo insuficiente en EcoTokens. Se requiere una garantía de ${requiredEscrow.toFixed(2)} ECO (40% Hogar + 10% Livora), pero tu saldo libre es de ${freeBalance.toFixed(2)} ECO. Por favor recarga tu saldo vía Izipay.`,
+        if (collector?.kycStatus !== 'APPROVED') {
+          throw new ForbiddenException(
+            'Tu cuenta de recolector debe estar verificada administrativamente (KYC aprobado) antes de poder aceptar recolecciones en campo.',
           );
+        }
+
+        let requiredEscrow = 0;
+        if (!collectionRequest.isDonation) {
+          // Calcular garantía requerida en EcoTokens: 50% del valor estimado total (40% Hogar + 10% Livora)
+          const agreedRates = (collectionRequest.agreedRates as Record<string, number>) || {};
+          const items = (collectionRequest.itemsEstimated as Record<string, number>) || {};
+          let totalEstimatedPenn = 0;
+
+          for (const [mat, rawWeight] of Object.entries(items)) {
+            const weight = typeof rawWeight === 'number' ? rawWeight : parseFloat(String(rawWeight)) || 0;
+            const rate = agreedRates[mat] || agreedRates[mat.toUpperCase()] || 1.0;
+            totalEstimatedPenn += weight * rate;
+          }
+
+          requiredEscrow = parseFloat((totalEstimatedPenn * 0.50).toFixed(2));
+
+          // Consultar saldo disponible del recolector
+          let totalBalance = 0;
+
+          if (collector?.walletAddress) {
+            try {
+              const balStr = await this.blockchainService.getBalance(collector.walletAddress);
+              totalBalance = parseFloat(balStr) || 0;
+            } catch {
+              totalBalance = 0;
+            }
+          }
+
+          // Si no hay saldo on-chain, sumar depósitos Izipay completados como fallback
+          if (totalBalance === 0) {
+            const payments = await this.prisma.paymentTransaction.findMany({
+              where: { userId, status: 'COMPLETED' },
+              select: { tokenAmount: true },
+            });
+            totalBalance = payments.reduce((sum, p) => sum + Number(p.tokenAmount), 0);
+          }
+
+          // Sumar garantías activas actualmente retenidas
+          const activeEscrows = await this.prisma.collectionRequest.aggregate({
+            where: {
+              collectorId: userId,
+              status: RequestStatus.ACCEPTED,
+            },
+            _sum: { escrowLocked: true },
+          });
+
+          const currentLocked = Number(activeEscrows._sum.escrowLocked || 0);
+          const freeBalance = Math.max(0, totalBalance - currentLocked);
+
+          if (freeBalance < requiredEscrow) {
+            throw new BadRequestException(
+              `Saldo insuficiente en LIVOs. Se requiere una garantía de ${requiredEscrow.toFixed(2)} LIVO (40% Hogar + 10% Livora), pero tu saldo libre es de ${freeBalance.toFixed(2)} LIVO. Por favor recarga tu saldo vía Izipay.`,
+            );
+          }
         }
 
         // Buscar o crear sub-lote OPEN para la combinación (recolector + centro de acopio comprador)
@@ -1049,8 +1070,9 @@ export class CollectionsService {
         totalActualValue += weight * rate;
       }
 
-      const hogarAmount = parseFloat((totalActualValue * 0.40).toFixed(2));
-      const treasuryAmount = parseFloat((totalActualValue * 0.10).toFixed(2));
+      const isDonation = collectionRequest.isDonation;
+      const hogarAmount = isDonation ? 0.00 : parseFloat((totalActualValue * 0.40).toFixed(2));
+      const treasuryAmount = isDonation ? 0.00 : parseFloat((totalActualValue * 0.10).toFixed(2));
 
       const householdUser = collectionRequest.household;
       const collectorUser = collectionRequest.collector;
@@ -1071,36 +1093,69 @@ export class CollectionsService {
         );
       }
 
-      // Transferir 40% al Hogar en EcoTokens
-      if (collectorUser?.encryptedPrivateKey && householdUser?.walletAddress && hogarAmount > 0) {
-        try {
-          const privKey = CryptoUtil.decrypt(collectorUser.encryptedPrivateKey, encryptionKey);
-          await this.blockchainService.executeSubsidizedTransfer(
-            privKey,
-            householdUser.walletAddress,
-            hogarAmount,
-          );
-        } catch (err: any) {
-          this.logger.warn(`Transferencia subsidiada a Hogar: ${err.message}`);
+      let txHash: string | null = null;
+
+      // Acreditar 40% al Hogar en LIVOs (Stellar Soroban) solo si no es donación
+      if (!isDonation && householdUser?.walletAddress && hogarAmount > 0) {
+        let creditedOnChain = false;
+        if (collectorUser?.encryptedPrivateKey && encryptionKey) {
+          try {
+            const privKey = CryptoUtil.decrypt(collectorUser.encryptedPrivateKey, encryptionKey);
+            const keypair = Keypair.fromSecret(privKey);
+            const balStr = await this.blockchainService.getBalance(keypair.publicKey());
+            if (parseFloat(balStr) >= hogarAmount) {
+              const transferRes = await this.blockchainService.executeSubsidizedTransfer(
+                privKey,
+                householdUser.walletAddress,
+                hogarAmount,
+              );
+              txHash = transferRes?.hash || null;
+              creditedOnChain = true;
+            }
+          } catch (err: any) {
+            this.logger.warn(`Transferencia on-chain desde recolector omitida: ${err.message}. Acreditando vía Minter oficial.`);
+          }
+        }
+
+        // Si el recolector no tenía fondos on-chain o su cuenta no está fondeada en Stellar:
+        // El Minter oficial de Livora (Worker Keypair) acuña los LIVOs al Hogar
+        if (!creditedOnChain) {
+          try {
+            this.logger.log(`Acuñando ${hogarAmount} LIVOs hacia Hogar ${householdUser.walletAddress} vía Minter de Livora`);
+            const mintRes = await this.blockchainService.mintEcoTokens(
+              householdUser.walletAddress,
+              hogarAmount,
+            );
+            txHash = mintRes?.hash || null;
+            creditedOnChain = true;
+          } catch (err: any) {
+            this.logger.error(`Error al acuñar LIVOs para el Hogar: ${err.message}`);
+          }
         }
       }
 
-      // Transferir 10% a Tesorería de Livora en EcoTokens
+      // Transferir 10% a Tesorería de Livora en LIVOs si recolector tiene fondos on-chain y no es donación
       if (
+        !isDonation &&
         collectorUser?.encryptedPrivateKey &&
         treasuryWallet &&
         treasuryAmount > 0 &&
-        treasuryWallet !== collectorUser.walletAddress
+        treasuryWallet !== collectorUser.walletAddress &&
+        encryptionKey
       ) {
         try {
           const privKey = CryptoUtil.decrypt(collectorUser.encryptedPrivateKey, encryptionKey);
-          await this.blockchainService.executeSubsidizedTransfer(
-            privKey,
-            treasuryWallet,
-            treasuryAmount,
-          );
+          const keypair = Keypair.fromSecret(privKey);
+          const balStr = await this.blockchainService.getBalance(keypair.publicKey());
+          if (parseFloat(balStr) >= treasuryAmount) {
+            await this.blockchainService.executeSubsidizedTransfer(
+              privKey,
+              treasuryWallet,
+              treasuryAmount,
+            );
+          }
         } catch (err: any) {
-          this.logger.warn(`Transferencia subsidiada a Tesorería: ${err.message}`);
+          this.logger.warn(`Transferencia a Tesorería omitida: ${err.message}`);
         }
       }
 
@@ -1130,7 +1185,13 @@ export class CollectionsService {
       // Actualización atómica condicional anti-race condition
       const updatedCount = await this.prisma.$executeRaw`
         UPDATE collection_requests
-        SET status = 'COMPLETED'::"RequestStatus", "batchId" = ${targetBatchId}::uuid, "actualWeights" = ${JSON.stringify(actualWeights)}::jsonb, "escrowLocked" = 0, "updatedAt" = NOW()
+        SET status = 'COMPLETED'::"RequestStatus",
+            "batchId" = ${targetBatchId}::uuid,
+            "actualWeights" = ${JSON.stringify(actualWeights)}::jsonb,
+            "escrowLocked" = 0,
+            "householdRewardEarned" = ${hogarAmount}::numeric,
+            "txHash" = ${txHash},
+            "updatedAt" = NOW()
         WHERE id = ${id}::uuid AND status IN ('ACCEPTED'::"RequestStatus", 'ARRIVED'::"RequestStatus")
       `;
 
@@ -1148,14 +1209,25 @@ export class CollectionsService {
         },
       });
 
-      this.notificationsService
-        .sendPushNotification(
-          collectionRequest.householdId,
-          'Recolección completada con éxito',
-          `Se han acreditado ${hogarAmount.toFixed(2)} EcoTokens a tu billetera por tu material reciclado.`,
-          { requestId: id },
-        )
-        .catch(() => {});
+      if (isDonation) {
+        this.notificationsService
+          .sendPushNotification(
+            collectionRequest.householdId,
+            'Recolección completada con éxito',
+            `¡Muchas gracias por tu donación ecológica! Tu impacto ambiental ha sido registrado positivamente en Livora.`,
+            { requestId: id },
+          )
+          .catch(() => {});
+      } else {
+        this.notificationsService
+          .sendPushNotification(
+            collectionRequest.householdId,
+            'Recolección completada con éxito',
+            `Se han acreditado ${hogarAmount.toFixed(2)} LIVOs a tu billetera por tu material reciclado.`,
+            { requestId: id },
+          )
+          .catch(() => {});
+      }
 
       return completed!;
     } finally {
@@ -1518,13 +1590,13 @@ export class CollectionsService {
       );
     }
 
-    // Validar ventana de espera de 10 min (600,000 ms) excepto en tests
+    // Validar ventana de espera de 5 min (300,000 ms) excepto en tests
     if (request.arrivedAt && process.env.NODE_ENV !== 'test') {
       const elapsedMs = Date.now() - new Date(request.arrivedAt).getTime();
-      if (elapsedMs < 10 * 60 * 1000) {
-        const remainingMin = Math.ceil((10 * 60 * 1000 - elapsedMs) / 60000);
+      if (elapsedMs < 5 * 60 * 1000) {
+        const remainingMin = Math.ceil((5 * 60 * 1000 - elapsedMs) / 60000);
         throw new BadRequestException(
-          `Debes esperar al menos 10 minutos desde tu llegada antes de reportar inasistencia. Faltan aprox. ${remainingMin} minuto(s).`,
+          `Debes esperar al menos 5 minutos desde tu llegada antes de reportar inasistencia. Faltan aprox. ${remainingMin} minuto(s).`,
         );
       }
     }

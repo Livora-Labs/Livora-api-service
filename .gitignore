@@ -32,3 +32,6 @@ Thumbs.db
 *.apk
 .env.stellar*
 docker-compose.stellar.yml
+
+dist.tar.gz
+*.tar.gz

@@ -12,12 +12,12 @@ import {
   rpc as StellarRpc,
 } from '@stellar/stellar-sdk';
 import { StellarRpcManagerService } from '../services/stellar-rpc-manager.service';
-import { BLOCKCHAIN_QUEUE } from '../blockchain.constants';
+import { STELLAR_MAINTENANCE_QUEUE } from '../blockchain.constants';
 
 export const TTL_BUMP_JOB_NAME = 'bump-soroban-ledger-ttl';
 export const DEFAULT_EXTEND_TO_LEDGERS = 3110400; // ~6 meses (a 5s por ledger)
 
-@Processor(BLOCKCHAIN_QUEUE)
+@Processor(STELLAR_MAINTENANCE_QUEUE)
 @Injectable()
 export class SorobanTtlBumpWorker extends WorkerHost implements OnModuleInit {
   private readonly logger = new Logger(SorobanTtlBumpWorker.name);
@@ -26,17 +26,17 @@ export class SorobanTtlBumpWorker extends WorkerHost implements OnModuleInit {
     private readonly rpcManager: StellarRpcManagerService,
     private readonly configService: ConfigService,
     @Optional()
-    @InjectQueue(BLOCKCHAIN_QUEUE)
-    private readonly blockchainQueue?: Queue,
+    @InjectQueue(STELLAR_MAINTENANCE_QUEUE)
+    private readonly maintenanceQueue?: Queue,
   ) {
     super();
   }
 
   async onModuleInit() {
-    if (this.blockchainQueue) {
+    if (this.maintenanceQueue) {
       try {
         // Registrar trabajo recurrente diario a las 02:00 UTC
-        await this.blockchainQueue.add(
+        await this.maintenanceQueue.add(
           TTL_BUMP_JOB_NAME,
           { extendTo: DEFAULT_EXTEND_TO_LEDGERS },
           {

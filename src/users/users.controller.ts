@@ -46,6 +46,7 @@ export class UsersController {
       email: u.email,
       role: u.role,
       walletAddress: u.walletAddress,
+      kycStatus: u.kycStatus,
       createdAt: u.createdAt,
       name: u.name,
       phone: u.phone,

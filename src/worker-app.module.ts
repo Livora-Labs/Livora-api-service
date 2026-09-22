@@ -11,9 +11,11 @@ import { StellarRpcManagerService } from './blockchain/services/stellar-rpc-mana
 import { BlockchainProcessor } from './blockchain/blockchain.processor';
 import { SorobanTtlBumpWorker } from './blockchain/workers/soroban-ttl-bump.worker';
 import { RedemptionExpirationWorker } from './stores/workers/redemption-expiration.worker';
+import { CollectionsTimeoutWorker } from './collections/workers/collections-timeout.worker';
 import {
   BLOCKCHAIN_QUEUE,
   BLOCKCHAIN_DLQ,
+  STELLAR_MAINTENANCE_QUEUE,
 } from './blockchain/blockchain.constants';
 import { NotificationsService } from './notifications/notifications.service';
 
@@ -66,12 +68,25 @@ import { NotificationsService } from './notifications/notifications.service';
           removeOnFail: false,
         },
       },
+      {
+        name: STELLAR_MAINTENANCE_QUEUE,
+        defaultJobOptions: {
+          attempts: 5,
+          backoff: {
+            type: 'exponential',
+            delay: 5000,
+          },
+          removeOnComplete: true,
+          removeOnFail: false,
+        },
+      },
     ),
   ],
   providers: [
     BlockchainProcessor,
     SorobanTtlBumpWorker,
     RedemptionExpirationWorker,
+    CollectionsTimeoutWorker,
     IpfsService,
     BlockchainService,
     StellarSequenceManager,
