@@ -218,7 +218,7 @@ export class BatchesService {
       );
     }
 
-    return this.prisma.batch.update({
+    const updated = await this.prisma.batch.update({
       where: { id },
       data: {
         destinationCenterId: dto.destinationCenterId,
@@ -227,10 +227,34 @@ export class BatchesService {
       include: {
         requests: true,
         destinationCenter: {
-          select: { id: true, email: true },
+          select: { id: true, email: true, name: true },
         },
       },
     });
+
+    // Notificar al Centro de Acopio y al Recolector en tiempo real
+    this.websocketsService?.emitUserEvent(
+      dto.destinationCenterId,
+      'batch:dispatched',
+      updated,
+    );
+    this.websocketsService?.emitUserEvent(collectorId, 'batch:updated', updated);
+
+    // Enviar push notification al Centro de Acopio
+    this.notificationsService
+      ?.sendPushNotification(
+        dto.destinationCenterId,
+        'Nuevo lote en camino',
+        'Un recolector ha despachado un lote hacia tu centro de acopio.',
+        {
+          batchId: id,
+          status: 'IN_TRANSIT',
+          channelId: 'livora_collections_urgent',
+        },
+      )
+      .catch(() => {});
+
+    return updated;
   }
 
   /**
@@ -335,6 +359,17 @@ export class BatchesService {
         },
       });
 
+      this.websocketsService?.emitUserEvent(
+        batch.collectorId,
+        'batch:updated',
+        updatedBatch,
+      );
+      this.websocketsService?.emitUserEvent(
+        centerId,
+        'batch:updated',
+        updatedBatch,
+      );
+
       return {
         status: BatchStatus.FLAGGED_FOR_REVIEW,
         batchId: updatedBatch.id,
@@ -386,6 +421,17 @@ export class BatchesService {
         attempts: 5,
         backoff: { type: 'exponential', delay: 2000 },
       },
+    );
+
+    this.websocketsService?.emitUserEvent(
+      updatedBatch.collectorId,
+      'batch:updated',
+      updatedBatch,
+    );
+    this.websocketsService?.emitUserEvent(
+      centerId,
+      'batch:updated',
+      updatedBatch,
     );
 
     // c) Responde de inmediato al cliente con HTTP 202 Accepted
@@ -610,6 +656,22 @@ export class BatchesService {
       )
       .catch(() => {});
 
+    this.websocketsService?.emitUserEvent(
+      batch.collectorId,
+      'batch:fiat-settled',
+      { batchId: updated.id, fiatSettled: true },
+    );
+    this.websocketsService?.emitUserEvent(
+      batch.collectorId,
+      'batch:updated',
+      updated,
+    );
+    this.websocketsService?.emitUserEvent(
+      centerUserId,
+      'batch:updated',
+      updated,
+    );
+
     return {
       message: 'Pago fiat registrado exitosamente',
       batchId: updated.id,
@@ -674,7 +736,18 @@ export class BatchesService {
           { batchId, status: 'DISPUTED' },
         )
         .catch(() => {});
+      this.websocketsService?.emitUserEvent(
+        batch.destinationCenterId,
+        'batch:updated',
+        updated,
+      );
     }
+
+    this.websocketsService?.emitUserEvent(
+      collectorUserId,
+      'batch:updated',
+      updated,
+    );
 
     return updated;
   }
@@ -805,6 +878,11 @@ export class BatchesService {
           { batchId },
         )
         .catch(() => {});
+      this.websocketsService?.emitUserEvent(
+        oldCenterId,
+        'batch:updated',
+        updatedBatch,
+      );
     }
 
     this.notificationsService
@@ -815,6 +893,21 @@ export class BatchesService {
         { batchId },
       )
       .catch(() => {});
+    this.websocketsService?.emitUserEvent(
+      newCenterId,
+      'batch:dispatched',
+      updatedBatch,
+    );
+    this.websocketsService?.emitUserEvent(
+      newCenterId,
+      'batch:updated',
+      updatedBatch,
+    );
+    this.websocketsService?.emitUserEvent(
+      collectorId,
+      'batch:updated',
+      updatedBatch,
+    );
 
     return updatedBatch;
   }

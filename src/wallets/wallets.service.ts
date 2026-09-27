@@ -92,22 +92,16 @@ export class WalletsService {
           householdId: userId,
           status: 'COMPLETED',
         },
-        include: { batch: true },
+        select: {
+          householdRewardEarned: true,
+          actualWeights: true,
+          itemsEstimated: true,
+          agreedRates: true,
+        },
       });
       for (const r of reqs) {
-        if (r.batch?.status === 'RECEIVED') {
-          const mats =
-            (r.batch.materialsActual as Record<string, number>) || {};
-          let batchTotal = 0;
-          for (const [mat, wt] of Object.entries(mats)) {
-            const rate = await this.blockchainService.getMaterialRate(mat);
-            batchTotal += wt * rate;
-          }
-          const siblings = await this.prisma.collectionRequest.count({
-            where: { batchId: r.batchId },
-          });
-          const divisor = siblings || 1;
-          totalEarned += (batchTotal * 0.8) / divisor;
+        if (r.householdRewardEarned != null && Number(r.householdRewardEarned) > 0) {
+          totalEarned += Number(r.householdRewardEarned);
         } else {
           const actualWeights =
             (r.actualWeights as Record<string, number>) ||
@@ -117,7 +111,10 @@ export class WalletsService {
           let reqTotal = 0;
           for (const [mat, rawWt] of Object.entries(actualWeights)) {
             const wt = typeof rawWt === 'number' ? rawWt : parseFloat(String(rawWt)) || 0;
-            const rate = agreedRates[mat] || agreedRates[mat.toUpperCase()] || (await this.blockchainService.getMaterialRate(mat));
+            const rate =
+              agreedRates[mat] ||
+              agreedRates[mat.toUpperCase()] ||
+              (await this.blockchainService.getMaterialRate(mat));
             reqTotal += wt * rate;
           }
           totalEarned += reqTotal * 0.40;
@@ -191,6 +188,23 @@ export class WalletsService {
       dto.toAddress,
       dto.amount,
     );
+
+    // Persistir la transferencia P2P en la BD para el historial de ambas partes
+    const receiverUser = await this.prisma.user.findFirst({
+      where: { walletAddress: dto.toAddress },
+    });
+
+    await this.prisma.walletTransfer.create({
+      data: {
+        senderUserId: userId,
+        receiverUserId: receiverUser?.id ?? null,
+        fromAddress: user.walletAddress!,
+        toAddress: dto.toAddress,
+        amount: dto.amount,
+        txHash: receipt.hash,
+        status: 'COMPLETED',
+      },
+    });
 
     return {
       status: 'PROCESSING',
@@ -395,6 +409,55 @@ export class WalletsService {
           }
         }
       }
+    }
+
+    // 3. Transferencias P2P (enviadas y recibidas) — para todos los roles
+    const sentTransfers = await this.prisma.walletTransfer.findMany({
+      where: { senderUserId: userId },
+      include: {
+        receiver: { select: { name: true, email: true, walletAddress: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    for (const t of sentTransfers) {
+      txs.push({
+        id: t.id,
+        type: 'TRANSFERENCIA_P2P',
+        amount: Number(t.amount),
+        direction: 'OUT',
+        recipientName:
+          t.receiver?.name ||
+          t.receiver?.email?.split('@')[0] ||
+          t.toAddress.slice(0, 8) + '...',
+        recipientWallet: t.toAddress,
+        txHash: t.txHash || null,
+        createdAt: t.createdAt,
+      });
+    }
+
+    const receivedTransfers = await this.prisma.walletTransfer.findMany({
+      where: { receiverUserId: userId },
+      include: {
+        sender: { select: { name: true, email: true, walletAddress: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    for (const t of receivedTransfers) {
+      txs.push({
+        id: t.id + '_recv',
+        type: 'TRANSFERENCIA_P2P',
+        amount: Number(t.amount),
+        direction: 'IN',
+        recipientName:
+          t.sender?.name ||
+          t.sender?.email?.split('@')[0] ||
+          t.fromAddress.slice(0, 8) + '...',
+        recipientWallet: t.fromAddress,
+        txHash: t.txHash || null,
+        createdAt: t.createdAt,
+      });
     }
 
     // Filter by direction if specified

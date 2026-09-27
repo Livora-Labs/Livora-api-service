@@ -80,6 +80,20 @@ export class CreateCollectionDto {
   @IsString()
   description?: string;
 
+  @ApiPropertyOptional({
+    example: 'Av. Larco 123, Miraflores',
+    description: 'Dirección textual congelada para el recojo',
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value && typeof value === 'object' && 'value' in value) {
+      return value.value;
+    }
+    return value;
+  })
+  @IsString()
+  address?: string;
+
   @ApiProperty({ example: 4.6097, description: 'Latitud GPS' })
   @IsNotEmpty({ message: 'latitude es requerida' })
   @Transform(({ value }) => {

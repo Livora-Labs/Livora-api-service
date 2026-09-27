@@ -118,6 +118,23 @@ export class UsersController {
     return this.usersService.registerDeviceToken(userId, dto);
   }
 
+  @Delete('me/device-tokens')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Eliminar token de dispositivo FCM al cerrar sesión (Logout)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Device token desregistrado exitosamente',
+  })
+  async unregisterDeviceToken(
+    @CurrentUser('id') userId: string,
+    @Body('token') token?: string,
+  ) {
+    await this.usersService.unregisterDeviceToken(userId, token);
+    return { success: true, message: 'Device token desregistrado exitosamente' };
+  }
+
   @Delete('me')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

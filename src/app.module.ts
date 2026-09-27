@@ -26,6 +26,7 @@ import { BetaModule } from './beta/beta.module';
 import { ComplaintsModule } from './complaints/complaints.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { PaymentsModule } from './payments/payments.module';
+import { RoutingModule } from './routing/routing.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { RedisModule } from './redis/redis.module';
@@ -46,6 +47,7 @@ import { AuditLogBufferService } from './common/services/audit-log-buffer.servic
         connection: {
           host: configService.get<string>('REDIS_HOST', 'localhost'),
           port: configService.get<number>('REDIS_PORT', 6379),
+          ...(configService.get<string>('REDIS_PASSWORD') ? { password: configService.get<string>('REDIS_PASSWORD') } : {}),
           maxRetriesPerRequest: null,
           enableReadyCheck: false,
         },
@@ -81,6 +83,7 @@ import { AuditLogBufferService } from './common/services/audit-log-buffer.servic
     ComplaintsModule,
     UploadsModule,
     PaymentsModule,
+    RoutingModule,
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -145,6 +148,7 @@ import { AuditLogBufferService } from './common/services/audit-log-buffer.servic
         storage: new ThrottlerStorageRedisService({
           host: configService.get<string>('REDIS_HOST', 'localhost'),
           port: configService.get<number>('REDIS_PORT', 6379),
+          ...(configService.get<string>('REDIS_PASSWORD') ? { password: configService.get<string>('REDIS_PASSWORD') } : {}),
         }),
       }),
     }),

@@ -27,6 +27,7 @@ import { AvailableCollectionsQueryDto } from './dto/available-collections-query.
 import { RateCollectionDto } from './dto/rate-collection.dto';
 import { EditCollectionRequestDto } from './dto/edit-collection-request.dto';
 import { UpdateCollectionDto } from './dto/update-collection.dto';
+import { CollectorTelemetryDto } from './dto/collector-telemetry.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -351,6 +352,35 @@ export class CollectionsController {
     @CurrentUser('id') collectorId: string,
   ) {
     return this.collectionsService.reachDestination(id, collectorId);
+  }
+
+  @Patch(':id/arrival')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.RECOLECTOR)
+  @ApiOperation({
+    summary:
+      'Confirmar arribo al domicilio del hogar, apagar sensor y activar PIN (EN_ROUTE -> ARRIVED) (Rol: RECOLECTOR)',
+  })
+  async confirmArrival(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') collectorId: string,
+  ) {
+    return this.collectionsService.reachDestination(id, collectorId);
+  }
+
+  @Patch(':id/location')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.RECOLECTOR)
+  @ApiOperation({
+    summary:
+      'Actualizar telemetría GPS periódica del recolector en ruta y retransmitir por WebSocket (Rol: RECOLECTOR)',
+  })
+  async updateLocation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') collectorId: string,
+    @Body() dto: CollectorTelemetryDto,
+  ) {
+    return this.collectionsService.updateCollectorLocation(id, collectorId, dto);
   }
 
   @Post(':id/no-show')

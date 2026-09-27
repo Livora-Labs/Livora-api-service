@@ -18,6 +18,8 @@ import {
   STELLAR_MAINTENANCE_QUEUE,
 } from './blockchain/blockchain.constants';
 import { NotificationsService } from './notifications/notifications.service';
+import { PUSH_NOTIFICATIONS_QUEUE } from './notifications/notifications.constants';
+import { PushNotificationProcessor } from './notifications/push-notification.processor';
 
 @Module({
   imports: [
@@ -34,6 +36,7 @@ import { NotificationsService } from './notifications/notifications.service';
         connection: {
           host: configService.get<string>('REDIS_HOST', 'localhost'),
           port: configService.get<number>('REDIS_PORT', 6379),
+          password: configService.get<string>('REDIS_PASSWORD'),
           maxRetriesPerRequest: null,
           enableReadyCheck: false,
         },
@@ -80,10 +83,23 @@ import { NotificationsService } from './notifications/notifications.service';
           removeOnFail: false,
         },
       },
+      {
+        name: PUSH_NOTIFICATIONS_QUEUE,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 2000,
+          },
+          removeOnComplete: { count: 200 },
+          removeOnFail: { count: 1000 },
+        },
+      },
     ),
   ],
   providers: [
     BlockchainProcessor,
+    PushNotificationProcessor,
     SorobanTtlBumpWorker,
     RedemptionExpirationWorker,
     CollectionsTimeoutWorker,

@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { initializeApp, App, cert } from 'firebase-admin';
@@ -10,6 +11,11 @@ import { getMessaging } from 'firebase-admin/messaging';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { UpdateNotificationDto } from './dto/update-notification.dto';
+import { WebsocketsService } from '../websockets/websockets.service';
+
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { PUSH_NOTIFICATIONS_QUEUE } from './notifications.constants';
 
 @Injectable()
 export class NotificationsService {
@@ -19,6 +25,10 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    @Optional() private readonly websocketsService?: WebsocketsService,
+    @Optional()
+    @InjectQueue(PUSH_NOTIFICATIONS_QUEUE)
+    private readonly pushQueue?: Queue,
   ) {
     const projectId = this.configService.get<string>('FIREBASE_PROJECT_ID');
     const clientEmail = this.configService.get<string>('FIREBASE_CLIENT_EMAIL');
@@ -114,7 +124,7 @@ export class NotificationsService {
     data?: Record<string, string>,
   ): Promise<void> {
     try {
-      await this.prisma.notification.create({
+      const created = await this.prisma.notification.create({
         data: {
           userId,
           title,
@@ -122,12 +132,81 @@ export class NotificationsService {
           isRead: false,
         },
       });
+
+      // Emite evento en tiempo real por WebSocket al canal privado user:${userId}
+      this.websocketsService?.emitUserEvent(userId, 'notification:created', {
+        id: created.id,
+        title: created.title,
+        message: created.message,
+        createdAt: created.createdAt,
+        isRead: false,
+        data: data || {},
+      });
     } catch (err: any) {
       this.logger.error(
         `Error guardando notificación en la base de datos: ${err.message}`,
       );
     }
 
+    // Desacoplamiento asíncrono con BullMQ: respuesta inmediata en API (<15ms)
+    if (this.pushQueue) {
+      try {
+        await this.pushQueue.add('send-user-push', {
+          type: 'user',
+          userId,
+          title,
+          body,
+          data,
+        });
+        return;
+      } catch (err: any) {
+        this.logger.warn(
+          `Error encolando push en BullMQ (${err.message}). Conmutando a despacho directo.`,
+        );
+      }
+    }
+
+    await this.executePushNotification(userId, title, body, data);
+  }
+
+  /**
+   * Encola o despacha una notificación a un tópico FCM (ej: zone_lima, role_recolector)
+   */
+  async sendTopicNotification(
+    topic: string,
+    title: string,
+    body: string,
+    data?: Record<string, string>,
+  ): Promise<void> {
+    if (this.pushQueue) {
+      try {
+        await this.pushQueue.add('send-topic-push', {
+          type: 'topic',
+          topic,
+          title,
+          body,
+          data,
+        });
+        return;
+      } catch (err: any) {
+        this.logger.warn(
+          `Error encolando topic push en BullMQ (${err.message}). Conmutando a despacho directo.`,
+        );
+      }
+    }
+
+    await this.executeTopicNotification(topic, title, body, data);
+  }
+
+  /**
+   * Ejecución real de despacho FCM a tokens de usuario (invocado por el Worker BullMQ o en fallback)
+   */
+  async executePushNotification(
+    userId: string,
+    title: string,
+    body: string,
+    data?: Record<string, string>,
+  ): Promise<void> {
     // Consultar todos los tokens de dispositivo registrados para el usuario
     const deviceTokens = await this.prisma.deviceToken.findMany({
       where: { userId },
@@ -159,40 +238,134 @@ export class NotificationsService {
       return;
     }
 
-    // Despachar a cada token registrado
-    for (const token of allTokens) {
+    const tokenArray = Array.from(allTokens);
+    const channelId = data?.channelId || 'livora_collections_urgent';
+    const sound =
+      data?.sound ||
+      (channelId === 'livora_wallet_ledger'
+        ? 'transaction_tone.mp3'
+        : channelId === 'livora_collections_urgent'
+          ? 'alert_tone.mp3'
+          : 'default');
+
+    // Despacho masivo optimizado mediante sendEachForMulticast en lotes de 500
+    const chunkSize = 500;
+    for (let i = 0; i < tokenArray.length; i += chunkSize) {
+      const chunk = tokenArray.slice(i, i + chunkSize);
       try {
-        await getMessaging(this.firebaseApp).send({
-          token,
+        const response = await getMessaging(this.firebaseApp).sendEachForMulticast({
+          tokens: chunk,
           notification: { title, body },
-          data,
+          data: data || {},
+          android: {
+            priority: 'high',
+            notification: {
+              channelId,
+              sound,
+              clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+            },
+          },
+          apns: {
+            payload: {
+              aps: {
+                sound,
+                category: data?.type || 'LIVORA_NOTIFICATION',
+              },
+            },
+          },
         });
+
         this.logger.log(
-          `Notificación Push FCM enviada con éxito al dispositivo (${token.substring(0, 10)}...) del usuario ${userId}`,
+          `[FCM Multicast] Éxito: ${response.successCount}, Fallos: ${response.failureCount} para usuario ${userId}`,
         );
-      } catch (err: any) {
-        this.logger.error(
-          `Error enviando notificación Push a ${userId} en token ${token}: ${err.message}`,
-        );
-        // Limpieza automática de tokens desregistrados / inválidos
-        if (
-          err.code === 'messaging/registration-token-not-registered' ||
-          err.code === 'messaging/invalid-registration-token' ||
-          err.message?.includes('not registered')
-        ) {
-          this.logger.warn(
-            `Eliminando DeviceToken obsoleto/inválido: ${token}`,
-          );
-          await this.prisma.deviceToken
-            .deleteMany({ where: { token } })
-            .catch(() => {});
-          if (user?.fcmToken === token) {
-            await this.prisma.user
-              .update({ where: { id: userId }, data: { fcmToken: null } })
+
+        // Limpieza reactiva de tokens inválidos o desinstalados
+        if (response.failureCount > 0) {
+          const tokensToDelete: string[] = [];
+          response.responses.forEach((resp, idx) => {
+            if (!resp.success && resp.error) {
+              const errCode = resp.error.code;
+              if (
+                errCode === 'messaging/registration-token-not-registered' ||
+                errCode === 'messaging/invalid-registration-token' ||
+                resp.error.message?.includes('not registered')
+              ) {
+                tokensToDelete.push(chunk[idx]);
+              }
+            }
+          });
+
+          if (tokensToDelete.length > 0) {
+            this.logger.warn(`Eliminando ${tokensToDelete.length} tokens FCM obsoletos`);
+            await this.prisma.deviceToken
+              .deleteMany({ where: { token: { in: tokensToDelete } } })
               .catch(() => {});
+            if (user?.fcmToken && tokensToDelete.includes(user.fcmToken)) {
+              await this.prisma.user
+                .update({ where: { id: userId }, data: { fcmToken: null } })
+                .catch(() => {});
+            }
           }
         }
+      } catch (err: any) {
+        this.logger.error(`Error en sendEachForMulticast para usuario ${userId}: ${err.message}`);
       }
     }
   }
+
+  /**
+   * Ejecución real de despacho a tópico FCM (invocado por el Worker BullMQ o en fallback)
+   */
+  async executeTopicNotification(
+    topic: string,
+    title: string,
+    body: string,
+    data?: Record<string, string>,
+  ): Promise<void> {
+    const cleanTopic = topic.replace(/[^a-zA-Z0-9-_.~%]/g, '_');
+    if (!this.firebaseApp) {
+      this.logger.log(
+        `[FCM Simulación Tópico: ${cleanTopic}] Título: "${title}" | Mensaje: "${body}"`,
+      );
+      return;
+    }
+
+    try {
+      const channelId = data?.channelId || 'livora_collections_urgent';
+      const sound =
+        data?.sound ||
+        (channelId === 'livora_wallet_ledger'
+          ? 'transaction_tone.mp3'
+          : channelId === 'livora_collections_urgent'
+            ? 'alert_tone.mp3'
+            : 'default');
+
+      await getMessaging(this.firebaseApp).send({
+        topic: cleanTopic,
+        notification: { title, body },
+        data: data || {},
+        android: {
+          priority: 'high',
+          notification: {
+            channelId,
+            sound,
+            clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound,
+              category: data?.type || 'LIVORA_NOTIFICATION',
+            },
+          },
+        },
+      });
+
+      this.logger.log(`Notificación emitida al tópico FCM [${cleanTopic}]: "${title}"`);
+    } catch (err: any) {
+      this.logger.error(`Error enviando notificación al tópico FCM ${cleanTopic}: ${err.message}`);
+    }
+  }
 }
+

@@ -289,19 +289,19 @@ export class BlockchainProcessor extends WorkerHost {
         `[Paso D] Enviando notarización ESG on-chain a Soroban para sub-lote ${batchId} (Cero minteo; distribución financiera previa en puerta vía escrow)...`,
       );
       const centerWallet = batchRecord?.destinationCenter?.walletAddress || '';
-      const receipt = await this.blockchainService.notarizeBatchReceipt(
-        batchId,
-        ipfsCid,
-        centerWallet,
-      );
-
-      if (!receipt?.hash) {
-        throw new Error(
-          `No se obtuvo un hash de transacción válido para el lote ${batchId}`,
+      let txHash: string | null = null;
+      try {
+        const receipt = await this.blockchainService.notarizeBatchReceipt(
+          batchId,
+          ipfsCid,
+          centerWallet,
+        );
+        txHash = receipt?.hash || null;
+      } catch (notarizeErr: any) {
+        this.logger.error(
+          `[Notarización Soroban Degradada] Advertencia para lote ${batchId}: ${notarizeErr.message}. Continuando con la acreditación física en almacén...`,
         );
       }
-
-      const txHash = receipt.hash;
 
       // -------------------------------------------------------------------
       // PASO E: Actualizar estado del lote a RECEIVED en PostgreSQL y cargar inventario
@@ -366,15 +366,56 @@ export class BlockchainProcessor extends WorkerHost {
       // -------------------------------------------------------------------
       // PASO F: Notificar al centro de acopio en tiempo real vía WebSockets
       // -------------------------------------------------------------------
-      this.logger.log(
-        `[Paso F] Emitiendo notificación WebSocket 'batch:completed' al centro ${effectiveCenterId}...`,
-      );
       this.websocketsService?.emitBatchCompleted(effectiveCenterId, {
         batchId,
         status: BatchStatus.RECEIVED,
         txHash,
         ipfsCid: this.ipfsService.getGatewayUrl(ipfsCid),
       });
+      // Notificar también a la sala de usuario por idempotencia de conexión
+      this.websocketsService?.emitUserEvent(effectiveCenterId, 'batch:completed', {
+        batchId,
+        status: BatchStatus.RECEIVED,
+        txHash,
+        ipfsCid: this.ipfsService.getGatewayUrl(ipfsCid),
+      });
+      this.websocketsService?.emitUserEvent(effectiveCenterId, 'batch:updated', {
+        batchId,
+        status: BatchStatus.RECEIVED,
+      });
+
+      // Notificar al recolector en tiempo real vía WebSockets
+      if (effectiveCollectorId) {
+        this.websocketsService?.emitUserEvent(
+          effectiveCollectorId,
+          'batch:completed',
+          {
+            batchId,
+            status: BatchStatus.RECEIVED,
+            txHash,
+          },
+        );
+        this.websocketsService?.emitUserEvent(
+          effectiveCollectorId,
+          'batch:updated',
+          {
+            batchId,
+            status: BatchStatus.RECEIVED,
+            txHash,
+          },
+        );
+      }
+
+      // Notificar a todos los hogares participantes en tiempo real vía WebSockets
+      if (Array.isArray(validHouseholdIds)) {
+        for (const hhId of validHouseholdIds) {
+          this.websocketsService?.emitUserEvent(hhId, 'collection:updated', {
+            batchId,
+            status: 'COMPLETED',
+            txHash,
+          });
+        }
+      }
 
       // Notificar al recolector mediante push FCM
       this.notificationsService
@@ -382,7 +423,7 @@ export class BlockchainProcessor extends WorkerHost {
           effectiveCollectorId,
           'Lote procesado y registrado',
           'Tu lote ha sido recibido y pesado por el Centro de Acopio. Notarización registrada en Stellar.',
-          { batchId, txHash },
+          { batchId, txHash: txHash || '' },
         )
         ?.catch(() => {});
 
@@ -394,7 +435,7 @@ export class BlockchainProcessor extends WorkerHost {
               hhId,
               'LIVOs acreditados',
               'El material de tu entrega ha sido pesado y procesado. Tus LIVOs han sido acreditados.',
-              { batchId, txHash },
+              { batchId, txHash: txHash || '' },
             )
             ?.catch(() => {});
         }

@@ -21,6 +21,8 @@ describe('CollectionsController', () => {
     selectBid: jest.fn(),
     claimAutomatic: jest.fn(),
     abandonCollectionRequest: jest.fn(),
+    updateCollectorLocation: jest.fn(),
+    reachDestination: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -308,5 +310,43 @@ describe('CollectionsController', () => {
       expect(result).toEqual(expected);
     });
   });
+
+  describe('updateLocation', () => {
+    it('should call service.updateCollectorLocation with requestId, collectorId and telemetry dto', async () => {
+      const dto = {
+        latitude: -12.1215,
+        longitude: -77.0305,
+        heading: 95.0,
+        speed: 5.5,
+      };
+      const expected = { ok: true, timestamp: Date.now() };
+      mockCollectionsService.updateCollectorLocation.mockResolvedValue(expected);
+
+      const result = await controller.updateLocation('req-1', 'collector-1', dto as any);
+
+      expect(mockCollectionsService.updateCollectorLocation).toHaveBeenCalledWith(
+        'req-1',
+        'collector-1',
+        dto,
+      );
+      expect(result).toEqual(expected);
+    });
+  });
+
+  describe('confirmArrival', () => {
+    it('should call service.reachDestination with requestId and collectorId', async () => {
+      const expected = { id: 'req-1', status: 'ARRIVED', arrivedAt: new Date().toISOString() };
+      mockCollectionsService.reachDestination.mockResolvedValue(expected);
+
+      const result = await controller.confirmArrival('req-1', 'collector-1');
+
+      expect(mockCollectionsService.reachDestination).toHaveBeenCalledWith(
+        'req-1',
+        'collector-1',
+      );
+      expect(result).toEqual(expected);
+    });
+  });
 });
+
 

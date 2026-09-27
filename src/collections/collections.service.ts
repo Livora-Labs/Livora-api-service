@@ -25,6 +25,7 @@ import { SelectBidDto } from './dto/select-bid.dto';
 import { AvailableCollectionsQueryDto } from './dto/available-collections-query.dto';
 import { RateCollectionDto } from './dto/rate-collection.dto';
 import { EditCollectionRequestDto } from './dto/edit-collection-request.dto';
+import { CollectorTelemetryDto } from './dto/collector-telemetry.dto';
 import { BatchStatus, RequestStatus, Role, Prisma } from '@prisma/client';
 import { Keypair } from '@stellar/stellar-sdk';
 import { PaginatedResultDto } from '../common/dto/paginated-result.dto';
@@ -113,11 +114,16 @@ export class CollectionsService {
 
     const householdUser = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, kycStatus: true },
+      select: { id: true, kycStatus: true, address: true },
     });
     const isDonation =
       (dto as any).isDonation === true ||
       householdUser?.kycStatus !== 'APPROVED';
+
+    const effectiveAddress =
+      dto.address && dto.address.trim().length > 0
+        ? dto.address.trim()
+        : (householdUser?.address || 'Ubicación seleccionada');
 
     const assignmentMode = dto.assignmentMode === 'AUCTION' ? 'AUCTION' : 'AUTOMATIC';
     const status =
@@ -136,6 +142,7 @@ export class CollectionsService {
         itemsEstimated: dto.itemsEstimated,
         description: dto.description,
         verificationPin,
+        address: effectiveAddress,
         latitude: dto.latitude,
         longitude: dto.longitude,
         photoUrl,
@@ -211,12 +218,19 @@ export class CollectionsService {
       throw new NotFoundException('Solicitud de recolección no encontrada');
     }
 
-    if (request.status !== RequestStatus.PENDING) {
-      throw new BadRequestException('La solicitud no está en estado PENDING y no acepta ofertas');
+    if (
+      request.status !== RequestStatus.PENDING &&
+      request.status !== RequestStatus.AUCTION_ACTIVE
+    ) {
+      throw new BadRequestException('La solicitud no está disponible para recibir ofertas');
     }
 
     if (request.assignmentMode !== 'AUCTION') {
       throw new BadRequestException('La solicitud no está en modalidad de subasta (AUCTION)');
+    }
+
+    if (request.auctionExpiresAt && new Date() > request.auctionExpiresAt) {
+      throw new BadRequestException('El tiempo de la subasta ha expirado');
     }
 
     const proposedRates: Record<string, number> = dto.proposedRates || {};
@@ -303,10 +317,26 @@ export class CollectionsService {
       .sendPushNotification(
         request.householdId,
         'Nueva propuesta de Centro de Acopio',
-        `Un centro de acopio ha ofertado S/ ${totalEstimatedPenn.toFixed(2)} PEN (${totalEstimatedEco.toFixed(2)} ECO) por tu material.`,
+        `Un centro de acopio ha ofertado S/ ${totalEstimatedPenn.toFixed(2)} PEN (${totalEstimatedEco.toFixed(2)} LIVOs) por tu material.`,
         { requestId, bidId: bid.id },
       )
       .catch(() => {});
+
+    // Notificación en tiempo real directa al hogar
+    this.websocketsService.emitUserEvent(
+      request.householdId,
+      'auction:bid',
+      {
+        requestId,
+        bidId: bid.id,
+        centerId: bid.centerId,
+        centerName: (bid as any).center?.name || 'Centro de Acopio',
+        totalEstimatedPenn,
+        totalEstimatedLivo: totalEstimatedEco,
+        proposedRates,
+        timestamp: Date.now(),
+      },
+    );
 
     this.websocketsService.emitCollectionUpdated(this.stripPin(request));
     return bid;
@@ -427,8 +457,9 @@ export class CollectionsService {
       )
       .catch(() => {});
 
-    // Notificar a recolectores vía WebSockets
+    // Notificar a recolectores y partes interesadas vía WebSockets
     this.websocketsService.emitCollectionCreated(this.stripPin(updatedRequest));
+    this.websocketsService.emitCollectionUpdated(this.stripPin(updatedRequest));
 
     return updatedRequest;
   }
@@ -494,8 +525,9 @@ export class CollectionsService {
       )
       .catch(() => {});
 
-    // Emitir a recolectores
+    // Emitir a recolectores y partes interesadas
     this.websocketsService.emitCollectionCreated(this.stripPin(updatedRequest));
+    this.websocketsService.emitCollectionUpdated(this.stripPin(updatedRequest));
 
     return updatedRequest;
   }
@@ -536,7 +568,7 @@ export class CollectionsService {
       where = {
         OR: [
           {
-            status: RequestStatus.PENDING,
+            status: { in: [RequestStatus.PENDING, RequestStatus.AUCTION_ACTIVE] },
             assignmentMode: 'AUCTION',
           },
           {
@@ -576,6 +608,14 @@ export class CollectionsService {
             },
             {
               collectorId: user.id,
+              status: {
+                in: [
+                  RequestStatus.ACCEPTED,
+                  RequestStatus.EN_ROUTE,
+                  RequestStatus.ARRIVED,
+                  RequestStatus.AUCTION_ASSIGNED,
+                ],
+              },
             },
           ],
         };
@@ -777,6 +817,17 @@ export class CollectionsService {
       throw new ForbiddenException('No tienes permisos para ver esta solicitud');
     }
 
+    if (this.redisService) {
+      try {
+        const cachedLoc = await this.redisService.get(`collector:loc:${id}`).catch(() => null);
+        if (cachedLoc) {
+          (collectionRequest as any).collectorLocation = JSON.parse(cachedLoc);
+        }
+      } catch (_) {
+        // Ignora errores transitorios de lectura de ubicación en caché
+      }
+    }
+
     if (role !== Role.HOGAR) {
       return this.stripPin(collectionRequest);
     }
@@ -941,6 +992,10 @@ export class CollectionsService {
           )
           .catch(() => {});
 
+        if (updated) {
+          this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
+        }
+
         return updated;
       }
 
@@ -966,13 +1021,20 @@ export class CollectionsService {
           );
         }
 
-        return this.prisma.collectionRequest.update({
+        const cancelled = await this.prisma.collectionRequest.update({
           where: { id },
           data: {
             status: RequestStatus.CANCELLED,
             escrowLocked: 0,
           },
+          include: {
+            household: { select: { id: true, email: true, name: true, address: true } },
+            collector: { select: { id: true, name: true, phone: true } },
+            assignedCenter: { select: { id: true, name: true, email: true } },
+          },
         });
+        this.websocketsService.emitCollectionUpdated(this.stripPin(cancelled));
+        return this.stripPin(cancelled);
       }
 
       throw new BadRequestException(
@@ -1012,10 +1074,11 @@ export class CollectionsService {
 
       if (
         collectionRequest.status !== RequestStatus.ACCEPTED &&
+        collectionRequest.status !== RequestStatus.EN_ROUTE &&
         collectionRequest.status !== RequestStatus.ARRIVED
       ) {
         throw new BadRequestException(
-          'La solicitud debe estar en estado ACCEPTED o ARRIVED para verificar el PIN',
+          'La solicitud debe estar en estado ACCEPTED, EN_ROUTE o ARRIVED para verificar el PIN',
         );
       }
 
@@ -1025,20 +1088,49 @@ export class CollectionsService {
         );
       }
 
+      // Protección contra ataques de fuerza bruta en PIN de 4 dígitos (máx 5 intentos en 15 min)
+      const attemptsKey = `attempts:pin:${id}`;
       if (this.redisService) {
-        const cachedPin = await this.redisService.get(`pin:collection:${id}`);
-        if (cachedPin && cachedPin !== dto.pin) {
-          throw new BadRequestException('PIN de verificación incorrecto');
+        const attempts = await this.redisService.get(attemptsKey);
+        if (attempts && parseInt(attempts, 10) >= 5) {
+          throw new ForbiddenException(
+            'Demasiados intentos fallidos de PIN. Esta verificación ha sido bloqueada temporalmente por seguridad (15 minutos).',
+          );
         }
       }
 
-      if (collectionRequest.verificationPin !== dto.pin) {
+      let isPinValid = collectionRequest.verificationPin === dto.pin;
+      if (this.redisService) {
+        const cachedPin = await this.redisService.get(`pin:collection:${id}`);
+        if (cachedPin) {
+          isPinValid = cachedPin === dto.pin;
+        }
+      }
+
+      if (!isPinValid) {
+        if (this.redisService) {
+          const rawAttempts = await this.redisService.get(attemptsKey);
+          const count = (rawAttempts ? parseInt(rawAttempts, 10) : 0) + 1;
+          await this.redisService.set(attemptsKey, count.toString(), 900);
+          const remaining = Math.max(0, 5 - count);
+          if (count >= 5) {
+            throw new ForbiddenException(
+              'Límite de 5 intentos fallidos de PIN alcanzado. Verificación bloqueada temporalmente por 15 minutos.',
+            );
+          }
+          throw new BadRequestException(
+            `PIN de verificación incorrecto. Te quedan ${remaining} intento(s) antes del bloqueo.`,
+          );
+        }
         throw new BadRequestException('PIN de verificación incorrecto o expirado');
       }
 
-      // Invalidar PIN en Redis tras uso exitoso
+      // Limpiar PIN y contador de intentos fallidos en Redis tras verificación exitosa
       if (this.redisService) {
-        await this.redisService.del(`pin:collection:${id}`);
+        await Promise.all([
+          this.redisService.del(`pin:collection:${id}`).catch(() => {}),
+          this.redisService.del(attemptsKey).catch(() => {}),
+        ]);
       }
 
       // Validar pesos reales si fueron provistos
@@ -1192,12 +1284,12 @@ export class CollectionsService {
             "householdRewardEarned" = ${hogarAmount}::numeric,
             "txHash" = ${txHash},
             "updatedAt" = NOW()
-        WHERE id = ${id}::uuid AND status IN ('ACCEPTED'::"RequestStatus", 'ARRIVED'::"RequestStatus")
+        WHERE id = ${id}::uuid AND status IN ('ACCEPTED'::"RequestStatus", 'EN_ROUTE'::"RequestStatus", 'ARRIVED'::"RequestStatus")
       `;
 
       if (updatedCount === 0) {
         throw new BadRequestException(
-          'La solicitud ya fue procesada o no está en estado ACCEPTED o ARRIVED',
+          'La solicitud ya fue procesada o no está en estado ACCEPTED, EN_ROUTE o ARRIVED',
         );
       }
 
@@ -1208,6 +1300,15 @@ export class CollectionsService {
           assignedCenter: { select: { id: true, name: true, email: true } },
         },
       });
+
+      // Purgar telemetría y metadatos de ruta activa en Redis
+      if (this.redisService) {
+        await Promise.all([
+          this.redisService.del(`collection:active:${id}`).catch(() => {}),
+          this.redisService.del(`collector:loc:${id}`).catch(() => {}),
+          this.redisService.del(`route:collection:${id}`).catch(() => {}),
+        ]);
+      }
 
       if (isDonation) {
         this.notificationsService
@@ -1227,6 +1328,10 @@ export class CollectionsService {
             { requestId: id },
           )
           .catch(() => {});
+      }
+
+      if (completed) {
+        this.websocketsService.emitCollectionUpdated(this.stripPin(completed));
       }
 
       return completed!;
@@ -1301,6 +1406,7 @@ export class CollectionsService {
       .catch(() => {});
 
     this.websocketsService.emitCollectionCreated(this.stripPin(updatedRequest));
+    this.websocketsService.emitCollectionUpdated(this.stripPin(updatedRequest));
 
     return this.stripPin(updatedRequest);
   }
@@ -1451,6 +1557,7 @@ export class CollectionsService {
 
     if (updated) {
       this.websocketsService.emitCollectionCreated(this.stripPin(updated));
+      this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
     }
 
     return updated;
@@ -1477,6 +1584,11 @@ export class CollectionsService {
       throw new ForbiddenException('Solo el recolector asignado puede iniciar la ruta');
     }
 
+    if (request.status === RequestStatus.EN_ROUTE) {
+      // Idempotente: la ruta ya fue iniciada previamente
+      return this.stripPin(request);
+    }
+
     if (request.status !== RequestStatus.ACCEPTED) {
       throw new BadRequestException(
         `Solo solicitudes en estado ACCEPTED pueden iniciar ruta (Estado actual: ${request.status})`,
@@ -1495,6 +1607,26 @@ export class CollectionsService {
         assignedCenter: { select: { id: true, name: true, email: true, address: true } },
       },
     });
+
+    // Cachear metadatos en Redis para que los pings de telemetría tengan 0 costo en Postgres
+    if (this.redisService) {
+      const kyc = await this.prisma.kycApplication.findFirst({
+        where: { userId: updated.collectorId! },
+        select: { transportType: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      const meta = {
+        id: updated.id,
+        collectorId: updated.collectorId,
+        householdId: updated.householdId,
+        latitude: updated.latitude,
+        longitude: updated.longitude,
+        transportType: kyc?.transportType || 'MOTO_CARGA',
+      };
+      await this.redisService
+        .set(`collection:active:${id}`, JSON.stringify(meta), 3600)
+        .catch(() => {});
+    }
 
     this.notificationsService
       .sendPushNotification(
@@ -1531,6 +1663,9 @@ export class CollectionsService {
     }
 
     if (request.status !== RequestStatus.EN_ROUTE) {
+      if (request.status === RequestStatus.ARRIVED) {
+        return this.stripPin(request);
+      }
       throw new BadRequestException(
         `Solo solicitudes en estado EN_ROUTE pueden marcar llegada (Estado actual: ${request.status})`,
       );
@@ -1554,12 +1689,210 @@ export class CollectionsService {
         request.householdId,
         'Recolector en puerta',
         'El recolector ha llegado a tu domicilio. Acércate con tus materiales y tu PIN de 4 dígitos.',
-        { requestId: id, status: 'ARRIVED' },
+        {
+          type: 'HOGAR_COLLECTOR_ARRIVED',
+          requestId: id,
+          status: 'ARRIVED',
+          channelId: 'livora_collections_urgent',
+          requiresInAppModal: 'true',
+        },
       )
       .catch(() => {});
 
+    // Invalida la telemetría y metadatos en caché para esta solicitud
+    if (this.redisService) {
+      await Promise.all([
+        this.redisService.del(`collection:active:${id}`).catch(() => {}),
+        this.redisService.del(`collector:loc:${id}`).catch(() => {}),
+        this.redisService.del(`route:collection:${id}`).catch(() => {}),
+      ]);
+    }
+
+    // Emite notificación directa en tiempo real al canal privado del Hogar
+    this.websocketsService.emitUserEvent(request.householdId, 'collector:arrived', {
+      requestId: id,
+      status: RequestStatus.ARRIVED,
+      timestamp: Date.now(),
+    });
+
     this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
     return this.stripPin(updated);
+  }
+
+  /**
+   * PATCH /collection-requests/:id/location (Rol: RECOLECTOR)
+   * Procesa la telemetría periódica GPS del recolector en ruta hacia el domicilio.
+   * Valida propiedad, estado EN_ROUTE, adopta métricas OSRM y retransmite vía WebSocket.
+   */
+  async updateCollectorLocation(
+    id: string,
+    collectorId: string,
+    dto: CollectorTelemetryDto,
+  ) {
+    let meta: {
+      id: string;
+      collectorId: string;
+      householdId: string;
+      latitude: number;
+      longitude: number;
+      transportType: string;
+    } | null = null;
+
+    if (this.redisService) {
+      const cached = await this.redisService
+        .get(`collection:active:${id}`)
+        .catch(() => null);
+      if (cached) {
+        try {
+          meta = JSON.parse(cached);
+        } catch (_) {
+          // Fallback a consulta en base de datos si el parseo de caché falla
+        }
+      }
+    }
+
+    if (!meta) {
+      const request = await this.prisma.collectionRequest.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          status: true,
+          collectorId: true,
+          householdId: true,
+          latitude: true,
+          longitude: true,
+        },
+      });
+
+      if (!request) {
+        throw new NotFoundException('Solicitud de recolección no encontrada');
+      }
+
+      if (request.collectorId !== collectorId) {
+        throw new ForbiddenException('Solo el recolector asignado puede emitir ubicación');
+      }
+
+      if (request.status !== RequestStatus.EN_ROUTE) {
+        throw new BadRequestException(
+          `Solo solicitudes en estado EN_ROUTE pueden emitir telemetría (Estado actual: ${request.status})`,
+        );
+      }
+
+      const kyc = await this.prisma.kycApplication.findFirst({
+        where: { userId: collectorId },
+        select: { transportType: true },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      meta = {
+        id: request.id,
+        collectorId: request.collectorId!,
+        householdId: request.householdId,
+        latitude: request.latitude,
+        longitude: request.longitude,
+        transportType: kyc?.transportType || 'MOTO_CARGA',
+      };
+
+      if (this.redisService) {
+        await this.redisService
+          .set(`collection:active:${id}`, JSON.stringify(meta), 3600)
+          .catch(() => {});
+      }
+    }
+
+    if (meta.collectorId !== collectorId) {
+      throw new ForbiddenException('Solo el recolector asignado puede emitir ubicación');
+    }
+
+    const { latitude, longitude, heading = 0, speed = 0 } = dto;
+    const distKm = this.calculateHaversineKm(
+      latitude,
+      longitude,
+      meta.latitude,
+      meta.longitude,
+    );
+    const fallbackDistMeters = Math.round(distKm * 1000);
+
+    const distanceRemainingMeters =
+      typeof dto.distanceRemainingMeters === 'number' && dto.distanceRemainingMeters >= 0
+        ? Math.round(dto.distanceRemainingMeters)
+        : fallbackDistMeters;
+
+    const transportType = dto.transportType || meta.transportType || 'MOTO_CARGA';
+    let defaultSpeed = 20;
+    switch (transportType) {
+      case 'A_PIE':
+        defaultSpeed = 4.2;
+        break;
+      case 'TRICICLO':
+        defaultSpeed = 11;
+        break;
+      case 'BICICLETA':
+        defaultSpeed = 15;
+        break;
+      case 'MOTO_CARGA':
+        defaultSpeed = 24;
+        break;
+      case 'CAMIONETA':
+        defaultSpeed = 30;
+        break;
+      default:
+        defaultSpeed = 20;
+    }
+
+    const effectiveSpeedKmh = speed > 3 ? Math.min(speed, defaultSpeed * 1.5) : defaultSpeed;
+    const fallbackEta = Math.max(
+      1,
+      Math.round(((distanceRemainingMeters / 1000) / effectiveSpeedKmh) * 60),
+    );
+
+    const etaMinutes =
+      typeof dto.etaMinutes === 'number' && dto.etaMinutes > 0
+        ? dto.etaMinutes
+        : fallbackEta;
+
+    const socketPayload = {
+      requestId: id,
+      collectorId,
+      transportType,
+      latitude,
+      longitude,
+      heading,
+      speed,
+      distanceRemainingMeters,
+      etaMinutes,
+      timestamp: dto.timestamp || Date.now(),
+    };
+
+    if (this.redisService) {
+      await this.redisService
+        .set(`collector:loc:${id}`, JSON.stringify(socketPayload), 1800)
+        .catch(() => {});
+    }
+
+    // Retransmisión cerrada y segura a la sala privada user:<householdId>
+    this.websocketsService.emitUserEvent(
+      meta.householdId,
+      'collector:location',
+      socketPayload,
+    );
+
+    return socketPayload;
+  }
+
+  private calculateHaversineKm(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number {
+    const toRad = (v: number) => (v * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
   /**

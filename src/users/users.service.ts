@@ -580,4 +580,29 @@ export class UsersService implements OnModuleInit {
 
     return deviceToken;
   }
+
+  /**
+   * Elimina el DeviceToken de FCM del usuario al cerrar sesión (logout).
+   */
+  async unregisterDeviceToken(userId: string, token?: string) {
+    if (token) {
+      await this.prisma.deviceToken
+        .deleteMany({
+          where: { token, userId },
+        })
+        .catch(() => {});
+    } else {
+      await this.prisma.deviceToken
+        .deleteMany({
+          where: { userId },
+        })
+        .catch(() => {});
+    }
+    await this.prisma.user
+      .update({
+        where: { id: userId },
+        data: { fcmToken: null },
+      })
+      .catch(() => {});
+  }
 }

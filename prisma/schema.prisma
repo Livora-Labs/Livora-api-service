@@ -84,6 +84,8 @@ model User {
   paymentTransactions PaymentTransaction[]
   deviceTokens        DeviceToken[]
   accounts            Account[]
+  sentTransfers       WalletTransfer[] @relation("SentTransfers")
+  receivedTransfers   WalletTransfer[] @relation("ReceivedTransfers")
 
   @@map("users")
 }
@@ -115,6 +117,7 @@ model CollectionRequest {
   photoUrl           String?
   description        String?
   verificationPin    String
+  address            String?
   latitude           Float
   longitude          Float
   householdId        String         @db.Uuid
@@ -787,3 +790,26 @@ model DisputeCase {
 
 
 
+
+// Transferencias P2P entre wallets (tokens EcoToken en Stellar)
+model WalletTransfer {
+  id              String   @id @default(uuid()) @db.Uuid
+  senderUserId    String   @db.Uuid
+  receiverUserId  String?  @db.Uuid
+  toAddress       String
+  fromAddress     String
+  amount          Decimal  @db.Decimal(14, 4)
+  txHash          String?
+  status          String   @default("COMPLETED")
+  note            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  sender   User  @relation("SentTransfers",     fields: [senderUserId],   references: [id], onDelete: Cascade)
+  receiver User? @relation("ReceivedTransfers", fields: [receiverUserId], references: [id], onDelete: SetNull)
+
+  @@index([senderUserId])
+  @@index([receiverUserId])
+  @@index([toAddress])
+  @@map("wallet_transfers")
+}

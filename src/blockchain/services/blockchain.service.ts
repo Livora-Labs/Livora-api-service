@@ -22,6 +22,7 @@ import {
   Operation,
   Address,
   StrKey,
+  Memo,
 } from '@stellar/stellar-sdk';
 import {
   normalizeMaterialCode,
@@ -148,7 +149,12 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
     try {
       const host = this.configService.get<string>('REDIS_HOST', 'localhost');
       const port = this.configService.get<number>('REDIS_PORT', 6379);
-      this.redisClient = new Redis({ host, port });
+      const password = this.configService.get<string>('REDIS_PASSWORD');
+      this.redisClient = new Redis({
+        host,
+        port,
+        ...(password ? { password } : {}),
+      });
       this.logger.log(
         `Redis inicializado para BlockchainService en ${host}:${port}`,
       );
@@ -560,26 +566,58 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
           signerKeypair.publicKey(),
         );
 
-        const tx = new TransactionBuilder(sourceAccount, {
-          fee: '1000',
-          networkPassphrase: this.networkPassphrase,
-        })
-          .addOperation(
-            Operation.invokeContractFunction({
-              contract: this.contractId,
-              function: 'notarize_batch_receipt',
-              args: [
-                Address.fromString(signerKeypair.publicKey()).toScVal(),
-                xdr.ScVal.scvBytes(uuid32),
-                Address.fromString(center).toScVal(),
-                nativeToScVal(ipfsCid, { type: 'string' }),
-              ],
-            }),
-          )
-          .setTimeout(30)
-          .build();
+        try {
+          const tx = new TransactionBuilder(sourceAccount, {
+            fee: '1000',
+            networkPassphrase: this.networkPassphrase,
+          })
+            .addOperation(
+              Operation.invokeContractFunction({
+                contract: this.contractId,
+                function: 'notarize_batch_receipt',
+                args: [
+                  Address.fromString(signerKeypair.publicKey()).toScVal(),
+                  xdr.ScVal.scvBytes(uuid32),
+                  Address.fromString(center).toScVal(),
+                  nativeToScVal(ipfsCid, { type: 'string' }),
+                ],
+              }),
+            )
+            .setTimeout(30)
+            .build();
 
-        return this.sendTransaction(tx, signerKeypair);
+          return await this.sendTransaction(tx, signerKeypair);
+        } catch (contractErr: any) {
+          const errMsg = contractErr?.message || String(contractErr);
+          if (
+            errMsg.includes('MissingValue') ||
+            errMsg.includes('non-existent contract function') ||
+            errMsg.includes('HostError') ||
+            errMsg.includes('trying to invoke')
+          ) {
+            this.logger.warn(
+              `[Stellar Ledger Fallback] Contrato ${this.contractId} no tiene 'notarize_batch_receipt' (${errMsg}). Ejecutando notarización ESG nativa en Ledger Stellar (manageData + Memo.hash)...`,
+            );
+            const fallbackAccount = await this.getSourceAccount(
+              signerKeypair.publicKey(),
+            );
+            const fallbackTx = new TransactionBuilder(fallbackAccount, {
+              fee: '1000',
+              networkPassphrase: this.networkPassphrase,
+            })
+              .addOperation(
+                Operation.manageData({
+                  name: `LIVO_${cleanUuid.substring(0, 16)}`,
+                  value: Buffer.from(ipfsCid.substring(0, 64)),
+                }),
+              )
+              .setTimeout(30)
+              .build();
+
+            return await this.sendTransaction(fallbackTx, signerKeypair);
+          }
+          throw contractErr;
+        }
       };
 
       try {
@@ -588,8 +626,9 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
         const msg = err?.message || String(err);
         if (msg.includes('tx_bad_seq') || msg.includes('bad_seq')) {
           this.logger.warn(
-            `Secuencia desfasada en notarizeBatchReceipt. Reintentando...`,
+            `Secuencia desfasada en notarizeBatchReceipt. Reintentando tras 500ms...`,
           );
+          await new Promise((r) => setTimeout(r, 500));
           return await buildAndSend();
         }
         throw err;
@@ -948,20 +987,26 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
 
     // 2. Si estamos en Testnet, intentar activar primero vía Friendbot de forma ágil
     if (this.networkPassphrase.toLowerCase().includes('test')) {
+      const friendbotUrl = `https://friendbot.stellar.org?addr=${userPublicKey}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
       try {
-        const friendbotUrl = `https://friendbot.stellar.org?addr=${userPublicKey}`;
-        const axios = require('axios');
-        const fbRes = await axios.get(friendbotUrl, { timeout: 10000 });
-        if (fbRes.data?.successful || fbRes.data?.hash) {
-          this.logger.log(
-            `Cuenta ${userPublicKey} activada en Stellar Testnet vía Friendbot. Tx: ${fbRes.data.hash}`,
-          );
-          return { hash: fbRes.data.hash, sponsored: true };
+        const res = await fetch(friendbotUrl, { signal: controller.signal });
+        if (res.ok) {
+          const fbData: any = await res.json();
+          if (fbData?.successful || fbData?.hash) {
+            this.logger.log(
+              `Cuenta ${userPublicKey} activada en Stellar Testnet vía Friendbot. Tx: ${fbData.hash}`,
+            );
+            return { hash: fbData.hash, sponsored: true };
+          }
         }
       } catch (fbErr: any) {
         this.logger.warn(
           `Friendbot no disponible para ${userPublicKey} (${fbErr.message}). Continuando con patrocinio nativo Worker...`,
         );
+      } finally {
+        clearTimeout(timeout);
       }
     }
 

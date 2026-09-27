@@ -70,7 +70,14 @@ services:
     expose:
       - "3000"
     deploy:
-      replicas: 3
+      replicas: 2
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 350M
+        reservations:
+          cpus: "0.2"
+          memory: 128M
     command: npm run start:api
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1));\""]
@@ -99,6 +106,14 @@ services:
     environment:
       - APP_MODE=WORKER
       - DB_POOL_MAX=5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.8"
+          memory: 350M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
     command: npm run start:worker
     depends_on:
       livora_postgres:
@@ -121,8 +136,9 @@ services:
       POSTGRES_USER: ${DB_USER:-livora}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-livora_secret}
       POSTGRES_DB: ${DB_NAME:-livora_db}
-    ports:
-      - "${DB_PORT:-5434}:5432"
+    # C1: Solo accesible dentro de la red Docker — puerto NO expuesto al host
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -140,10 +156,13 @@ services:
     image: redis:7-alpine
     container_name: livora_redis
     restart: always
+    env_file: .env.production
+    # C2: Password obligatorio | A3: AOF activado para persistencia en reinicios
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --appendfsync everysec"]
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
