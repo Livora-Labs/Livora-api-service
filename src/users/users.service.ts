@@ -456,7 +456,16 @@ export class UsersService implements OnModuleInit {
     const activeRequest = await this.prisma.collectionRequest.findFirst({
       where: {
         householdId: userId,
-        status: { in: [RequestStatus.PENDING, RequestStatus.ACCEPTED] },
+        status: {
+          in: [
+            RequestStatus.PENDING,
+            RequestStatus.AUCTION_ACTIVE,
+            RequestStatus.AUCTION_ASSIGNED,
+            RequestStatus.ACCEPTED,
+            RequestStatus.EN_ROUTE,
+            RequestStatus.ARRIVED,
+          ],
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
