@@ -531,6 +531,7 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
           email: 'eco.user@livora.io',
           role: Role.HOGAR,
           walletAddress: '0x1234567890abcdef1234567890abcdef12345678',
+          kycStatus: 'UNVERIFIED',
         },
       });
     });

@@ -28,6 +28,9 @@ import { UpdateComplaintStatusDto } from '../complaints/dto/update-complaint-sta
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { FindUsersAdminQueryDto } from './dto/find-users-admin-query.dto';
 import { LedgerAuditQueryDto, ServerLogsQueryDto } from './dto/audit-query.dto';
+import { AdminResetPasswordDto } from './dto/admin-reset-password.dto';
+import { SupabaseService } from '../supabase/supabase.service';
+import { AuthService } from '../auth/auth.service';
 
 @Injectable()
 export class AdminService {
@@ -49,6 +52,10 @@ export class AdminService {
     private readonly blockchainService?: BlockchainService,
     @Optional()
     private readonly configService?: ConfigService,
+    @Optional()
+    private readonly supabaseService?: SupabaseService,
+    @Optional()
+    private readonly authService?: AuthService,
   ) {}
 
   async createKycApplication(userId: string, dto: CreateKycApplicationDto) {
@@ -376,6 +383,63 @@ export class AdminService {
       userStatus: updatedUser.userStatus,
       updatedAt: updatedUser.updatedAt.toISOString(),
     };
+  }
+
+  async regularizeUserPassword(userId: string, dto: AdminResetPasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    if (!dto.newPassword && !dto.sendResetEmail) {
+      throw new BadRequestException(
+        'Debes proporcionar una nueva contraseña o solicitar el envío de correo de recuperación.',
+      );
+    }
+
+    const results: { passwordUpdated?: boolean; emailSent?: boolean; message: string } = {
+      message: '',
+    };
+
+    // 1. Si se especificó nueva contraseña manual, actualizar en Supabase Auth
+    if (dto.newPassword) {
+      if (!this.supabaseService) {
+        throw new BadRequestException('Servicio de autenticación no disponible');
+      }
+      const supabaseClient = this.supabaseService.getClient();
+      const { error } = await supabaseClient.auth.admin.updateUserById(userId, {
+        password: dto.newPassword,
+      });
+
+      if (error) {
+        throw new BadRequestException(
+          error.message || 'Error al actualizar la contraseña del usuario en Supabase Auth',
+        );
+      }
+      results.passwordUpdated = true;
+    }
+
+    // 2. Si se solicitó enviar correo de recuperación, disparar authService.forgotPassword
+    if (dto.sendResetEmail) {
+      if (!this.authService) {
+        throw new BadRequestException('Servicio de correo de recuperación no disponible');
+      }
+      await this.authService.forgotPassword({ email: user.email });
+      results.emailSent = true;
+    }
+
+    if (results.passwordUpdated && results.emailSent) {
+      results.message = `Contraseña actualizada manualmente y correo de recuperación enviado a ${user.email}`;
+    } else if (results.passwordUpdated) {
+      results.message = `Contraseña actualizada exitosamente para ${user.email}`;
+    } else {
+      results.message = `Correo de recuperación de contraseña enviado exitosamente a ${user.email}`;
+    }
+
+    return results;
   }
 
   /**

@@ -5,6 +5,7 @@ import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { BlockchainModule } from '../blockchain/blockchain.module';
+import { AuthModule } from '../auth/auth.module';
 import { AuditLogBufferService } from '../common/services/audit-log-buffer.service';
 import { BLOCKCHAIN_QUEUE, BLOCKCHAIN_DLQ } from '../blockchain/blockchain.constants';
 
@@ -13,6 +14,7 @@ import { BLOCKCHAIN_QUEUE, BLOCKCHAIN_DLQ } from '../blockchain/blockchain.const
     ConfigModule,
     PrismaModule,
     BlockchainModule,
+    AuthModule,
     BullModule.registerQueue(
       {
         name: BLOCKCHAIN_QUEUE,

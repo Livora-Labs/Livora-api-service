@@ -425,6 +425,12 @@ export class UsersService implements OnModuleInit {
 
     const supabaseClient = this.supabaseService.getClient();
 
+    if (currentPassword && currentPassword === newPassword) {
+      throw new BadRequestException(
+        'La nueva contraseña debe ser diferente a la contraseña actual',
+      );
+    }
+
     if (currentPassword) {
       const { error: verifyErr } = await supabaseClient.auth.signInWithPassword({
         email: user.email,

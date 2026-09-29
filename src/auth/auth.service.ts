@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
@@ -17,6 +18,7 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcryptjs';
@@ -427,12 +429,12 @@ export class AuthService {
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
     const { email } = forgotPasswordDto;
 
-    // 1. Verificar si el usuario existe localmente (mensaje uniforme anti-enumeración)
+    // 1. Verificar si el usuario existe localmente
     const existingUser = await this.usersService.findByEmail(email);
     if (!existingUser) {
-      return {
-        message: 'Si el correo electrónico está registrado, recibirás un enlace de recuperación.',
-      };
+      throw new BadRequestException(
+        'El correo electrónico no se encuentra registrado',
+      );
     }
 
     // 2. Generar token criptográfico único
@@ -491,6 +493,48 @@ export class AuthService {
 
     return {
       message: 'Contraseña restablecida exitosamente',
+    };
+  }
+
+  async changePassword(userId: string, changePasswordDto: ChangePasswordDto) {
+    const { currentPassword, newPassword } = changePasswordDto;
+
+    if (currentPassword === newPassword) {
+      throw new BadRequestException(
+        'La nueva contraseña debe ser diferente a la contraseña actual',
+      );
+    }
+
+    // 1. Obtener usuario localmente
+    const user = await this.usersService.findById(userId);
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    // 2. Verificar la contraseña actual contra Supabase Auth
+    const supabaseClient = this.supabaseService.getClient();
+    const { error: verifyError } = await supabaseClient.auth.signInWithPassword({
+      email: user.email,
+      password: currentPassword,
+    });
+
+    if (verifyError) {
+      throw new BadRequestException('La contraseña actual es incorrecta');
+    }
+
+    // 3. Actualizar la contraseña en Supabase Auth usando la API admin
+    const { error: updateError } = await supabaseClient.auth.admin.updateUserById(userId, {
+      password: newPassword,
+    });
+
+    if (updateError) {
+      throw new BadRequestException(
+        updateError.message || 'Error al actualizar la contraseña',
+      );
+    }
+
+    return {
+      message: 'Contraseña actualizada exitosamente',
     };
   }
 

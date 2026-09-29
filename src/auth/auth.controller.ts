@@ -5,8 +5,9 @@ import {
   HttpStatus,
   Post,
   Req,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -15,7 +16,10 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { RefreshDto } from './dto/refresh.dto';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -99,6 +103,20 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Contraseña actualizada correctamente' })
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetPassword(resetPasswordDto);
+  }
+
+  @Throttle({ auth_strict: { limit: 5, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @UseGuards(SupabaseAuthGuard)
+  @Post('change-password')
+  @ApiOperation({ summary: 'Cambiar contraseña de usuario autenticado' })
+  @ApiResponse({ status: 200, description: 'Contraseña cambiada exitosamente' })
+  async changePassword(
+    @CurrentUser('id') userId: string,
+    @Body() changePasswordDto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(userId, changePasswordDto);
   }
 
   @Throttle({ default: { limit: 10, ttl: 60000 } })

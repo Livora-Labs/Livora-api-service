@@ -16,6 +16,7 @@ import { CreateKycApplicationDto } from '../kyc/dto/create-kyc-application.dto';
 import { CreateB2bApplicationDto } from '../b2b/dto/create-b2b-application.dto';
 import { UpdateKycStatusDto } from './dto/update-kyc-status.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
+import { AdminResetPasswordDto } from './dto/admin-reset-password.dto';
 import { UpdateComplaintStatusDto } from '../complaints/dto/update-complaint-status.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { FindUsersAdminQueryDto } from './dto/find-users-admin-query.dto';
@@ -107,6 +108,21 @@ export class AdminController {
     @Body() dto: UpdateUserStatusDto,
   ) {
     return this.adminService.updateUserStatus(id, dto);
+  }
+
+  @Patch('admin/users/:id/password')
+  @ApiBearerAuth()
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary:
+      'Regularizar contraseña de usuario (asignación manual o envío de correo) (Rol: ADMIN)',
+  })
+  async regularizeUserPassword(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdminResetPasswordDto,
+  ) {
+    return this.adminService.regularizeUserPassword(id, dto);
   }
 
   @Get('admin/blockchain/health')
