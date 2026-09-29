@@ -426,6 +426,33 @@ export class AuthService {
     };
   }
 
+  /**
+   * Resuelve de manera canónica y segura la URL base del frontend para enlaces transaccionales.
+   * Evita fugas de localhost en entornos de producción o cuando FRONTEND_URL no está configurada.
+   */
+  private getFrontendUrl(): string {
+    const configuredUrl = process.env.FRONTEND_URL?.trim();
+    const isProd = process.env.NODE_ENV === 'production';
+
+    if (configuredUrl) {
+      if (isProd && configuredUrl.includes('localhost')) {
+        const domain = process.env.DOMAIN?.trim() || 'grupolivoralabs.com';
+        return `https://${domain}`;
+      }
+      return configuredUrl.replace(/\/+$/, '');
+    }
+
+    if (process.env.DOMAIN?.trim()) {
+      return `https://${process.env.DOMAIN.trim()}`;
+    }
+
+    if (isProd) {
+      return 'https://grupolivoralabs.com';
+    }
+
+    return 'http://localhost:3000';
+  }
+
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
     const { email } = forgotPasswordDto;
 
@@ -444,8 +471,8 @@ export class AuthService {
     // 3. Guardar token en Redis con TTL de 1 hora (3600 segundos)
     await this.redisService.set(tokenKey, email, 3600);
 
-    // 4. Generar enlace de restablecimiento
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+    // 4. Generar enlace de restablecimiento con URL canónica segura
+    const frontendUrl = this.getFrontendUrl();
     const resetLink = `${frontendUrl}/restablecer-contrasena?token=${token}`;
 
     // 5. Enviar el correo electrónico

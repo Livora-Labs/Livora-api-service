@@ -67,6 +67,7 @@ services:
     environment:
       - APP_MODE=API
       - DB_POOL_MAX=10
+      - FRONTEND_URL=https://${DOMAIN:-grupolivoralabs.com}
     expose:
       - "3000"
     deploy:

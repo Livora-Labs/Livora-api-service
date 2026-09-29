@@ -278,31 +278,34 @@ export class MailService {
       <html>
       <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Restablecer contraseña - Livora</title>
       </head>
-      <body style="margin:0;padding:0;background-color:#0a192f;">
+      <body style="margin:0;padding:0;background-color:#0a192f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0a192f;padding:32px 16px;">
           <tr>
             <td align="center">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background-color:#0d1117;border:1px solid #1e293b;border-radius:12px;padding:40px;font-family:sans-serif;text-align:left;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background-color:#0d1117;border:1px solid #1e293b;border-radius:12px;padding:40px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;text-align:left;">
                 <tr>
                   <td style="border-bottom:2px solid #10b981;padding-bottom:20px;text-align:center;">
-                    <span style="font-size:26px;font-weight:800;color:#10b981;text-decoration:none;letter-spacing:-0.5px;">LIVORA</span>
+                    <span style="font-size:26px;font-weight:900;color:#10b981;text-decoration:none;letter-spacing:1px;">LIVORA</span>
                   </td>
                 </tr>
                 <tr>
                   <td style="padding-top:30px;line-height:1.6;color:#f8fafc;">
                     <h2 style="font-size:20px;font-weight:700;color:#f8fafc;margin-top:0;margin-bottom:16px;">Solicitud de restablecimiento de contraseña</h2>
-                    <p style="color:#f8fafc;margin:10px 0;">Estimado usuario,</p>
-                    <p style="color:#f8fafc;margin:10px 0;">Hemos recibido una solicitud para restablecer la contraseña asociada a su cuenta en la plataforma de economía circular Livora.</p>
-                    <p style="color:#f8fafc;margin:10px 0;">Para continuar con el proceso y definir una nueva contraseña, por favor haga clic en el siguiente enlace:</p>
-                    <div style="text-align:center;margin:30px 0;">
-                      <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 28px;background:linear-gradient(135deg, #10b981, #059669);color:#0a192f;text-decoration:none;border-radius:8px;font-weight:bold;font-size:15px;box-shadow:0 4px 6px rgba(16, 185, 129, 0.1);">Restablecer contraseña</a>
+                    <p style="color:#f8fafc;margin:10px 0;font-size:15px;">Estimado usuario,</p>
+                    <p style="color:#cbd5e1;margin:10px 0;font-size:14px;line-height:1.6;">Hemos recibido una solicitud para restablecer la contraseña asociada a su cuenta en la plataforma de economía circular Livora.</p>
+                    <p style="color:#cbd5e1;margin:10px 0;font-size:14px;line-height:1.6;">Para continuar con el proceso y definir su nueva contraseña de forma segura, haga clic en el siguiente botón:</p>
+                    <div style="text-align:center;margin:32px 0;">
+                      <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 32px;background-color:#10b981;background:linear-gradient(135deg, #10b981, #059669);color:#04130d !important;text-decoration:none;border-radius:10px;font-weight:800;font-size:15px;letter-spacing:0.3px;box-shadow:0 4px 14px rgba(16, 185, 129, 0.35);">
+                        Restablecer contraseña
+                      </a>
                     </div>
-                    <p style="color:#f8fafc;margin:10px 0;">Si el botón no funciona, también puede copiar y pegar la siguiente dirección en su navegador web:</p>
-                    <p style="margin:10px 0;"><a href="${resetLink}" target="_blank" style="word-break:break-all;color:#06b6d4;font-size:13px;text-decoration:underline;">${resetLink}</a></p>
-                    <div style="background-color:#1e293b;border-left:4px solid #f59e0b;padding:16px;border-radius:6px;font-size:13px;color:#94a3b8;margin-top:24px;">
-                      Por motivos de seguridad, este enlace es de uso único y tiene una validez de 1 hora. Si usted no ha solicitado este restablecimiento, puede ignorar este mensaje; su contraseña actual permanecerá segura.
+                    <p style="color:#94a3b8;margin:16px 0 6px;font-size:13px;">Si el botón no abre automáticamente su navegador, copie y pegue el siguiente enlace directo en su navegador web:</p>
+                    <p style="margin:0 0 16px;"><a href="${resetLink}" target="_blank" style="word-break:break-all;color:#10b981;font-size:13px;text-decoration:underline;">${resetLink}</a></p>
+                    <div style="background-color:#1e293b;border-left:4px solid #f59e0b;padding:16px;border-radius:6px;font-size:13px;color:#94a3b8;margin-top:24px;line-height:1.5;">
+                      <strong style="color:#f59e0b;">Aviso de seguridad:</strong> Este enlace es de un solo uso y expirará en 1 hora. Si usted no solicitó este cambio, puede ignorar este mensaje; su cuenta continuará protegida y no se realizará ninguna modificación.
                     </div>
                   </td>
                 </tr>
