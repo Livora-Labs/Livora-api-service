@@ -31,6 +31,8 @@ import { LedgerAuditQueryDto, ServerLogsQueryDto } from './dto/audit-query.dto';
 import { AdminResetPasswordDto } from './dto/admin-reset-password.dto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { AuthService } from '../auth/auth.service';
+import { Role } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class AdminService {
@@ -45,6 +47,7 @@ export class AdminService {
     @InjectQueue(BLOCKCHAIN_DLQ)
     private readonly blockchainDlq?: Queue,
     @Optional()
+    @InjectQueue(BLOCKCHAIN_QUEUE)
     private readonly stellarRpcManager?: StellarRpcManagerService,
     @Optional()
     private readonly auditLogBuffer?: AuditLogBufferService,
@@ -56,6 +59,8 @@ export class AdminService {
     private readonly supabaseService?: SupabaseService,
     @Optional()
     private readonly authService?: AuthService,
+    @Optional()
+    private readonly notificationsService?: NotificationsService,
   ) {}
 
   async createKycApplication(userId: string, dto: CreateKycApplicationDto) {
@@ -141,6 +146,49 @@ export class AdminService {
     const limit = query.limit ?? 20;
     const skip = (page - 1) * limit;
 
+    // Auto-sincronizar comercios con perfil registrado que aún no cuenten con expediente formal
+    try {
+      const storesWithoutKyc = await this.prisma.user.findMany({
+        where: {
+          role: Role.TIENDA,
+          kycApplications: { none: {} },
+        },
+        include: {
+          storeProfile: true,
+        },
+      });
+
+      for (const storeUser of storesWithoutKyc) {
+        const sp = storeUser.storeProfile;
+        if (sp) {
+          const docUrl = sp.logoUrl || null;
+          const ruc = sp.ruc || null;
+          const bName = sp.businessName || storeUser.name || 'Comercio Aliado';
+          await this.prisma.kycApplication.create({
+            data: {
+              userId: storeUser.id,
+              status: storeUser.kycStatus === 'APPROVED' ? 'APPROVED' : 'PENDING',
+              documentType: 'RUC',
+              documentNumber: ruc,
+              taxIdRuc: ruc,
+              businessName: bName,
+              bankCci: sp.bankAccount || null,
+              documentUrl: docUrl,
+            },
+          }).catch(() => {});
+
+          if (storeUser.kycStatus === 'UNVERIFIED') {
+            await this.prisma.user.update({
+              where: { id: storeUser.id },
+              data: { kycStatus: 'PENDING' },
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch (e: any) {
+      this.logger.warn(`Auto-sincronización de KYC de tiendas: ${e.message}`);
+    }
+
     const readPrisma =
       (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
 
@@ -158,9 +206,11 @@ export class AdminService {
             address: true,
             role: true,
             userStatus: true,
+            kycStatus: true,
             profilePhotoUrl: true,
             isActive: true,
             createdAt: true,
+            storeProfile: true,
           },
         },
       },
@@ -207,12 +257,46 @@ export class AdminService {
           address: true,
           role: true,
           userStatus: true,
+          kycStatus: true,
+          kycVerifiedAt: true,
           isActive: true,
           walletAddress: true,
           profilePhotoUrl: true,
           marketingAccepted: true,
           createdAt: true,
           updatedAt: true,
+          storeProfile: {
+            select: {
+              id: true,
+              businessName: true,
+              ruc: true,
+              address: true,
+              bankAccount: true,
+              logoUrl: true,
+            },
+          },
+          kycApplications: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: {
+              id: true,
+              status: true,
+              documentType: true,
+              documentNumber: true,
+              documentUrl: true,
+              documentUrlBack: true,
+              selfieUrl: true,
+              taxIdRuc: true,
+              businessName: true,
+              bankCci: true,
+              transportType: true,
+              vehiclePlate: true,
+              associationName: true,
+              observationNotes: true,
+              retryCount: true,
+              createdAt: true,
+            },
+          },
           _count: {
             select: {
               collectorBatches: true,
@@ -285,6 +369,34 @@ export class AdminService {
           },
         },
       });
+    } else if (user.role === Role.TIENDA) {
+      const storeProfile = await this.prisma.storeProfile.findUnique({
+        where: { userId: user.id },
+      });
+      updatedApp = await this.prisma.kycApplication.create({
+        data: {
+          userId: user.id,
+          status: newStatus,
+          documentType: 'RUC',
+          documentNumber: storeProfile?.ruc || null,
+          taxIdRuc: storeProfile?.ruc || null,
+          businessName: storeProfile?.businessName || user.name || 'Comercio Aliado',
+          bankCci: storeProfile?.bankAccount || null,
+          documentUrl: storeProfile?.logoUrl || null,
+          observationNotes: dto.observationNotes || null,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              role: true,
+              isActive: true,
+            },
+          },
+        },
+      }).catch(() => null);
     }
 
     // Activar o suspender usuario según el estado KYC y patrocinar cuenta en Stellar
@@ -334,6 +446,20 @@ export class AdminService {
         where: { id: userId },
         data: updateData,
       });
+
+      // Notificación multicanal de verificación aprobada
+      if (this.notificationsService) {
+        const title = user.role === Role.TIENDA
+          ? 'Comercio Verificado'
+          : 'Verificación KYC Aprobada';
+        const body = user.role === Role.TIENDA
+          ? 'Tu comercio ha sido verificado con éxito. Ya puedes cobrar y recibir recompensas LIVO.'
+          : 'Tu cuenta ha sido verificada con éxito. Ya estás habilitado para operar en Livora.';
+        this.notificationsService.sendPushNotification(user.id, title, body, {
+          type: 'KYC_APPROVED',
+          role: user.role,
+        }).catch(() => {});
+      }
     } else if (newStatus === 'REJECTED') {
       await this.prisma.user.update({
         where: { id: userId },
@@ -344,6 +470,15 @@ export class AdminService {
             dto.observationNotes || 'Rechazado en revisión administrativa',
         },
       });
+
+      if (this.notificationsService) {
+        this.notificationsService.sendPushNotification(
+          user.id,
+          'Expediente de Verificación Rechazado',
+          `Tu solicitud de verificación no fue aprobada: ${dto.observationNotes || 'Verifica los requisitos reglamentarios'}`,
+          { type: 'KYC_REJECTED', role: user.role },
+        ).catch(() => {});
+      }
     } else if (newStatus === 'OBSERVED') {
       await this.prisma.user.update({
         where: { id: userId },
@@ -353,6 +488,15 @@ export class AdminService {
             dto.observationNotes || 'Observado en revisión administrativa',
         },
       });
+
+      if (this.notificationsService) {
+        this.notificationsService.sendPushNotification(
+          user.id,
+          'Expediente Observado',
+          `Tu expediente requiere subsanación: ${dto.observationNotes || 'Revisa tus documentos en la aplicación'}`,
+          { type: 'KYC_OBSERVED', role: user.role },
+        ).catch(() => {});
+      }
     }
 
     return updatedApp || { userId, status: newStatus };
