@@ -70,6 +70,18 @@ export class AdminService {
       },
     }).catch(() => {});
 
+    if (dto.taxIdRuc || dto.businessName || dto.documentUrl) {
+      await this.prisma.storeProfile.updateMany({
+        where: { userId },
+        data: {
+          ruc: dto.taxIdRuc ?? undefined,
+          businessName: dto.businessName ?? undefined,
+          bankAccount: dto.bankCci ?? undefined,
+          logoUrl: dto.documentUrl ?? undefined,
+        },
+      }).catch(() => {});
+    }
+
     return this.prisma.kycApplication.create({
       data: {
         userId,

@@ -61,7 +61,7 @@ export class StoresService {
         businessName: dto.businessName,
         ruc: dto.ruc,
         address: dto.address,
-        bankAccount: dto.bankAccount,
+        bankAccount: dto.bankAccount ?? '',
         logoUrl: dto.logoUrl,
       },
       include: {
@@ -78,14 +78,43 @@ export class StoresService {
   }
 
   /**
+   * Obtiene de forma idempotente el perfil de tienda para un usuario.
+   * Si el usuario tiene rol TIENDA y aún no cuenta con perfil (ej. cuentas previas a la migración),
+   * inicializa el perfil base de manera automática para garantizar cero errores 404 en el cliente.
+   */
+  async getOrCreateStoreProfile(userId: string) {
+    let profile = await this.prisma.storeProfile.findUnique({
+      where: { userId },
+    });
+
+    if (!profile) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (user && user.role === Role.TIENDA) {
+        profile = await this.prisma.storeProfile.create({
+          data: {
+            userId,
+            businessName: user.name || user.email.split('@')[0],
+            ruc: '',
+            address: '',
+            bankAccount: '',
+          },
+        });
+      }
+    }
+
+    return profile;
+  }
+
+  /**
    * POST /stores/redemptions/qr
    * Genera un código QR para un canje (Rol: TIENDA).
    * Registra la transacción en estado PENDING y sin userId.
    */
   async generateQrRedemption(userId: string, dto: CreateQrRedemptionDto) {
-    const storeProfile = await this.prisma.storeProfile.findUnique({
-      where: { userId },
-    });
+    const storeProfile = await this.getOrCreateStoreProfile(userId);
 
     if (!storeProfile) {
       throw new NotFoundException(
@@ -447,9 +476,7 @@ export class StoresService {
    * Calcula el fiatAmount (1 Token = 1 Sol) y registra en PENDING.
    */
   async requestSettlement(userId: string, dto: CreateSettlementRequestDto) {
-    const storeProfile = await this.prisma.storeProfile.findUnique({
-      where: { userId },
-    });
+    const storeProfile = await this.getOrCreateStoreProfile(userId);
 
     if (!storeProfile) {
       throw new NotFoundException(
@@ -714,9 +741,7 @@ export class StoresService {
    * Obtiene el perfil de tienda de un usuario (Rol: TIENDA)
    */
   async getProfile(userId: string) {
-    const profile = await this.prisma.storeProfile.findUnique({
-      where: { userId },
-    });
+    const profile = await this.getOrCreateStoreProfile(userId);
     if (!profile) {
       throw new NotFoundException(
         'Perfil de tienda no encontrado para este usuario',
@@ -740,11 +765,19 @@ export class StoresService {
           businessName: dto.businessName,
           ruc: dto.ruc,
           address: dto.address,
-          bankAccount: dto.bankAccount,
+          bankAccount: dto.bankAccount ?? '',
           logoUrl: dto.logoUrl,
         },
       });
     }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        name: dto.businessName ?? undefined,
+        address: dto.address ?? undefined,
+      },
+    }).catch(() => {});
 
     return this.prisma.storeProfile.update({
       where: { id: profile.id },
@@ -752,18 +785,16 @@ export class StoresService {
         businessName: dto.businessName,
         ruc: dto.ruc,
         address: dto.address,
-        bankAccount: dto.bankAccount,
+        bankAccount: dto.bankAccount ?? profile.bankAccount,
         logoUrl: dto.logoUrl,
       },
     });
   }
 
   async getRedemptions(userId: string, page = 1, limit = 15) {
-    const storeProfile = await this.prisma.storeProfile.findUnique({
-      where: { userId },
-    });
+    const storeProfile = await this.getOrCreateStoreProfile(userId);
     if (!storeProfile) {
-      throw new NotFoundException('Perfil de tienda no encontrado');
+      return new PaginatedResultDto([], 0, page, limit);
     }
     const where = { storeId: storeProfile.id };
     const skip = (page - 1) * limit;
@@ -788,11 +819,9 @@ export class StoresService {
   }
 
   async getSettlements(userId: string, page = 1, limit = 15) {
-    const storeProfile = await this.prisma.storeProfile.findUnique({
-      where: { userId },
-    });
+    const storeProfile = await this.getOrCreateStoreProfile(userId);
     if (!storeProfile) {
-      throw new NotFoundException('Perfil de tienda no encontrado');
+      return new PaginatedResultDto([], 0, page, limit);
     }
     const where = { storeId: storeProfile.id };
     const skip = (page - 1) * limit;

@@ -261,6 +261,19 @@ export class UsersService implements OnModuleInit {
       },
     });
 
+    // Auto-aprovisionar perfil de tienda inicial si el rol es TIENDA
+    if (registerDto.role === Role.TIENDA) {
+      await this.prisma.storeProfile.create({
+        data: {
+          userId: supabaseUserId,
+          businessName: registerDto.email.split('@')[0],
+          ruc: '',
+          address: '',
+          bankAccount: '',
+        },
+      });
+    }
+
     // Retornar usuario despojando campos sensibles
     const { encryptedPrivateKey: _, ...userWithoutSecrets } = createdUser;
     return userWithoutSecrets;

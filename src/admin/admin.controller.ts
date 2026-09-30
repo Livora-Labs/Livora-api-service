@@ -34,9 +34,9 @@ export class AdminController {
   @Post('collectors/kyc-applications')
   @ApiBearerAuth()
   @UseGuards(SupabaseAuthGuard, RolesGuard)
-  @Roles(Role.RECOLECTOR, Role.HOGAR)
+  @Roles(Role.RECOLECTOR, Role.HOGAR, Role.TIENDA)
   @ApiOperation({
-    summary: 'Enviar solicitud de verificación KYC (Rol: RECOLECTOR, HOGAR)',
+    summary: 'Enviar solicitud de verificación KYC (Rol: RECOLECTOR, HOGAR, TIENDA)',
   })
   async createKycApplication(
     @CurrentUser('id') userId: string,
@@ -48,9 +48,9 @@ export class AdminController {
   @Get('collectors/me/kyc-application')
   @ApiBearerAuth()
   @UseGuards(SupabaseAuthGuard, RolesGuard)
-  @Roles(Role.RECOLECTOR, Role.HOGAR)
+  @Roles(Role.RECOLECTOR, Role.HOGAR, Role.TIENDA)
   @ApiOperation({
-    summary: 'Consultar mi estado de verificación KYC (Rol: RECOLECTOR, HOGAR)',
+    summary: 'Consultar mi estado de verificación KYC (Rol: RECOLECTOR, HOGAR, TIENDA)',
   })
   async getMyKycApplication(@CurrentUser('id') userId: string) {
     return this.adminService.getMyKycApplication(userId);

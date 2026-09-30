@@ -26,13 +26,13 @@ export class CreateStoreProfileDto {
   @IsString({ message: 'address debe ser un texto' })
   address: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'BCP - CCI: 002-191001234567890-54',
     description: 'Cuenta bancaria o CCI para recibir las liquidaciones',
   })
-  @IsNotEmpty({ message: 'bankAccount es obligatorio' })
+  @IsOptional()
   @IsString({ message: 'bankAccount debe ser un texto' })
-  bankAccount: string;
+  bankAccount?: string;
 
   @ApiPropertyOptional({
     example: 'https://mi-tienda.com/logo.png',
