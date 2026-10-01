@@ -13,6 +13,9 @@ import { PrismaService } from '../prisma/prisma.service';
   cors: {
     origin: '*',
   },
+  pingInterval: 10000,
+  pingTimeout: 10000,
+  transports: ['websocket', 'polling'],
 })
 @Injectable()
 export class WebsocketsGateway
