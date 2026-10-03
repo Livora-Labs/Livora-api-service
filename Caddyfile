@@ -26,6 +26,12 @@
 		header Content-Disposition "attachment; filename=livora.apk"
 		file_server
 	}
+	handle /downloads/* {
+		root * /srv/public
+		header Content-Type application/vnd.android.package-archive
+		header Content-Disposition "attachment; filename=livora.apk"
+		file_server
+	}
 	handle /assets/* {
 		root * /srv/public
 		file_server
