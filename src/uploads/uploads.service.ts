@@ -104,7 +104,7 @@ export class UploadsService implements OnModuleInit {
         throw new BadRequestException(`No se pudo almacenar el documento KYC: ${uploadError.message}`);
       }
 
-      const { data: signedData, error: signedError } = await storage.createSignedUrl(path, 15 * 60);
+      const { data: signedData, error: signedError } = await storage.createSignedUrl(path, 24 * 60 * 60);
       if (signedError || !signedData?.signedUrl) {
         this.logger.error(`Error generando signed URL: ${signedError?.message}`);
         throw new BadRequestException('Documento guardado, pero falló la generación de la URL temporal');
@@ -116,7 +116,7 @@ export class UploadsService implements OnModuleInit {
         purpose,
         mimeType: detected.mime,
         size: file.size,
-        expiresIn: 900,
+        expiresIn: 86400,
       };
     }
 
@@ -143,7 +143,7 @@ export class UploadsService implements OnModuleInit {
     };
   }
 
-  async getPresignedKycUrl(path: string, expiresInSeconds = 900): Promise<string> {
+  async getPresignedKycUrl(path: string, expiresInSeconds = 86400): Promise<string> {
     const storage = this.client.storage.from(this.kycBucket);
     const { data, error } = await storage.createSignedUrl(path, expiresInSeconds);
     if (error || !data?.signedUrl) {
@@ -151,4 +151,113 @@ export class UploadsService implements OnModuleInit {
     }
     return data.signedUrl;
   }
+
+  /**
+   * Refresca determinísticamente un enlace KYC firmado si ha expirado o proviene de Supabase Storage.
+   * Si es IPFS (ipfs:// o hash CID), lo normaliza a gateway HTTPS para compatibilidad directa.
+   */
+  async getFreshSignedUrl(urlOrPath?: string | null): Promise<string | null> {
+    if (!urlOrPath) return null;
+    const trimmed = urlOrPath.trim();
+    if (!trimmed) return null;
+
+    // Normalizar IPFS
+    if (trimmed.startsWith('ipfs://')) {
+      const cid = trimmed.replace(/^ipfs:\/\//, '').replace(/^ipfs\//, '');
+      return `https://ipfs.io/ipfs/${cid}`;
+    }
+    if (/^Qm[1-9A-HJ-NP-za-km-z]{44}/.test(trimmed) || /^bafy[a-z0-9]{55}/.test(trimmed)) {
+      return `https://ipfs.io/ipfs/${trimmed}`;
+    }
+
+    // Si es del bucket privado KYC o contiene /object/sign/
+    if (trimmed.includes(this.kycBucket) || trimmed.includes('/object/sign/')) {
+      try {
+        let storagePath = trimmed;
+        if (trimmed.includes(`/${this.kycBucket}/`)) {
+          const parts = trimmed.split(`/${this.kycBucket}/`)[1];
+          if (parts) {
+            storagePath = parts.split('?')[0];
+          }
+        }
+        const storage = this.client.storage.from(this.kycBucket);
+        const { data, error } = await storage.createSignedUrl(storagePath, 24 * 60 * 60);
+        if (!error && data?.signedUrl) {
+          return data.signedUrl;
+        }
+      } catch (e: any) {
+        this.logger.warn(`Error refrescando signed URL para KYC: ${e.message}`);
+      }
+    }
+
+    return trimmed;
+  }
+
+  /**
+   * Obtiene el flujo binario (Stream/Buffer) y metadatos de un archivo almacenado
+   * ya sea en el bucket privado de KYC o en el público, garantizando descarga controlada.
+   */
+  async getFileStream(pathOrUrl: string): Promise<{
+    buffer: Buffer;
+    mimeType: string;
+    size: number;
+  }> {
+    if (!pathOrUrl || !pathOrUrl.trim()) {
+      throw new BadRequestException('Ruta o identificador de archivo no proporcionado');
+    }
+
+    let cleanPath = pathOrUrl.trim();
+    let targetBucket = this.kycBucket;
+
+    // Detectar si la ruta especifica el bucket o viene como URL completa
+    if (cleanPath.includes(`/${this.publicBucket}/`)) {
+      targetBucket = this.publicBucket;
+      cleanPath = cleanPath.split(`/${this.publicBucket}/`)[1].split('?')[0];
+    } else if (cleanPath.includes(`/${this.kycBucket}/`)) {
+      targetBucket = this.kycBucket;
+      cleanPath = cleanPath.split(`/${this.kycBucket}/`)[1].split('?')[0];
+    } else if (cleanPath.startsWith('collection/') || cleanPath.startsWith('receipt/')) {
+      targetBucket = this.publicBucket;
+    }
+
+    cleanPath = decodeURIComponent(cleanPath.split('?')[0]);
+
+    const storage = this.client.storage.from(targetBucket);
+    const { data, error } = await storage.download(cleanPath);
+
+    if (error || !data) {
+      // Intento en el otro bucket en caso de que esté cruzado
+      const alternateBucket = targetBucket === this.kycBucket ? this.publicBucket : this.kycBucket;
+      const altStorage = this.client.storage.from(alternateBucket);
+      const { data: altData, error: altError } = await altStorage.download(cleanPath);
+
+      if (altError || !altData) {
+        this.logger.error(`Error descargando archivo de storage '${cleanPath}': ${error?.message || altError?.message}`);
+        throw new BadRequestException('El archivo solicitado no existe o no se encuentra disponible');
+      }
+
+      const arrayBuffer = await altData.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const detected = validateMagicBytes(buffer);
+      const mimeType = detected?.mime || altData.type || 'application/octet-stream';
+
+      return {
+        buffer,
+        mimeType,
+        size: buffer.length,
+      };
+    }
+
+    const arrayBuffer = await data.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const detected = validateMagicBytes(buffer);
+    const mimeType = detected?.mime || data.type || 'application/octet-stream';
+
+    return {
+      buffer,
+      mimeType,
+      size: buffer.length,
+    };
+  }
 }
+

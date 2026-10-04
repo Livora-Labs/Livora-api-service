@@ -33,6 +33,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { AuthService } from '../auth/auth.service';
 import { Role } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
+import { UploadsService } from '../uploads/uploads.service';
 
 @Injectable()
 export class AdminService {
@@ -61,6 +62,8 @@ export class AdminService {
     private readonly authService?: AuthService,
     @Optional()
     private readonly notificationsService?: NotificationsService,
+    @Optional()
+    private readonly uploadsService?: UploadsService,
   ) {}
 
   async createKycApplication(userId: string, dto: CreateKycApplicationDto) {
@@ -192,7 +195,7 @@ export class AdminService {
     const readPrisma =
       (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
 
-    return readPrisma.kycApplication.findMany({
+    const apps = await readPrisma.kycApplication.findMany({
       skip,
       take: limit,
       orderBy: { createdAt: 'desc' },
@@ -215,6 +218,19 @@ export class AdminService {
         },
       },
     });
+
+    if (this.uploadsService) {
+      return Promise.all(
+        apps.map(async (app) => ({
+          ...app,
+          documentUrl: await this.uploadsService!.getFreshSignedUrl(app.documentUrl),
+          documentUrlBack: await this.uploadsService!.getFreshSignedUrl(app.documentUrlBack),
+          selfieUrl: await this.uploadsService!.getFreshSignedUrl(app.selfieUrl),
+        }))
+      );
+    }
+
+    return apps;
   }
 
   async getUsers(query: FindUsersAdminQueryDto) {
@@ -309,8 +325,40 @@ export class AdminService {
       }),
     ]);
 
+    let finalUsers = users;
+    if (this.uploadsService) {
+      finalUsers = await Promise.all(
+        users.map(async (u) => {
+          let refreshedKyc = u.kycApplications;
+          if (u.kycApplications && u.kycApplications.length > 0) {
+            refreshedKyc = await Promise.all(
+              u.kycApplications.map(async (app) => ({
+                ...app,
+                documentUrl: await this.uploadsService!.getFreshSignedUrl(app.documentUrl),
+                documentUrlBack: await this.uploadsService!.getFreshSignedUrl(app.documentUrlBack),
+                selfieUrl: await this.uploadsService!.getFreshSignedUrl(app.selfieUrl),
+              }))
+            );
+          }
+          let refreshedStore = u.storeProfile;
+          if (u.storeProfile?.logoUrl) {
+            refreshedStore = {
+              ...u.storeProfile,
+              logoUrl: await this.uploadsService!.getFreshSignedUrl(u.storeProfile.logoUrl),
+            };
+          }
+          return {
+            ...u,
+            profilePhotoUrl: await this.uploadsService!.getFreshSignedUrl(u.profilePhotoUrl),
+            storeProfile: refreshedStore,
+            kycApplications: refreshedKyc,
+          };
+        })
+      );
+    }
+
     return {
-      data: users,
+      data: finalUsers,
       meta: {
         total,
         page,

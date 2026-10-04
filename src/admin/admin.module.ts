@@ -11,6 +11,7 @@ import { BLOCKCHAIN_QUEUE, BLOCKCHAIN_DLQ } from '../blockchain/blockchain.const
 
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WebsocketsModule } from '../websockets/websockets.module';
+import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { WebsocketsModule } from '../websockets/websockets.module';
     AuthModule,
     NotificationsModule,
     WebsocketsModule,
+    UploadsModule,
     BullModule.registerQueue(
       {
         name: BLOCKCHAIN_QUEUE,
