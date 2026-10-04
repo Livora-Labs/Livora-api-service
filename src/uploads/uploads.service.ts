@@ -195,7 +195,8 @@ export class UploadsService implements OnModuleInit {
 
   /**
    * Obtiene el flujo binario (Stream/Buffer) y metadatos de un archivo almacenado
-   * ya sea en el bucket privado de KYC o en el público, garantizando descarga controlada.
+   * ya sea en el bucket privado de KYC o en el público, garantizando descarga controlada
+   * mediante el Service Role de Supabase, evitando tokens expirados o fallos de permisos.
    */
   async getFileStream(pathOrUrl: string): Promise<{
     buffer: Buffer;
@@ -206,33 +207,46 @@ export class UploadsService implements OnModuleInit {
       throw new BadRequestException('Ruta o identificador de archivo no proporcionado');
     }
 
-    let cleanPath = pathOrUrl.trim();
+    let clean = pathOrUrl.trim();
     let targetBucket = this.kycBucket;
 
-    // Detectar si la ruta especifica el bucket o viene como URL completa
-    if (cleanPath.includes(`/${this.publicBucket}/`)) {
+    // Si viene como URL completa de Supabase Storage (p.ej. /storage/v1/object/sign/bucket/path?token=...)
+    if (clean.includes('/object/sign/') || clean.includes('/object/public/') || clean.includes('/object/authenticated/')) {
+      const parts = clean.split(/\/object\/(?:sign|public|authenticated)\//);
+      if (parts[1]) {
+        const withoutQuery = parts[1].split('?')[0];
+        const segments = withoutQuery.split('/');
+        const firstSegment = segments[0];
+        if (firstSegment === this.publicBucket || firstSegment === this.kycBucket) {
+          targetBucket = firstSegment;
+          clean = segments.slice(1).join('/');
+        } else {
+          clean = withoutQuery;
+        }
+      }
+    } else if (clean.includes(`/${this.publicBucket}/`)) {
       targetBucket = this.publicBucket;
-      cleanPath = cleanPath.split(`/${this.publicBucket}/`)[1].split('?')[0];
-    } else if (cleanPath.includes(`/${this.kycBucket}/`)) {
+      clean = clean.split(`/${this.publicBucket}/`)[1].split('?')[0];
+    } else if (clean.includes(`/${this.kycBucket}/`)) {
       targetBucket = this.kycBucket;
-      cleanPath = cleanPath.split(`/${this.kycBucket}/`)[1].split('?')[0];
-    } else if (cleanPath.startsWith('collection/') || cleanPath.startsWith('receipt/')) {
+      clean = clean.split(`/${this.kycBucket}/`)[1].split('?')[0];
+    } else if (clean.startsWith('collection/') || clean.startsWith('receipt/')) {
       targetBucket = this.publicBucket;
     }
 
-    cleanPath = decodeURIComponent(cleanPath.split('?')[0]);
+    clean = decodeURIComponent(clean.split('?')[0]);
 
     const storage = this.client.storage.from(targetBucket);
-    const { data, error } = await storage.download(cleanPath);
+    const { data, error } = await storage.download(clean);
 
     if (error || !data) {
       // Intento en el otro bucket en caso de que esté cruzado
       const alternateBucket = targetBucket === this.kycBucket ? this.publicBucket : this.kycBucket;
       const altStorage = this.client.storage.from(alternateBucket);
-      const { data: altData, error: altError } = await altStorage.download(cleanPath);
+      const { data: altData, error: altError } = await altStorage.download(clean);
 
       if (altError || !altData) {
-        this.logger.error(`Error descargando archivo de storage '${cleanPath}': ${error?.message || altError?.message}`);
+        this.logger.error(`Error descargando archivo de storage '${clean}': ${error?.message || altError?.message}`);
         throw new BadRequestException('El archivo solicitado no existe o no se encuentra disponible');
       }
 
