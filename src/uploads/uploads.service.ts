@@ -12,7 +12,7 @@ import { validateMagicBytes } from './utils/magic-bytes.util';
 const DEFAULT_PUBLIC_BUCKET = 'livora-uploads';
 const DEFAULT_KYC_BUCKET = 'livora-kyc-private';
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
-const PURPOSES = ['collection', 'kyc', 'receipt'] as const;
+const PURPOSES = ['collection', 'kyc', 'receipt', 'store'] as const;
 type PurposeType = typeof PURPOSES[number];
 
 @Injectable()
@@ -230,7 +230,7 @@ export class UploadsService implements OnModuleInit {
     } else if (clean.includes(`/${this.kycBucket}/`)) {
       targetBucket = this.kycBucket;
       clean = clean.split(`/${this.kycBucket}/`)[1].split('?')[0];
-    } else if (clean.startsWith('collection/') || clean.startsWith('receipt/')) {
+    } else if (clean.startsWith('collection/') || clean.startsWith('receipt/') || clean.startsWith('store/')) {
       targetBucket = this.publicBucket;
     }
 

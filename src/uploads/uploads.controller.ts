@@ -42,7 +42,7 @@ export class UploadsController {
         file: { type: 'string', format: 'binary' },
         purpose: {
           type: 'string',
-          enum: ['collection', 'kyc', 'receipt'],
+          enum: ['collection', 'kyc', 'receipt', 'store'],
           default: 'collection',
         },
       },
@@ -90,7 +90,10 @@ export class UploadsController {
     const isKycOrPrivate =
       path.includes('livora-kyc-private') ||
       path.includes('/object/sign/') ||
-      (!path.startsWith('collection/') && !path.startsWith('receipt/') && !path.includes('livora-uploads'));
+      (!path.startsWith('collection/') &&
+        !path.startsWith('receipt/') &&
+        !path.startsWith('store/') &&
+        !path.includes('livora-uploads'));
 
     if (isKycOrPrivate) {
       const isPrivilegedRole =
