@@ -367,12 +367,18 @@ export class GamificationService {
     const rewardAmount = dto.stage === 'STAGE_3' ? 0.5 : 1.0;
     const systemWallet = 'GA3LZ7ROA3YAYOY52J5TDLDDMDADCCZ3CV6CXVQE4SUQGCAB732QXGEB';
 
-    // Registrar la recompensa en wallet_transfers como transferencia del sistema
+    // Obtener el usuario administrador o tesorería del sistema para ser el remitente
+    const systemAdmin = await this.prisma.user.findFirst({
+      where: { role: 'ADMIN' },
+      select: { id: true, walletAddress: true },
+    });
+
+    // Registrar la recompensa en wallet_transfers como abono formal del sistema hacia el usuario
     const transfer = await this.prisma.walletTransfer.create({
       data: {
-        senderUserId: userId, // o wallet del sistema
+        senderUserId: systemAdmin?.id ?? userId,
         receiverUserId: userId,
-        fromAddress: systemWallet,
+        fromAddress: systemAdmin?.walletAddress || systemWallet,
         toAddress: user.walletAddress || systemWallet,
         amount: rewardAmount,
         note: correlationKey,

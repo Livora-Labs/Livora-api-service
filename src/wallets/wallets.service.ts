@@ -133,6 +133,31 @@ export class WalletsService {
       }
     }
 
+    // Sumar transferencias recibidas (recompensas de misiones de bosque o transferencias P2P recibidas)
+    const receivedTransfers = await this.prisma.walletTransfer.findMany({
+      where: { receiverUserId: user.id, status: 'COMPLETED' },
+      select: { amount: true },
+    });
+    const totalTransfersReceived = receivedTransfers.reduce(
+      (sum, t) => sum + Number(t.amount),
+      0,
+    );
+    totalEarned += totalTransfersReceived;
+
+    // Restar transferencias P2P enviadas a otros usuarios (excluyendo abonos internos donde sender == receiver)
+    const sentP2PTransfers = await this.prisma.walletTransfer.findMany({
+      where: {
+        senderUserId: user.id,
+        receiverUserId: { not: user.id },
+        status: 'COMPLETED',
+      },
+      select: { amount: true },
+    });
+    const totalTransfersSent = sentP2PTransfers.reduce(
+      (sum, t) => sum + Number(t.amount),
+      0,
+    );
+
     const payments = await this.prisma.paymentTransaction.findMany({
       where: { userId: user.id, status: 'COMPLETED' },
       select: { tokenAmount: true },
@@ -140,7 +165,7 @@ export class WalletsService {
     const totalPayments = payments.reduce((sum, p) => sum + Number(p.tokenAmount), 0);
     totalEarned += totalPayments;
 
-    const finalBalance = Math.max(0, totalEarned - totalSpent);
+    const finalBalance = Math.max(0, totalEarned - totalSpent - totalTransfersSent);
     return { balance: finalBalance.toFixed(2) };
   }
 
@@ -413,7 +438,10 @@ export class WalletsService {
 
     // 3. Transferencias P2P (enviadas y recibidas) — para todos los roles
     const sentTransfers = await this.prisma.walletTransfer.findMany({
-      where: { senderUserId: userId },
+      where: {
+        senderUserId: userId,
+        receiverUserId: { not: userId }, // Excluir abonos internos donde el usuario figuró como emisor y receptor
+      },
       include: {
         receiver: { select: { name: true, email: true, walletAddress: true } },
       },
@@ -445,15 +473,17 @@ export class WalletsService {
     });
 
     for (const t of receivedTransfers) {
+      const isForestReward = t.note?.startsWith('FOREST_');
       txs.push({
         id: t.id + '_recv',
-        type: 'TRANSFERENCIA_P2P',
+        type: isForestReward ? 'RECOMPENSA_RECICLAJE' : 'TRANSFERENCIA_P2P',
         amount: Number(t.amount),
         direction: 'IN',
-        recipientName:
-          t.sender?.name ||
-          t.sender?.email?.split('@')[0] ||
-          t.fromAddress.slice(0, 8) + '...',
+        recipientName: isForestReward
+          ? 'Misión Mi Bosque (LIVOs)'
+          : t.sender?.name ||
+            t.sender?.email?.split('@')[0] ||
+            t.fromAddress.slice(0, 8) + '...',
         recipientWallet: t.fromAddress,
         txHash: t.txHash || null,
         createdAt: t.createdAt,
