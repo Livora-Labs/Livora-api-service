@@ -13,6 +13,22 @@ export class AppController {
     return this.appService.getHello();
   }
 
+  @Get('app/version')
+  @ApiOperation({
+    summary: 'Consulta la versión mínima y recomendada de la app móvil Livora',
+  })
+  getAppVersion() {
+    return this.appService.getAppVersion();
+  }
+
+  @Get('common/app-version')
+  @ApiOperation({
+    summary: 'Alias de compatibilidad para consulta de versión de app móvil',
+  })
+  getCommonAppVersion() {
+    return this.appService.getAppVersion();
+  }
+
   @Get('debug-sentry')
   @ApiOperation({
     summary: 'Endpoint de diagnóstico para probar captura de errores en Sentry',

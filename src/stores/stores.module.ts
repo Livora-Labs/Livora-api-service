@@ -7,6 +7,7 @@ import { WebsocketsModule } from '../websockets/websockets.module';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { RedisModule } from '../redis/redis.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { RoutingModule } from '../routing/routing.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     WebsocketsModule,
     BlockchainModule,
     NotificationsModule,
+    RoutingModule,
   ],
   controllers: [StoresController],
   providers: [StoresService],

@@ -15,6 +15,7 @@ import { WalletsService } from '../wallets/wallets.service';
 import { WebsocketsService } from '../websockets/websockets.service';
 import { BlockchainService } from '../blockchain/services/blockchain.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RoutingService } from '../routing/routing.service';
 import { CreateStoreProfileDto } from './dto/create-store-profile.dto';
 import { CreateQrRedemptionDto } from './dto/create-qr-redemption.dto';
 import { CreateSettlementRequestDto } from './dto/create-settlement-request.dto';
@@ -37,7 +38,40 @@ export class StoresService {
     private readonly blockchainService: BlockchainService,
     @InjectQueue('blockchain-queue') private readonly blockchainQueue: Queue,
     @Optional() private readonly notificationsService?: NotificationsService,
+    @Optional() private readonly routingService?: RoutingService,
   ) {}
+
+  /**
+   * Resuelve coordenadas geográficas para una dirección física.
+   */
+  private async resolveCoordinates(
+    address?: string,
+    explicitLat?: number,
+    explicitLng?: number,
+  ): Promise<{ lat?: number; lng?: number }> {
+    if (
+      explicitLat != null &&
+      explicitLng != null &&
+      Number(explicitLat) !== 0 &&
+      Number(explicitLng) !== 0
+    ) {
+      return { lat: Number(explicitLat), lng: Number(explicitLng) };
+    }
+    if (!address || !address.trim() || !this.routingService) {
+      return {};
+    }
+    try {
+      const geoResults = await this.routingService.searchAddress(address.trim());
+      if (geoResults && geoResults.length > 0) {
+        return { lat: geoResults[0].latitude, lng: geoResults[0].longitude };
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `No se pudo geocodificar la dirección "${address}": ${err.message}`,
+      );
+    }
+    return {};
+  }
 
   /**
    * POST /stores/profile
@@ -55,6 +89,29 @@ export class StoresService {
       );
     }
 
+    // Resolver coordenadas geográficas (explícitas o a través de geocodificación de address)
+    const coords = await this.resolveCoordinates(
+      dto.address,
+      dto.latitude,
+      dto.longitude,
+    );
+
+    // Actualizar coordenadas y datos en la tabla User
+    await this.prisma.user
+      .update({
+        where: { id: userId },
+        data: {
+          name: dto.businessName ?? undefined,
+          address: dto.address ?? undefined,
+          ...(coords.lat != null && coords.lng != null
+            ? { latitude: coords.lat, longitude: coords.lng }
+            : {}),
+        },
+      })
+      .catch((err) => {
+        this.logger.warn(`Error al actualizar usuario para tienda ${userId}: ${err.message}`);
+      });
+
     return this.prisma.storeProfile.create({
       data: {
         userId,
@@ -71,6 +128,8 @@ export class StoresService {
             email: true,
             role: true,
             walletAddress: true,
+            latitude: true,
+            longitude: true,
           },
         },
       },
@@ -758,7 +817,26 @@ export class StoresService {
       where: { userId },
     });
 
+    const coords = await this.resolveCoordinates(
+      dto.address,
+      dto.latitude,
+      dto.longitude,
+    );
+
     if (!profile) {
+      await this.prisma.user
+        .update({
+          where: { id: userId },
+          data: {
+            name: dto.businessName ?? undefined,
+            address: dto.address ?? undefined,
+            ...(coords.lat != null && coords.lng != null
+              ? { latitude: coords.lat, longitude: coords.lng }
+              : {}),
+          },
+        })
+        .catch(() => {});
+
       return this.prisma.storeProfile.create({
         data: {
           userId,
@@ -771,13 +849,18 @@ export class StoresService {
       });
     }
 
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        name: dto.businessName ?? undefined,
-        address: dto.address ?? undefined,
-      },
-    }).catch(() => {});
+    await this.prisma.user
+      .update({
+        where: { id: userId },
+        data: {
+          name: dto.businessName ?? undefined,
+          address: dto.address ?? undefined,
+          ...(coords.lat != null && coords.lng != null
+            ? { latitude: coords.lat, longitude: coords.lng }
+            : {}),
+        },
+      })
+      .catch(() => {});
 
     return this.prisma.storeProfile.update({
       where: { id: profile.id },
@@ -929,27 +1012,58 @@ export class StoresService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return stores.map((u) => {
-      const sp = u.storeProfile;
-      const name = sp?.businessName || u.name || 'Comercio Aliado';
-      return {
-        id: sp?.id || u.id,
-        userId: u.id,
-        name,
-        businessName: sp?.businessName || u.name || name,
-        category: 'BioFerias & Orgánicos',
-        address: sp?.address || u.address || 'Lima, Perú',
-        latitude: u.latitude || -12.1215,
-        longitude: u.longitude || -77.0298,
-        phone: u.phone || '+51 956789012',
-        email: u.email,
-        discount: 'Canje 1 LIVO = S/ 1.00 PEN',
-        description:
-          'Comercio eco-amigable aliado al ecosistema Livora para canje de LIVOs.',
-        walletAddress: u.walletAddress,
-        logoUrl: sp?.logoUrl,
-        ruc: sp?.ruc,
-      };
-    });
+    return Promise.all(
+      stores.map(async (u, index) => {
+        const sp = u.storeProfile;
+        const name = sp?.businessName || u.name || 'Comercio Aliado';
+        const address = sp?.address || u.address || 'Lima, Perú';
+
+        let lat = u.latitude;
+        let lng = u.longitude;
+
+        // Si la tienda aún no tiene coordenadas en users, intentar resolverlas dinámicamente y guardarlas
+        if ((lat == null || lng == null) && address && this.routingService) {
+          try {
+            const resolved = await this.resolveCoordinates(address);
+            if (resolved.lat != null && resolved.lng != null) {
+              lat = resolved.lat;
+              lng = resolved.lng;
+              // Guardar asíncronamente en BD para evitar futuras búsquedas
+              this.prisma.user
+                .update({
+                  where: { id: u.id },
+                  data: { latitude: lat, longitude: lng },
+                })
+                .catch(() => {});
+            }
+          } catch {}
+        }
+
+        // Si todavía es null por alguna dirección irreconocible, dispersar ligeramente para evitar agrupación en un solo punto
+        const finalLat =
+          lat ?? Number((-12.1215 + (index * 0.007)).toFixed(6));
+        const finalLng =
+          lng ?? Number((-77.0298 + (index * 0.007)).toFixed(6));
+
+        return {
+          id: sp?.id || u.id,
+          userId: u.id,
+          name,
+          businessName: sp?.businessName || u.name || name,
+          category: 'BioFerias & Orgánicos',
+          address,
+          latitude: finalLat,
+          longitude: finalLng,
+          phone: u.phone || '+51 956789012',
+          email: u.email,
+          discount: 'Canje 1 LIVO = S/ 1.00 PEN',
+          description:
+            'Comercio eco-amigable aliado al ecosistema Livora para canje de LIVOs.',
+          walletAddress: u.walletAddress,
+          logoUrl: sp?.logoUrl,
+          ruc: sp?.ruc,
+        };
+      }),
+    );
   }
 }

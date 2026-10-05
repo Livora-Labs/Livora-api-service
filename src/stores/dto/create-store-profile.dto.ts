@@ -27,6 +27,20 @@ export class CreateStoreProfileDto {
   address: string;
 
   @ApiPropertyOptional({
+    example: -12.1292494,
+    description: 'Latitud geográfica de la tienda',
+  })
+  @IsOptional()
+  latitude?: number;
+
+  @ApiPropertyOptional({
+    example: -77.0297057,
+    description: 'Longitud geográfica de la tienda',
+  })
+  @IsOptional()
+  longitude?: number;
+
+  @ApiPropertyOptional({
     example: 'BCP - CCI: 002-191001234567890-54',
     description: 'Cuenta bancaria o CCI para recibir las liquidaciones',
   })
