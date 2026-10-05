@@ -40,6 +40,16 @@ export class NotificationsController {
     return this.notificationsService.findAll(userId, query);
   }
 
+  @Patch('mark-all-read')
+  @ApiOperation({ summary: 'Marcar todas las notificaciones como leídas atómicamente' })
+  @ApiResponse({
+    status: 200,
+    description: 'Todas las notificaciones marcadas como leídas',
+  })
+  async markAllAsRead(@CurrentUser('id') userId: string) {
+    return this.notificationsService.markAllAsRead(userId);
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Marcar notificación como leída/no leída' })
   @ApiResponse({

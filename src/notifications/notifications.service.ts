@@ -115,6 +115,27 @@ export class NotificationsService {
   }
 
   /**
+   * PATCH /notifications/mark-all-read
+   * Marca atómicamente todas las notificaciones no leídas del usuario como leídas
+   */
+  async markAllAsRead(userId: string) {
+    const result = await this.prisma.notification.updateMany({
+      where: {
+        userId,
+        isRead: false,
+      },
+      data: {
+        isRead: true,
+      },
+    });
+
+    return {
+      success: true,
+      count: result.count,
+    };
+  }
+
+  /**
    * Envía una notificación Push FCM y la guarda en la base de datos
    */
   async sendPushNotification(
