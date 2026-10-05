@@ -417,6 +417,20 @@ export class UsersService implements OnModuleInit {
       });
     }
 
+    // Sincronización bidireccional defensiva: si el usuario es TIENDA y actualiza su nombre/dirección,
+    // reflejar de inmediato en su storeProfile para evitar desincronizaciones en mapa y catálogos.
+    if (user.role === Role.TIENDA) {
+      await this.prisma.storeProfile
+        .updateMany({
+          where: { userId: id },
+          data: {
+            businessName: dto.name !== undefined ? dto.name : undefined,
+            address: dto.address !== undefined ? dto.address : undefined,
+          },
+        })
+        .catch(() => {});
+    }
+
     return this.prisma.user.update({
       where: { id },
       data: {

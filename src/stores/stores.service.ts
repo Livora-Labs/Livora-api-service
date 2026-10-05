@@ -1015,7 +1015,23 @@ export class StoresService {
     return Promise.all(
       stores.map(async (u, index) => {
         const sp = u.storeProfile;
-        const name = sp?.businessName || u.name || 'Comercio Aliado';
+        const candidateStoreName = sp?.businessName?.trim();
+        const candidateUserName = u.name?.trim();
+        const emailPrefix = u.email ? u.email.split('@')[0] : '';
+
+        // Si el businessName es solo el prefijo del email pero el usuario tiene un nombre real (o viceversa),
+        // elegir el nombre más representativo y nunca un string provisional o vacío.
+        let name = 'Comercio Aliado';
+        if (candidateStoreName && candidateStoreName !== emailPrefix) {
+          name = candidateStoreName;
+        } else if (candidateUserName && candidateUserName !== emailPrefix) {
+          name = candidateUserName;
+        } else if (candidateStoreName) {
+          name = candidateStoreName;
+        } else if (candidateUserName) {
+          name = candidateUserName;
+        }
+
         const address = sp?.address || u.address || 'Lima, Perú';
 
         let lat = u.latitude;

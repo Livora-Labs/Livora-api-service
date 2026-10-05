@@ -88,6 +88,13 @@ export class AdminService {
           logoUrl: dto.documentUrl ?? undefined,
         },
       }).catch(() => {});
+
+      if (dto.businessName) {
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { name: dto.businessName },
+        }).catch(() => {});
+      }
     }
 
     return this.prisma.kycApplication.create({
