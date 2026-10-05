@@ -27,6 +27,7 @@ import { ComplaintsModule } from './complaints/complaints.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { PaymentsModule } from './payments/payments.module';
 import { RoutingModule } from './routing/routing.module';
+import { GamificationModule } from './gamification/gamification.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { RedisModule } from './redis/redis.module';
@@ -84,6 +85,7 @@ import { AuditLogBufferService } from './common/services/audit-log-buffer.servic
     UploadsModule,
     PaymentsModule,
     RoutingModule,
+    GamificationModule,
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
