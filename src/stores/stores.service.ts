@@ -1005,6 +1005,7 @@ export class StoresService {
       where: {
         role: Role.TIENDA,
         isActive: true,
+        kycStatus: 'APPROVED',
       },
       include: {
         storeProfile: true,

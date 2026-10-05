@@ -156,49 +156,7 @@ export class AdminService {
     const limit = query.limit ?? 20;
     const skip = (page - 1) * limit;
 
-    // Auto-sincronizar comercios con perfil registrado que aún no cuenten con expediente formal
-    try {
-      const storesWithoutKyc = await this.prisma.user.findMany({
-        where: {
-          role: Role.TIENDA,
-          kycApplications: { none: {} },
-        },
-        include: {
-          storeProfile: true,
-        },
-      });
-
-      for (const storeUser of storesWithoutKyc) {
-        const sp = storeUser.storeProfile;
-        if (sp) {
-          const docUrl = sp.logoUrl || null;
-          const ruc = sp.ruc || null;
-          const bName = sp.businessName || storeUser.name || 'Comercio Aliado';
-          await this.prisma.kycApplication.create({
-            data: {
-              userId: storeUser.id,
-              status: storeUser.kycStatus === 'APPROVED' ? 'APPROVED' : 'PENDING',
-              documentType: 'RUC',
-              documentNumber: ruc,
-              taxIdRuc: ruc,
-              businessName: bName,
-              bankCci: sp.bankAccount || null,
-              documentUrl: docUrl,
-            },
-          }).catch(() => {});
-
-          if (storeUser.kycStatus === 'UNVERIFIED') {
-            await this.prisma.user.update({
-              where: { id: storeUser.id },
-              data: { kycStatus: 'PENDING' },
-            }).catch(() => {});
-          }
-        }
-      }
-    } catch (e: any) {
-      this.logger.warn(`Auto-sincronización de KYC de tiendas: ${e.message}`);
-    }
-
+    // Solo se listan solicitudes KYC formales que los usuarios enviaron explícitamente a través de sus formularios.
     const readPrisma =
       (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
 
