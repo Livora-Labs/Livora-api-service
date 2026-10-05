@@ -198,7 +198,7 @@ export class UsersService implements OnModuleInit {
                 ruc:
                   '20' +
                   Math.floor(100000000 + Math.random() * 900000000).toString(),
-                address: 'Av. Principal 123',
+                address: '',
                 bankAccount: '000-00000000-0-00',
               },
             })
