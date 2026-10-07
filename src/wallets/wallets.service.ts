@@ -117,7 +117,7 @@ export class WalletsService {
               (await this.blockchainService.getMaterialRate(mat));
             reqTotal += wt * rate;
           }
-          totalEarned += reqTotal * 0.40;
+          totalEarned += reqTotal * 0.25;
         }
       }
     } else if (user.role === 'TIENDA') {
@@ -414,7 +414,7 @@ export class WalletsService {
           const isDonation = (r as any).isDonation;
           const rewardAmount = isDonation
             ? 0
-            : Number((r as any).householdRewardEarned) || reqTotal * 0.4;
+            : Number((r as any).householdRewardEarned) || reqTotal * 0.25;
           if (rewardAmount > 0 || isDonation) {
             txs.push({
               id: r.id,

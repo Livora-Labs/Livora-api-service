@@ -275,7 +275,7 @@ export class CollectionsService {
       totalEstimatedPenn += weight * rate;
     }
 
-    const totalEstimatedEco = parseFloat((totalEstimatedPenn * 0.40).toFixed(2));
+    const totalEstimatedEco = parseFloat((totalEstimatedPenn * 0.25).toFixed(2));
     totalEstimatedPenn = parseFloat(totalEstimatedPenn.toFixed(2));
 
     const existingBid = await this.prisma.acopioBid.findFirst({
@@ -892,7 +892,7 @@ export class CollectionsService {
             totalEstimatedPenn += weight * rate;
           }
 
-          requiredEscrow = parseFloat((totalEstimatedPenn * 0.50).toFixed(2));
+          requiredEscrow = parseFloat((totalEstimatedPenn * 0.70).toFixed(2));
 
           // Consultar saldo disponible del recolector
           let totalBalance = 0;
@@ -1163,8 +1163,8 @@ export class CollectionsService {
       }
 
       const isDonation = collectionRequest.isDonation;
-      const hogarAmount = isDonation ? 0.00 : parseFloat((totalActualValue * 0.40).toFixed(2));
-      const treasuryAmount = isDonation ? 0.00 : parseFloat((totalActualValue * 0.10).toFixed(2));
+      const hogarAmount = isDonation ? 0.00 : parseFloat((totalActualValue * 0.25).toFixed(2));
+      const treasuryAmount = parseFloat((totalActualValue * 0.05).toFixed(2));
 
       const householdUser = collectionRequest.household;
       const collectorUser = collectionRequest.collector;
@@ -1226,9 +1226,8 @@ export class CollectionsService {
         }
       }
 
-      // Transferir 10% a Tesorería de Livora en LIVOs si recolector tiene fondos on-chain y no es donación
+      // Transferir comisión a Tesorería de Livora en LIVOs si recolector tiene fondos on-chain
       if (
-        !isDonation &&
         collectorUser?.encryptedPrivateKey &&
         treasuryWallet &&
         treasuryAmount > 0 &&

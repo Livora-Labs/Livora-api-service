@@ -54,6 +54,9 @@ export class UsersController {
       latitude: u.latitude,
       longitude: u.longitude,
       marketingAccepted: u.marketingAccepted,
+      dniDocumentNumber: u.dniDocumentNumber,
+      dniPhotoUrl: u.dniPhotoUrl,
+      profilePhotoUrl: u.profilePhotoUrl,
       termsVersion: lastAudit?.termsVersion || '2.0.0',
       privacyVersion: lastAudit?.privacyVersion || '2.0.0',
     };
