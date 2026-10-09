@@ -6,7 +6,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
-import { SupabaseService } from '../supabase/supabase.service';
+import { TokenService } from '../auth/services/token.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @WebSocketGateway({
@@ -27,7 +27,7 @@ export class WebsocketsGateway
   private readonly logger = new Logger(WebsocketsGateway.name);
 
   constructor(
-    private readonly supabaseService: SupabaseService,
+    private readonly tokenService: TokenService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -49,18 +49,16 @@ export class WebsocketsGateway
       if (token.startsWith('e2e-token-')) {
         userId = token.replace('e2e-token-', '');
       } else {
-        const { data, error } = await this.supabaseService
-          .getClient()
-          .auth.getUser(token);
-
-        if (error || !data.user) {
+        try {
+          const payload = this.tokenService.verifyAccessToken(token);
+          userId = payload.sub;
+        } catch (err: any) {
           this.logger.warn(
-            `Conexión rechazada (Socket ${client.id}): token inválido (${error?.message || 'sin usuario'}).`,
+            `Conexión rechazada (Socket ${client.id}): token inválido (${err?.message || 'sin usuario'}).`,
           );
           client.disconnect();
           return;
         }
-        userId = data.user.id;
       }
 
       // El rol de la app (HOGAR/RECOLECTOR/...) vive en PostgreSQL, NO en el JWT

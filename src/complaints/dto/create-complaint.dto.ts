@@ -84,4 +84,8 @@ export class CreateComplaintDto {
   @IsOptional()
   @IsUUID('all', { message: 'userId debe ser un UUID válido' })
   userId?: string;
+
+  @IsOptional()
+  @IsString()
+  turnstileToken?: string;
 }

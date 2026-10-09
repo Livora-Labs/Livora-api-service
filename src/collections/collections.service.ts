@@ -10,7 +10,6 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
-import { SupabaseService } from '../supabase/supabase.service';
 import { IpfsService } from '../blockchain/services/ipfs.service';
 import { BlockchainService } from '../blockchain/services/blockchain.service';
 import { WebsocketsService } from '../websockets/websockets.service';
@@ -36,7 +35,6 @@ export class CollectionsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly supabaseService: SupabaseService,
     private readonly ipfsService: IpfsService,
     private readonly blockchainService: BlockchainService,
     private readonly websocketsService: WebsocketsService,

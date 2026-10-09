@@ -6,7 +6,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from 'nestjs-throttler-storage-redis';
 import { RoleThrottlerGuard } from './common/guards/role-throttler.guard';
 import { PrismaModule } from './prisma/prisma.module';
-import { SupabaseModule } from './supabase/supabase.module';
+import { StorageModule } from './storage/storage.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { CollectionsModule } from './collections/collections.module';
@@ -64,7 +64,7 @@ import { AuditLogBufferService } from './common/services/audit-log-buffer.servic
       }),
     }),
     PrismaModule,
-    SupabaseModule,
+    StorageModule,
     UsersModule,
     AuthModule,
     CollectionsModule,

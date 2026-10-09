@@ -9,12 +9,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { SupabaseService } from '../supabase/supabase.service';
 import { RegisterDto } from '../auth/dto/register.dto';
 import { CryptoUtil } from '../common/utils/crypto.util';
 import { Keypair } from '@stellar/stellar-sdk';
 import { User, ConsentAudit, RequestStatus, Role, PlatformType } from '@prisma/client';
 import * as crypto from 'crypto';
+import * as bcrypt from 'bcryptjs';
 import { WalletsService } from '../wallets/wallets.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
@@ -26,7 +26,6 @@ export class UsersService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
-    private readonly supabaseService: SupabaseService,
     @Optional()
     private readonly walletsService?: WalletsService,
   ) {}
@@ -100,136 +99,15 @@ export class UsersService implements OnModuleInit {
   }
 
   async autoProvisionFromAuth(userOrId: string | any): Promise<User | null> {
-    try {
-      let authUser: any =
-        typeof userOrId === 'object' && userOrId !== null ? userOrId : null;
-
-      if (!authUser && typeof userOrId === 'string') {
-        const supabaseClient = this.supabaseService.getClient();
-        const { data, error } =
-          await supabaseClient.auth.admin.getUserById(userOrId);
-        if (error || !data?.user) {
-          this.logger.warn(
-            `autoProvisionFromAuth: user ${userOrId} not found in Supabase Auth`,
-          );
-          return null;
-        }
-        authUser = data.user;
-      }
-
-      if (!authUser || !authUser.id || !authUser.email) {
-        return null;
-      }
-
-      // 1. Check if user already exists
-      const existing = await this.prisma.user.findUnique({
-        where: { id: authUser.id },
-      });
-      if (existing) {
-        return existing;
-      }
-
-      // 2. Defend against stale records with same email but different ID
-      const userByEmail = await this.prisma.user.findUnique({
-        where: { email: authUser.email },
-      });
-      if (userByEmail && userByEmail.id !== authUser.id) {
-        await this.prisma.user.update({
-          where: { id: userByEmail.id },
-          data: { email: `stale_${Date.now()}_${userByEmail.email}` },
-        });
-      }
-
-      // 3. Determine role from user metadata or email prefix
-      const rawRole = authUser.user_metadata?.role;
-      let role: Role = Role.HOGAR;
-      if (rawRole && Object.values(Role).includes(rawRole as Role)) {
-        role = rawRole as Role;
-      } else {
-        const emailLower = authUser.email.toLowerCase();
-        if (emailLower.includes('recolector')) role = Role.RECOLECTOR;
-        else if (emailLower.includes('centro') || emailLower.includes('acopio'))
-          role = Role.CENTRO_ACOPIO;
-        else if (emailLower.includes('tienda')) role = Role.TIENDA;
-        else if (emailLower.includes('empresa')) role = Role.EMPRESA_B2B;
-        else if (emailLower.includes('admin')) role = Role.ADMIN;
-      }
-
-      const name =
-        authUser.user_metadata?.name ||
-        authUser.user_metadata?.full_name ||
-        authUser.email.split('@')[0];
-
-      // 4. Generate Web3 Stellar Keypair
-      const pair = Keypair.random();
-      const walletAddress = pair.publicKey();
-      const privateKey = pair.secret();
-
-      const encryptionKey = this.getMasterEncryptionKey();
-      const encryptedPrivateKey = CryptoUtil.encrypt(privateKey, encryptionKey);
-
-      // 5. Create user record in PostgreSQL
-      const newUser = await this.prisma.user.upsert({
-        where: { id: authUser.id },
-        update: {},
-        create: {
-          id: authUser.id,
-          email: authUser.email,
-          role,
-          name,
-          walletAddress,
-          encryptedPrivateKey,
-          marketingAccepted: false,
-          isActive: true,
-        },
-      });
-
-      // 6. If TIENDA, ensure StoreProfile exists
-      if (role === Role.TIENDA) {
-        const store = await this.prisma.storeProfile.findUnique({
-          where: { userId: newUser.id },
-        });
-        if (!store) {
-          await this.prisma.storeProfile
-            .create({
-              data: {
-                userId: newUser.id,
-                businessName: name || 'Tienda Aliada',
-                ruc:
-                  '20' +
-                  Math.floor(100000000 + Math.random() * 900000000).toString(),
-                address: '',
-                bankAccount: '000-00000000-0-00',
-              },
-            })
-            .catch((err) =>
-              this.logger.error(
-                `Error creating StoreProfile in autoProvision: ${err.message}`,
-              ),
-            );
-        }
-      }
-
-      if (process.env.NODE_ENV !== 'test') {
-        this.userCache.set(newUser.id, { user: newUser, expires: Date.now() + 10000 });
-      }
-
-      this.logger.log(
-        `Auto-provisioned local user ${newUser.id} (${newUser.email}) with role ${newUser.role}`,
-      );
-      return newUser;
-    } catch (err: any) {
-      this.logger.error(
-        `Failed to auto-provision user: ${err.message}`,
-        err.stack,
-      );
-      return null;
-    }
+    const id = typeof userOrId === 'string' ? userOrId : userOrId?.id;
+    if (!id) return null;
+    return this.findById(id);
   }
 
   async create(
-    supabaseUserId: string,
+    userId: string,
     registerDto: RegisterDto,
+    passwordHash?: string,
   ): Promise<Omit<User, 'encryptedPrivateKey'>> {
     const existingUser = await this.findByEmail(registerDto.email);
     if (existingUser) {
@@ -249,29 +127,46 @@ export class UsersService implements OnModuleInit {
     // Encriptar clave privada con AES-256-GCM
     const encryptedPrivateKey = CryptoUtil.encrypt(privateKey, encryptionKey);
 
-    // Guardar usuario en PostgreSQL utilizando el id retornado por Supabase
-    const createdUser = await this.prisma.user.create({
-      data: {
-        id: supabaseUserId,
-        email: registerDto.email,
-        role: registerDto.role,
-        walletAddress,
-        encryptedPrivateKey,
-        marketingAccepted: registerDto.marketingAccepted ?? false,
-      },
-    });
-
-    // Auto-aprovisionar perfil de tienda inicial si el rol es TIENDA
-    if (registerDto.role === Role.TIENDA) {
-      await this.prisma.storeProfile.create({
+    // Guardar usuario en PostgreSQL utilizando transacción atómica
+    const createdUser = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
         data: {
-          userId: supabaseUserId,
-          businessName: registerDto.email.split('@')[0],
-          ruc: '',
-          address: '',
-          bankAccount: '',
+          id: userId,
+          email: registerDto.email,
+          role: registerDto.role,
+          walletAddress,
+          encryptedPrivateKey,
+          marketingAccepted: registerDto.marketingAccepted ?? false,
         },
       });
+
+      if (passwordHash) {
+        await tx.userCredential.create({
+          data: {
+            userId: user.id,
+            passwordHash,
+          },
+        });
+      }
+
+      // Auto-aprovisionar perfil de tienda inicial si el rol es TIENDA
+      if (registerDto.role === Role.TIENDA) {
+        await tx.storeProfile.create({
+          data: {
+            userId: user.id,
+            businessName: registerDto.email.split('@')[0],
+            ruc: '',
+            address: '',
+            bankAccount: '',
+          },
+        });
+      }
+
+      return user;
+    });
+
+    if (process.env.NODE_ENV !== 'test') {
+      this.userCache.set(createdUser.id, { user: createdUser, expires: Date.now() + 10000 });
     }
 
     // Retornar usuario despojando campos sensibles
@@ -358,17 +253,12 @@ export class UsersService implements OnModuleInit {
       await tx.betaSignup.deleteMany({
         where: { email: originalEmail },
       });
-    });
 
-    // 7. Eliminar identidad en Supabase Auth admin API (defensivo)
-    try {
-      const supabaseClient = this.supabaseService.getClient();
-      await supabaseClient.auth.admin.deleteUser(id);
-    } catch (error: any) {
-      this.logger.warn(
-        `Error al eliminar usuario en Supabase Auth durante ARCO: ${error?.message || error}`,
-      );
-    }
+      // 7. Eliminar credenciales de acceso asociadas
+      await tx.userCredential.deleteMany({
+        where: { userId: id },
+      });
+    });
 
     return {
       success: true,
@@ -445,12 +335,13 @@ export class UsersService implements OnModuleInit {
   }
 
   async changePassword(id: string, newPassword: string, currentPassword?: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: { credentials: true },
+    });
     if (!user || !user.isActive || user.deletedAt) {
       throw new NotFoundException('Usuario no encontrado');
     }
-
-    const supabaseClient = this.supabaseService.getClient();
 
     if (currentPassword && currentPassword === newPassword) {
       throw new BadRequestException(
@@ -459,23 +350,31 @@ export class UsersService implements OnModuleInit {
     }
 
     if (currentPassword) {
-      const { error: verifyErr } = await supabaseClient.auth.signInWithPassword({
-        email: user.email,
-        password: currentPassword,
-      });
-      if (verifyErr) {
+      if (!user.credentials) {
+        throw new BadRequestException('El usuario no posee credenciales registradas');
+      }
+      const isMatch = await bcrypt.compare(currentPassword, user.credentials.passwordHash);
+      if (!isMatch) {
         throw new BadRequestException('La contraseña actual es incorrecta.');
       }
     }
 
-    const { error } = await supabaseClient.auth.admin.updateUserById(id, {
-      password: newPassword,
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.userCredential.upsert({
+      where: { userId: id },
+      update: {
+        passwordHash,
+        failedAttempts: 0,
+        lockedUntil: null,
+        lastPasswordChange: new Date(),
+      },
+      create: {
+        userId: id,
+        passwordHash,
+        lastPasswordChange: new Date(),
+      },
     });
-    if (error) {
-      throw new BadRequestException(
-        error.message || 'Error al actualizar la contraseña en Supabase',
-      );
-    }
+
     return { success: true, message: 'Contraseña actualizada con éxito' };
   }
 

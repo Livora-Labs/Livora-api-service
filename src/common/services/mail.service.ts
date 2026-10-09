@@ -44,7 +44,7 @@ export class MailService {
     // bloquean imágenes en base64). Configurable con EMAIL_LOGO_URL.
     const logoUrl = this.configService.get<string>(
       'EMAIL_LOGO_URL',
-      'https://52.200.2.107.sslip.io/assets/livora-logo.png',
+      'https://grupolivoralabs.com/images/livora-logotipo.png',
     );
     const year = new Date().getFullYear();
     const htmlContent = `
@@ -343,7 +343,7 @@ export class MailService {
     const year = new Date().getFullYear();
     const logoUrl = this.configService.get<string>(
       'EMAIL_LOGO_URL',
-      'https://52.200.2.107.sslip.io/assets/livora-logo.png',
+      'https://grupolivoralabs.com/images/livora-logotipo.png',
     );
 
     const htmlContent = `

@@ -2,7 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ConflictException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SupabaseService } from '../supabase/supabase.service';
 import { ConfigService } from '@nestjs/config';
 import { WalletsService } from '../wallets/wallets.service';
 import { Role } from '@prisma/client';
@@ -10,30 +9,21 @@ import { Role } from '@prisma/client';
 describe('UsersService', () => {
   let service: UsersService;
   let mockPrismaService: any;
-  let mockSupabaseService: any;
-  let mockSupabaseClient: any;
 
   beforeEach(async () => {
-    mockSupabaseClient = {
-      auth: {
-        admin: {
-          deleteUser: jest.fn().mockResolvedValue({ error: null }),
-        },
-      },
-    };
-
-    mockSupabaseService = {
-      getClient: jest.fn().mockReturnValue(mockSupabaseClient),
-    };
-
     mockPrismaService = {
       user: {
         findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
       },
+      userCredential: {
+        create: jest.fn(),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       storeProfile: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        create: jest.fn().mockResolvedValue({ id: 'store-1' }),
       },
       kycApplication: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -59,7 +49,6 @@ describe('UsersService', () => {
       providers: [
         UsersService,
         { provide: PrismaService, useValue: mockPrismaService },
-        { provide: SupabaseService, useValue: mockSupabaseService },
         {
           provide: WalletsService,
           useValue: {
@@ -234,28 +223,10 @@ describe('UsersService', () => {
         where: { email: 'citizen@livora.io' },
       });
 
-      // 7. Supabase user deletion
-      expect(mockSupabaseClient.auth.admin.deleteUser).toHaveBeenCalledWith(
-        'user-1234-5678',
-      );
-    });
-
-    it('should complete ARCO deletion successfully even if Supabase deleteUser throws', async () => {
-      const activeUser = {
-        id: 'user-999',
-        email: 'user999@livora.io',
-        isActive: true,
-        deletedAt: null,
-      };
-      mockPrismaService.user.findUnique.mockResolvedValue(activeUser);
-      mockSupabaseClient.auth.admin.deleteUser.mockRejectedValue(
-        new Error('Supabase network timeout'),
-      );
-
-      const result = await service.cancelAccountARCO('user-999');
-
-      expect(result.success).toBe(true);
-      expect(mockPrismaService.user.update).toHaveBeenCalled();
+      // 7. Credential deletion
+      expect(mockPrismaService.userCredential.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1234-5678' },
+      });
     });
 
     it('should support anonymizeUser and deleteAccountGDPR aliases', async () => {
@@ -308,7 +279,6 @@ describe('UsersService', () => {
       const testService = new UsersService(
         mockPrismaService,
         configServiceMock as any,
-        mockSupabaseService,
       );
 
       expect(() => testService.onModuleInit()).toThrow(
@@ -323,7 +293,6 @@ describe('UsersService', () => {
       const testService = new UsersService(
         mockPrismaService,
         configServiceMock as any,
-        mockSupabaseService,
       );
 
       expect(() => testService.onModuleInit()).toThrow(
@@ -338,7 +307,6 @@ describe('UsersService', () => {
       const testService = new UsersService(
         mockPrismaService,
         configServiceMock as any,
-        mockSupabaseService,
       );
 
       expect(() => testService.onModuleInit()).toThrow(
@@ -356,7 +324,6 @@ describe('UsersService', () => {
       const testService = new UsersService(
         mockPrismaService,
         configServiceMock as any,
-        mockSupabaseService,
       );
 
       expect(() => testService.onModuleInit()).not.toThrow();

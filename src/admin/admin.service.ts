@@ -29,7 +29,7 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { FindUsersAdminQueryDto } from './dto/find-users-admin-query.dto';
 import { LedgerAuditQueryDto, ServerLogsQueryDto } from './dto/audit-query.dto';
 import { AdminResetPasswordDto } from './dto/admin-reset-password.dto';
-import { SupabaseService } from '../supabase/supabase.service';
+import * as bcrypt from 'bcryptjs';
 import { AuthService } from '../auth/auth.service';
 import { Role } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -56,8 +56,6 @@ export class AdminService {
     private readonly blockchainService?: BlockchainService,
     @Optional()
     private readonly configService?: ConfigService,
-    @Optional()
-    private readonly supabaseService?: SupabaseService,
     @Optional()
     private readonly authService?: AuthService,
     @Optional()
@@ -573,21 +571,23 @@ export class AdminService {
       message: '',
     };
 
-    // 1. Si se especificó nueva contraseña manual, actualizar en Supabase Auth
+    // 1. Si se especificó nueva contraseña manual, actualizar en PostgreSQL
     if (dto.newPassword) {
-      if (!this.supabaseService) {
-        throw new BadRequestException('Servicio de autenticación no disponible');
-      }
-      const supabaseClient = this.supabaseService.getClient();
-      const { error } = await supabaseClient.auth.admin.updateUserById(userId, {
-        password: dto.newPassword,
+      const passwordHash = await bcrypt.hash(dto.newPassword, 12);
+      await this.prisma.userCredential.upsert({
+        where: { userId },
+        update: {
+          passwordHash,
+          failedAttempts: 0,
+          lockedUntil: null,
+          lastPasswordChange: new Date(),
+        },
+        create: {
+          userId,
+          passwordHash,
+          lastPasswordChange: new Date(),
+        },
       });
-
-      if (error) {
-        throw new BadRequestException(
-          error.message || 'Error al actualizar la contraseña del usuario en Supabase Auth',
-        );
-      }
       results.passwordUpdated = true;
     }
 

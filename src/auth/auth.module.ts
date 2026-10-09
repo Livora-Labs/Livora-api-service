@@ -4,11 +4,27 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { PasswordService } from './services/password.service';
+import { TokenService } from './services/token.service';
+import { SessionService } from './services/session.service';
 
 @Module({
   imports: [UsersModule, PassportModule.register({ defaultStrategy: 'jwt' })],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService, JwtStrategy, PassportModule],
+  providers: [
+    AuthService,
+    PasswordService,
+    TokenService,
+    SessionService,
+    JwtStrategy,
+  ],
+  exports: [
+    AuthService,
+    PasswordService,
+    TokenService,
+    SessionService,
+    JwtStrategy,
+    PassportModule,
+  ],
 })
 export class AuthModule {}

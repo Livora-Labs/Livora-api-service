@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { SupabaseService } from '../supabase/supabase.service';
 import { IpfsService } from '../blockchain/services/ipfs.service';
 import { WebsocketsService } from '../websockets/websockets.service';
 import { CollectionsService } from '../collections/collections.service';
@@ -41,7 +40,6 @@ describe('CollectionsService - verifyPin', () => {
         CollectionsService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: RedisService, useValue: mockRedisService },
-        { provide: SupabaseService, useValue: {} },
         { provide: IpfsService, useValue: {} },
         {
           provide: BlockchainService,

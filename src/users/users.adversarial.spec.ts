@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SupabaseService } from '../supabase/supabase.service';
 import { ConfigService } from '@nestjs/config';
 import { WalletsService } from '../wallets/wallets.service';
 import { Role } from '@prisma/client';
@@ -16,18 +15,9 @@ import { StrKey } from '@stellar/stellar-sdk';
 describe('UsersService & Compliance Adversarial Unit Tests', () => {
   let service: UsersService;
   let mockPrisma: any;
-  let mockSupabaseClient: any;
   const encryptionKey = 'test_adversarial_aes256_secret_key!';
 
   beforeEach(async () => {
-    mockSupabaseClient = {
-      auth: {
-        admin: {
-          deleteUser: jest.fn().mockResolvedValue({ error: null }),
-        },
-      },
-    };
-
     mockPrisma = {
       user: {
         findUnique: jest.fn(),
@@ -35,8 +25,13 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
         update: jest.fn(),
         findMany: jest.fn(),
       },
+      userCredential: {
+        create: jest.fn(),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       storeProfile: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        create: jest.fn().mockResolvedValue({ id: 'store-1' }),
       },
       kycApplication: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -63,10 +58,6 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
       providers: [
         UsersService,
         { provide: PrismaService, useValue: mockPrisma },
-        {
-          provide: SupabaseService,
-          useValue: { getClient: () => mockSupabaseClient },
-        },
         {
           provide: WalletsService,
           useValue: { getBalance: jest.fn().mockResolvedValue('0.0') },
@@ -207,10 +198,10 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
         where: { email: 'citizen.multi@livora.io' },
       });
 
-      // Verify Supabase delete
-      expect(mockSupabaseClient.auth.admin.deleteUser).toHaveBeenCalledWith(
-        'user-multi-rel-1',
-      );
+      // Verify UserCredential delete
+      expect(mockPrisma.userCredential.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-multi-rel-1' },
+      });
     });
 
     it('rejects already deleted user on repeat ARCO attempt (idempotency defense)', async () => {
@@ -237,22 +228,6 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
       await expect(service.cancelAccountARCO('inactive-user')).rejects.toThrow(
         NotFoundException,
       );
-    });
-
-    it('handles Supabase admin API failure gracefully without breaking local transaction result', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
-        id: 'user-supa-fail',
-        email: 'supa.fail@livora.io',
-        isActive: true,
-        deletedAt: null,
-      });
-      mockSupabaseClient.auth.admin.deleteUser.mockRejectedValue(
-        new Error('Supabase 503 Unavailable'),
-      );
-
-      const res = await service.cancelAccountARCO('user-supa-fail');
-      expect(res.success).toBe(true);
-      expect(mockPrisma.user.update).toHaveBeenCalled();
     });
   });
 

@@ -26,18 +26,22 @@ import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { TurnstileService } from '../common/services/turnstile.service';
 
 @ApiTags('Libro de Reclamaciones')
 @Controller('complaints')
 export class ComplaintsController {
-  constructor(private readonly complaintsService: ComplaintsService) {}
+  constructor(
+    private readonly complaintsService: ComplaintsService,
+    private readonly turnstileService: TurnstileService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @Throttle({ complaints: { limit: 30, ttl: 3600000 } })
   @ApiOperation({
     summary:
-      'Registrar una nueva queja o reclamo en el Libro de Reclamaciones Virtual (Ley 29571 / Indecopi) — Máx. 3 por hora por IP',
+      'Registrar una nueva queja o reclamo en el Libro de Reclamaciones Virtual (Ley 29571 / Indecopi) — Protegido con Cloudflare Turnstile',
   })
   @ApiResponse({
     status: 201,
@@ -51,6 +55,12 @@ export class ComplaintsController {
     @Body() createComplaintDto: CreateComplaintDto,
     @Req() req: FastifyRequest,
   ) {
+    if (this.turnstileService) {
+      await this.turnstileService.verifyToken(
+        createComplaintDto.turnstileToken,
+        req.ip,
+      );
+    }
     const authenticatedUser = (req as any).user;
     return this.complaintsService.createComplaint(
       createComplaintDto,
