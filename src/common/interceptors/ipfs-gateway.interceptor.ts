@@ -17,7 +17,7 @@ export class IpfsGatewayInterceptor implements NestInterceptor {
     const gateway =
       (this.configService &&
         this.configService.get<string>('IPFS_GATEWAY_URL')) ||
-      'https://gateway.pinata.cloud/ipfs/';
+      'https://grupolivoralabs.com/ipfs/';
     this.gatewayUrl = gateway.endsWith('/') ? gateway : `${gateway}/`;
   }
 

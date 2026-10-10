@@ -52,6 +52,13 @@
 		file_server
 	}
 
+	# Gateway IPFS Corporativo Livora (acelerado por Cloudflare CDN)
+	handle /ipfs/* {
+		reverse_proxy https://gateway.pinata.cloud {
+			header_up Host gateway.pinata.cloud
+		}
+	}
+
 	# Endpoints de API Admin REST (matchers exactos para no interceptar páginas web Next.js como /admin/users-kyc o /admin/blockchain)
 	@api_admin {
 		path /admin/users /admin/users/* /admin/kyc-applications /admin/kyc-applications/* /admin/blockchain/health /admin/audit/* /admin/metrics /admin/metrics/* /admin/payments/*
@@ -132,6 +139,11 @@ www.grupolivoralabs.com {
 
 # API Stellar Dedicada (Mobile & Integraciones)
 api.grupolivoralabs.com {
+	handle /ipfs/* {
+		reverse_proxy https://gateway.pinata.cloud {
+			header_up Host gateway.pinata.cloud
+		}
+	}
 	reverse_proxy livora_api:3000
 }
 
