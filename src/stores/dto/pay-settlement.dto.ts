@@ -4,7 +4,7 @@ import { IsNotEmpty, IsUrl } from 'class-validator';
 export class PaySettlementDto {
   @ApiProperty({
     example:
-      'https://supabase.co/storage/v1/object/public/receipts/comprobante-123.pdf',
+      'https://media.grupolivoralabs.com/receipts/comprobante-123.pdf',
     description: 'URL del comprobante de pago de la liquidación',
   })
   @IsNotEmpty({ message: 'receiptUrl es obligatorio' })

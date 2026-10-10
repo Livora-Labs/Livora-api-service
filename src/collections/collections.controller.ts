@@ -28,7 +28,7 @@ import { RateCollectionDto } from './dto/rate-collection.dto';
 import { EditCollectionRequestDto } from './dto/edit-collection-request.dto';
 import { UpdateCollectionDto } from './dto/update-collection.dto';
 import { CollectorTelemetryDto } from './dto/collector-telemetry.dto';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -44,7 +44,7 @@ export interface AuthenticatedUser {
 @ApiBearerAuth()
 @IpfsTransform()
 @Controller('collection-requests')
-@UseGuards(SupabaseAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class CollectionsController {
   constructor(private readonly collectionsService: CollectionsService) {}
 

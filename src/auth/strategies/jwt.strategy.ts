@@ -4,7 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../../users/users.service';
 
-export interface SupabaseJwtPayload {
+export interface JwtPayload {
   sub: string;
   email?: string;
   aud?: string;
@@ -19,10 +19,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
   ) {
-    const jwtSecret = configService.get<string>('SUPABASE_JWT_SECRET');
+    const jwtSecret = configService.get<string>('JWT_SECRET');
     if (!jwtSecret && process.env.NODE_ENV !== 'test') {
       throw new Error(
-        'CRITICAL SECURITY ERROR: La variable de entorno SUPABASE_JWT_SECRET es obligatoria y no está configurada.',
+        'CRITICAL SECURITY ERROR: La variable de entorno JWT_SECRET es obligatoria y no está configurada.',
       );
     }
 
@@ -33,7 +33,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: SupabaseJwtPayload) {
+  async validate(payload: JwtPayload) {
     const user = await this.usersService.findById(payload.sub);
     if (!user) {
       throw new UnauthorizedException(

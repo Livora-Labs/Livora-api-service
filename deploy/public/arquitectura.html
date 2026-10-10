@@ -207,7 +207,8 @@
       <span class="chip">PostgreSQL 16 + PostGIS</span>
       <span class="chip">Redis · BullMQ</span>
       <span class="chip">IPFS · Pinata</span>
-      <span class="chip">Supabase Auth</span>
+      <span class="chip">Cloudflare R2 &amp; Turnstile</span>
+      <span class="chip">Native JWT Auth</span>
       <span class="chip">Ethers.js v6</span>
       <span class="chip">Socket.IO</span>
     </div>
@@ -217,7 +218,7 @@
     <h2>Vista general</h2>
     <figure>
       <div class="diagram-scroll">
-      <svg viewBox="0 0 960 500" role="img" aria-label="Diagrama de arquitectura: las apps móviles consumen el API Gateway NestJS, que usa Supabase Auth, PostgreSQL y Redis; un worker asíncrono publica el manifiesto en IPFS y registra el lote en el contrato EcoBatchRegistry de Arbitrum Stylus, notificando el resultado por WebSockets.">
+      <svg viewBox="0 0 960 500" role="img" aria-label="Diagrama de arquitectura: las apps móviles consumen el API Gateway NestJS, que usa Autenticación JWT Nativa, Cloudflare R2, PostgreSQL y Redis; un worker asíncrono publica el manifiesto en IPFS y registra el lote en el contrato Soroban, notificando el resultado por WebSockets.">
         <defs>
           <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0,0 L8,4 L0,8 z" fill="var(--ink)"></path>
@@ -262,12 +263,12 @@
         <line class="wire-soft" x1="250" y1="282" x2="202" y2="282" marker-end="url(#ahm)"></line>
         <text x="222" y="298" text-anchor="middle" class="edge">tiempo real</text>
 
-        <!-- Supabase -->
+        <!-- Cloudflare R2 -->
         <rect class="ext" x="548" y="64" width="180" height="52" rx="8"></rect>
-        <text x="638" y="86" text-anchor="middle" font-size="12.5" font-weight="600">Supabase Auth</text>
-        <text x="638" y="103" text-anchor="middle" class="sub">IdP · emisión y firma de JWT</text>
+        <text x="638" y="86" text-anchor="middle" font-size="12.5" font-weight="600">Cloudflare R2</text>
+        <text x="638" y="103" text-anchor="middle" class="sub">Storage S3 · multimedia y docs</text>
         <line class="wire" x1="480" y1="90" x2="542" y2="90" marker-end="url(#ah)"></line>
-        <text x="511" y="81" text-anchor="middle" class="edge">valida JWT</text>
+        <text x="511" y="81" text-anchor="middle" class="edge">upload/get</text>
 
         <!-- PostgreSQL -->
         <rect class="ext" x="548" y="150" width="180" height="56" rx="8"></rect>
@@ -437,7 +438,7 @@
         <tr><td>Smart contract</td><td>Rust + Stylus SDK → WASM</td><td>ERC-20 EcoToken + registro inmutable de lotes en un solo contrato; ABI 100% compatible con EVM. Desplegado en Arbitrum Sepolia.</td></tr>
         <tr><td>Backend</td><td>NestJS 11 · Prisma · Ethers v6</td><td>API Gateway modular, worker BullMQ, firma de transacciones con wallet en custodia.</td></tr>
         <tr><td>Datos</td><td>PostgreSQL 16 + PostGIS · Redis 7</td><td>Dominio y trazabilidad operativa; colas y adapter de Socket.IO.</td></tr>
-        <tr><td>Identidad</td><td>Supabase Auth</td><td>IdP gestionado: credenciales, hashing y emisión de JWT; UUID maestro sincronizado con la tabla local.</td></tr>
+        <tr><td>Identidad</td><td>Native JWT Auth</td><td>Motor nativo: credenciales con hashing Bcrypt (12 rondas OWASP), refresh tokens rotativos y sesiones gestionadas en Redis.</td></tr>
         <tr><td>Infraestructura</td><td>AWS Lightsail · Docker Compose</td><td>API + Postgres + Redis en contenedores; entorno alterno en Render.</td></tr>
       </tbody>
     </table>

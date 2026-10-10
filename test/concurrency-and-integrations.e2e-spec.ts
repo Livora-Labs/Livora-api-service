@@ -25,7 +25,7 @@ import request from 'supertest';
 import { Role } from '@prisma/client';
 import { IsBoolean, IsNotEmpty, IsNumber, IsString } from 'class-validator';
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
-import { SupabaseAuthGuard } from '../src/common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/common/guards/roles.guard';
 import { Roles } from '../src/common/decorators/roles.decorator';
 import { CurrentUser } from '../src/common/decorators/current-user.decorator';
@@ -33,7 +33,6 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { RedisService } from '../src/redis/redis.service';
 import { MailService } from '../src/common/services/mail.service';
 import { ConfigService } from '@nestjs/config';
-import { SupabaseService } from '../src/supabase/supabase.service';
 import { UsersService } from '../src/users/users.service';
 
 // Mocks to track test side-effects
@@ -108,7 +107,7 @@ class TestE2EController {
 
   @Post('collection-requests/:id/accept')
   @Roles(Role.RECOLECTOR)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   async acceptRequest(
     @CurrentUser('id') collectorId: string,
     @Param('id') id: string,
@@ -126,7 +125,7 @@ class TestE2EController {
 
   @Post('stores/redemptions/confirm/:qrCodeRef')
   @Roles(Role.HOGAR)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   async confirmRedemption(
     @Param('qrCodeRef') qrCodeRef: string,
     @Body() dto: ConfirmRedemptionTestDto,
@@ -159,7 +158,7 @@ class TestE2EController {
 
   @Post('sales')
   @Roles(Role.ADMIN)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   async makeSale(@Body() dto: CreateSaleTestDto) {
     const mermaFactor = 0.05;
     const maxAllowedSale = this.historicInputs * (1 - mermaFactor); // 95 kg max
@@ -194,7 +193,7 @@ class TestE2EController {
 
   @Post('batches/weighed')
   @Roles(Role.CENTRO_ACOPIO)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   async recordWeight(@Body() dto: WeighTestDto) {
     // 80/20 distribution
     const rewardTotal = dto.weightKg * 1.5; // 1.5 EcoTokens per Kg
@@ -210,7 +209,7 @@ class TestE2EController {
   }
 
   @Delete('users/me')
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(JwtAuthGuard)
   async deleteAccount(@CurrentUser('id') id: string) {
     // Simulation of ARCO deletion anonymization
     const anonymized = {
@@ -236,21 +235,21 @@ class TestE2EController {
 
   @Get('admin/inventory')
   @Roles(Role.ADMIN)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   getAdminInventory() {
     return { stock: this.currentStock };
   }
 
   @Post('centro/reception')
   @Roles(Role.CENTRO_ACOPIO)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   receiveCentro() {
     return { success: true };
   }
 
   @Post('stores/redemptions/qr')
   @Roles(Role.TIENDA)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   generateStoreQr() {
     return { success: true };
   }
@@ -338,16 +337,6 @@ class TestE2EController {
       },
     },
     {
-      provide: SupabaseService,
-      useValue: {
-        getClient: () => ({
-          auth: {
-            getUser: jest.fn(),
-          },
-        }),
-      },
-    },
-    {
       provide: UsersService,
       useValue: {
         findOne: jest.fn(),
@@ -406,7 +395,7 @@ describe('Suite de Pruebas Integrales de Carga, Concurrencia y Persistencia (E2E
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [TestE2EModule],
     })
-      .overrideGuard(SupabaseAuthGuard)
+      .overrideGuard(JwtAuthGuard)
       .useValue(mockAuthGuard)
       .compile();
 
@@ -416,7 +405,7 @@ describe('Suite de Pruebas Integrales de Carga, Concurrencia y Persistencia (E2E
       new FastifyAdapter(),
     );
 
-    // Mock SupabaseAuthGuard user resolution based on the mock token header
+    // Mock JwtAuthGuard user resolution based on the mock token header
     app.useGlobalFilters(new GlobalExceptionFilter());
     app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
 

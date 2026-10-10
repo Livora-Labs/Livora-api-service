@@ -17,14 +17,14 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { WalletsService } from './wallets.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Wallets')
 @ApiBearerAuth()
 @Controller('wallets')
-@UseGuards(SupabaseAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class WalletsController {
   constructor(private readonly walletsService: WalletsService) {}
 

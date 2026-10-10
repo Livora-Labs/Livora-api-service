@@ -21,7 +21,7 @@ import { UpdateComplaintStatusDto } from '../complaints/dto/update-complaint-sta
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { FindUsersAdminQueryDto } from './dto/find-users-admin-query.dto';
 import { LedgerAuditQueryDto, ServerLogsQueryDto } from './dto/audit-query.dto';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -33,7 +33,7 @@ export class AdminController {
 
   @Post('collectors/kyc-applications')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.RECOLECTOR, Role.HOGAR, Role.TIENDA)
   @ApiOperation({
     summary: 'Enviar solicitud de verificación KYC (Rol: RECOLECTOR, HOGAR, TIENDA)',
@@ -47,7 +47,7 @@ export class AdminController {
 
   @Get('collectors/me/kyc-application')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.RECOLECTOR, Role.HOGAR, Role.TIENDA)
   @ApiOperation({
     summary: 'Consultar mi estado de verificación KYC (Rol: RECOLECTOR, HOGAR, TIENDA)',
@@ -64,7 +64,7 @@ export class AdminController {
 
   @Get('admin/kyc-applications')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Listar solicitudes KYC pendientes (Rol: ADMIN)' })
   async getKycApplications(@Query() query: PaginationQueryDto) {
@@ -73,7 +73,7 @@ export class AdminController {
 
   @Get('admin/users')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Listar todos los usuarios registrados del sistema con paginación y filtros (Rol: ADMIN)',
@@ -84,7 +84,7 @@ export class AdminController {
 
   @Patch('users/:id/kyc-status')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Actualizar estado de verificación KYC de usuario (Rol: ADMIN)',
@@ -98,7 +98,7 @@ export class AdminController {
 
   @Patch('users/:id/status')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Baneo o activación de estado de usuario (Rol: ADMIN)',
@@ -112,7 +112,7 @@ export class AdminController {
 
   @Patch('admin/users/:id/password')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary:
@@ -127,7 +127,7 @@ export class AdminController {
 
   @Get('admin/blockchain/health')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Obtener estado de salud en tiempo real del cluster RPC Stellar (Rol: ADMIN)',
@@ -138,7 +138,7 @@ export class AdminController {
 
   @Get('admin/audit/reconciliation')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Auditoría de conciliación contable de partida doble Zero Loss (Rol: ADMIN)',
@@ -149,7 +149,7 @@ export class AdminController {
 
   @Get('admin/audit/ledger')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Auditoría paginada y filtrada del Libro Mayor de cuentas y tokens (Rol: ADMIN)',
@@ -160,7 +160,7 @@ export class AdminController {
 
   @Get('admin/audit/queues')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Inspección de colas BullMQ, Dead-Letter Queue (DLQ) y eventos Outbox (Rol: ADMIN)',
@@ -171,7 +171,7 @@ export class AdminController {
 
   @Post('admin/audit/queues/retry-job/:jobId')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Reintentar manualmente un trabajo de la cola BullMQ o DLQ (Rol: ADMIN)',
@@ -182,7 +182,7 @@ export class AdminController {
 
   @Post('admin/audit/outbox/retry-event/:id')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Restablecer evento Outbox a PENDING para reprocesamiento (Rol: ADMIN)',
@@ -193,7 +193,7 @@ export class AdminController {
 
   @Get('admin/audit/logs')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Consultar buffer circular de logs operativos del servidor con filtros de severidad (Rol: ADMIN)',
@@ -204,7 +204,7 @@ export class AdminController {
 
   @Patch('complaints/:id')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Actualizar estado de un reclamo/queja (Rol: ADMIN)',
@@ -218,7 +218,7 @@ export class AdminController {
 
   @Post('admin/payments/:id/retry-mint')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary:

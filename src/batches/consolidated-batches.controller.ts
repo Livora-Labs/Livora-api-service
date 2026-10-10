@@ -8,7 +8,7 @@ import {
 import { Role } from '@prisma/client';
 import { BatchesService } from './batches.service';
 import { CreateConsolidatedBatchDto } from './dto/create-consolidated-batch.dto';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -18,7 +18,7 @@ import { IpfsTransform } from '../common/decorators/ipfs-transform.decorator';
 @ApiBearerAuth()
 @IpfsTransform()
 @Controller('consolidated-batches')
-@UseGuards(SupabaseAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ConsolidatedBatchesController {
   constructor(private readonly batchesService: BatchesService) {}
 

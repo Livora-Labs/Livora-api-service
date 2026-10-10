@@ -1,6 +1,6 @@
-﻿import { BadRequestException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { BadRequestException } from '@nestjs/common';
 import { UploadsService } from './uploads.service';
+import { R2StorageService } from '../storage/r2-storage.service';
 import { validateMagicBytes } from './utils/magic-bytes.util';
 
 describe('UploadsService & MagicBytes (Binary Inspection & Private KYC)', () => {
@@ -32,38 +32,22 @@ describe('UploadsService & MagicBytes (Binary Inspection & Private KYC)', () => 
     });
   });
 
-  describe('UploadsService functionality', () => {
+  describe('UploadsService functionality with Cloudflare R2', () => {
     let service: UploadsService;
-    let mockStorage: any;
-    let mockClient: any;
+    let mockStorageService: jest.Mocked<Partial<R2StorageService>>;
 
     beforeEach(() => {
-      mockStorage = {
-        upload: jest.fn().mockResolvedValue({ error: null }),
-        getPublicUrl: jest.fn().mockReturnValue({ data: { publicUrl: 'https://storage.livora.pe/public/file.png' } }),
-        createSignedUrl: jest.fn().mockResolvedValue({ data: { signedUrl: 'https://storage.livora.pe/signed/kyc.pdf?token=123' }, error: null }),
-        getBucket: jest.fn().mockResolvedValue({ data: { name: 'bucket' } }),
-        createBucket: jest.fn().mockResolvedValue({ error: null }),
-      };
-
-      mockClient = {
-        storage: {
-          from: jest.fn().mockReturnValue(mockStorage),
-          getBucket: mockStorage.getBucket,
-          createBucket: mockStorage.createBucket,
-        },
-      };
-
-      const configService = {
-        get: jest.fn((key: string) => {
-          if (key === 'SUPABASE_URL') return 'https://test.supabase.co';
-          if (key === 'SUPABASE_SERVICE_ROLE_KEY') return 'test-service-key';
-          return null;
+      mockStorageService = {
+        upload: jest.fn().mockResolvedValue({
+          url: 'https://media.grupolivoralabs.com/collection/file.png',
+          path: 'collection/file.png',
+          expiresIn: undefined,
         }),
-      } as unknown as ConfigService;
+        getSignedUrl: jest.fn().mockResolvedValue('https://media.grupolivoralabs.com/signed/kyc.pdf?token=123'),
+        delete: jest.fn().mockResolvedValue(undefined),
+      };
 
-      service = new UploadsService(configService);
-      (service as any).client = mockClient;
+      service = new UploadsService(mockStorageService as R2StorageService);
     });
 
     it('should reject file upload when magic bytes do not match allowed formats', async () => {
@@ -88,7 +72,13 @@ describe('UploadsService & MagicBytes (Binary Inspection & Private KYC)', () => 
       );
     });
 
-    it('should upload KYC document to private bucket and return 15-minute presigned URL', async () => {
+    it('should upload KYC document to private path and return presigned URL', async () => {
+      mockStorageService.upload = jest.fn().mockResolvedValue({
+        url: 'https://media.grupolivoralabs.com/signed/kyc.pdf?token=123',
+        path: 'kyc/user-uuid-123/file.pdf',
+        expiresIn: 900,
+      });
+
       const pdfFile: any = {
         buffer: Buffer.from('%PDF-1.4 sample content'),
         mimetype: 'application/pdf',
@@ -97,18 +87,19 @@ describe('UploadsService & MagicBytes (Binary Inspection & Private KYC)', () => 
 
       const result = await service.upload(pdfFile, 'kyc', 'user-uuid-123');
 
-      expect(mockClient.storage.from).toHaveBeenCalledWith('livora-kyc-private');
-      expect(mockStorage.upload).toHaveBeenCalled();
-      expect(mockStorage.createSignedUrl).toHaveBeenCalledWith(expect.stringContaining('user-uuid-123/'), 900);
+      expect(mockStorageService.upload).toHaveBeenCalledWith(
+        expect.stringContaining('kyc/user-uuid-123/'),
+        pdfFile.buffer,
+        { contentType: 'application/pdf', isPublic: false },
+      );
       expect(result.expiresIn).toBe(900);
-      expect(result.url).toContain('https://storage.livora.pe/signed/kyc.pdf');
+      expect(result.url).toContain('https://media.grupolivoralabs.com/signed/kyc.pdf');
     });
 
     it('should generate presigned KYC URL with custom or default expiration', async () => {
       const url = await service.getPresignedKycUrl('user-123/doc.pdf', 900);
-      expect(mockClient.storage.from).toHaveBeenCalledWith('livora-kyc-private');
-      expect(mockStorage.createSignedUrl).toHaveBeenCalledWith('user-123/doc.pdf', 900);
-      expect(url).toBe('https://storage.livora.pe/signed/kyc.pdf?token=123');
+      expect(mockStorageService.getSignedUrl).toHaveBeenCalledWith('user-123/doc.pdf', 900);
+      expect(url).toBe('https://media.grupolivoralabs.com/signed/kyc.pdf?token=123');
     });
   });
 });

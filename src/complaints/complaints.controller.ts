@@ -22,7 +22,7 @@ import { ComplaintsService } from './complaints.service';
 import { CreateComplaintDto } from './dto/create-complaint.dto';
 import { UpdateComplaintStatusDto } from './dto/update-complaint-status.dto';
 import { TrackComplaintDto } from './dto/track-complaint.dto';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -70,7 +70,7 @@ export class ComplaintsController {
 
   @Get(':id')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiOperation({
     summary: 'Obtener el estado y detalle de una reclamación por ID (Titular o Admin)',
   })
@@ -126,7 +126,7 @@ export class ComplaintsController {
 
   @Get('correlative/:correlativeNumber')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary:
@@ -140,7 +140,7 @@ export class ComplaintsController {
 
   @Get(':id/pdf')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Header('Content-Type', 'application/pdf')
   @ApiOperation({ summary: 'Descargar copia en PDF de la Hoja de Reclamación (Titular o Admin)' })
   async downloadPdfById(
@@ -163,7 +163,7 @@ export class ComplaintsController {
 
   @Get('correlative/:correlativeNumber/pdf')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @Header('Content-Type', 'application/pdf')
   @ApiOperation({
@@ -184,7 +184,7 @@ export class ComplaintsController {
 
   @Patch(':id/status')
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary:
@@ -203,7 +203,7 @@ export class ComplaintsController {
 
   @Get()
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Listar reclamaciones con filtros y paginación (Rol: ADMIN)',

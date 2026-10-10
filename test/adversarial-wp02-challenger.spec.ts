@@ -1,4 +1,4 @@
-﻿import * as crypto from 'crypto';
+import * as crypto from 'crypto';
 import * as jwt from 'jsonwebtoken';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -12,11 +12,12 @@ import { ComplaintsController } from '../src/complaints/complaints.controller';
 import { ComplaintsService } from '../src/complaints/complaints.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { MailService } from '../src/common/services/mail.service';
-import { SupabaseAuthGuard } from '../src/common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/common/guards/roles.guard';
-import { SupabaseService } from '../src/supabase/supabase.service';
+import { TurnstileService } from '../src/common/services/turnstile.service';
 import { UsersService } from '../src/users/users.service';
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
+import { UnauthorizedException } from '@nestjs/common';
 
 import { UploadsService } from '../src/uploads/uploads.service';
 import { validateMagicBytes } from '../src/uploads/utils/magic-bytes.util';
@@ -28,7 +29,7 @@ describe('CHALLENGER WP-02: Empirical Adversarial Stress Suite', () => {
   const JWT_SECRET = 'test-jwt-secret-challenger-wp02';
 
   beforeAll(() => {
-    process.env.SUPABASE_JWT_SECRET = JWT_SECRET;
+    process.env.JWT_SECRET = JWT_SECRET;
   });
 
   // =========================================================================
@@ -281,14 +282,6 @@ describe('CHALLENGER WP-02: Empirical Adversarial Stress Suite', () => {
         }),
       };
 
-      const mockSupabaseService = {
-        getClient: jest.fn().mockReturnValue({
-          auth: {
-            getUser: jest.fn().mockResolvedValue({ data: { user: null }, error: new Error('Invalid token') }),
-          },
-        }),
-      };
-
       const mockMailService = {
         sendComplaintConfirmationEmail: jest.fn().mockResolvedValue(undefined),
       };
@@ -299,13 +292,45 @@ describe('CHALLENGER WP-02: Empirical Adversarial Stress Suite', () => {
           ComplaintsService,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: UsersService, useValue: mockUsersService },
-          { provide: SupabaseService, useValue: mockSupabaseService },
           { provide: MailService, useValue: mockMailService },
+          {
+            provide: TurnstileService,
+            useValue: { verifyToken: jest.fn().mockResolvedValue(true) },
+          },
           Reflector,
           RolesGuard,
-          SupabaseAuthGuard,
         ],
-      }).compile();
+      })
+        .overrideGuard(JwtAuthGuard)
+        .useValue({
+          canActivate: (context: any) => {
+            const req = context.switchToHttp().getRequest();
+            const authHeader = req.headers?.authorization;
+            if (!authHeader) {
+              throw new UnauthorizedException('Token no proporcionado');
+            }
+            const token = authHeader.replace(/^Bearer /i, '').trim();
+            try {
+              const decoded = jwt.verify(token, JWT_SECRET) as any;
+              if (decoded.sub === ADMIN_USER_ID) {
+                req.user = { id: ADMIN_USER_ID, role: Role.ADMIN, email: 'admin@livora.pe' };
+                return true;
+              }
+              if (decoded.sub === CITIZEN_USER_ID) {
+                req.user = { id: CITIZEN_USER_ID, role: Role.HOGAR, email: 'citizen@livora.pe' };
+                return true;
+              }
+              if (decoded.sub === OTHER_USER_ID) {
+                req.user = { id: OTHER_USER_ID, role: Role.HOGAR, email: 'other@livora.pe' };
+                return true;
+              }
+              throw new UnauthorizedException('Usuario no válido');
+            } catch {
+              throw new UnauthorizedException('Token inválido');
+            }
+          },
+        })
+        .compile();
 
       app = moduleRef.createNestApplication<NestFastifyApplication>(
         new FastifyAdapter({ trustProxy: true }),
@@ -434,41 +459,26 @@ describe('CHALLENGER WP-02: Empirical Adversarial Stress Suite', () => {
   // =========================================================================
   describe('Domain 3: Uploads Magic Bytes & KYC Private Storage Tests', () => {
     let uploadsService: UploadsService;
-    let mockStorage: any;
-    let mockClient: any;
+    let mockStorageService: any;
 
     beforeEach(() => {
-      mockStorage = {
-        upload: jest.fn().mockResolvedValue({ error: null }),
-        getPublicUrl: jest.fn().mockReturnValue({ data: { publicUrl: 'https://storage.livora.pe/public/test.png' } }),
-        createSignedUrl: jest.fn().mockResolvedValue({
-          data: { signedUrl: 'https://storage.livora.pe/signed/kyc-doc.pdf?token=exp900' },
-          error: null,
+      mockStorageService = {
+        upload: jest.fn().mockImplementation((path: string, buffer: Buffer, opts: any) => {
+          return Promise.resolve({
+            url: opts?.isPublic
+              ? `https://media.grupolivoralabs.com/${path}`
+              : `https://media.grupolivoralabs.com/${path}?token=exp900`,
+            path,
+            publicUrl: `https://media.grupolivoralabs.com/${path}`,
+            expiresIn: opts?.isPublic ? undefined : 900,
+          });
         }),
-        getBucket: jest.fn().mockResolvedValue({ data: { name: 'bucket' } }),
-        createBucket: jest.fn().mockResolvedValue({ error: null }),
+        getSignedUrl: jest.fn().mockImplementation((path: string, expiresIn: number) => {
+          return Promise.resolve(`https://media.grupolivoralabs.com/${path}?token=exp${expiresIn}`);
+        }),
       };
 
-      mockClient = {
-        storage: {
-          from: jest.fn().mockReturnValue(mockStorage),
-          getBucket: mockStorage.getBucket,
-          createBucket: mockStorage.createBucket,
-        },
-      };
-
-      const configService = {
-        get: jest.fn((key: string) => {
-          if (key === 'SUPABASE_URL') return 'https://test.supabase.co';
-          if (key === 'SUPABASE_SERVICE_ROLE_KEY') return 'test-service-key';
-          if (key === 'SUPABASE_STORAGE_BUCKET') return 'livora-uploads';
-          if (key === 'SUPABASE_STORAGE_KYC_BUCKET') return 'livora-kyc-private';
-          return null;
-        }),
-      } as unknown as ConfigService;
-
-      uploadsService = new UploadsService(configService);
-      (uploadsService as any).client = mockClient;
+      uploadsService = new UploadsService(mockStorageService);
     });
 
     it('3.1 validateMagicBytes identifies valid PNG, JPEG, and PDF signatures', () => {
@@ -532,7 +542,7 @@ describe('CHALLENGER WP-02: Empirical Adversarial Stress Suite', () => {
       );
     });
 
-    it('3.6 isolates KYC uploads in livora-kyc-private bucket with 15-minute presigned URL', async () => {
+    it('3.6 isolates KYC uploads in private storage with 15-minute presigned URL', async () => {
       const validKycPdf: any = {
         originalname: 'dni-scan.pdf',
         mimetype: 'application/pdf',
@@ -542,29 +552,21 @@ describe('CHALLENGER WP-02: Empirical Adversarial Stress Suite', () => {
 
       const result = await uploadsService.upload(validKycPdf, 'kyc', 'user-uuid-888');
 
-      // Verify routing to livora-kyc-private
-      expect(mockClient.storage.from).toHaveBeenCalledWith('livora-kyc-private');
-      // Verify storage path begins with user ID
-      expect(mockStorage.upload).toHaveBeenCalledWith(
-        expect.stringMatching(/^user-uuid-888\/[0-9a-f-]+\.pdf$/),
+      // Verify routing to private kyc path
+      expect(mockStorageService.upload).toHaveBeenCalledWith(
+        expect.stringMatching(/^kyc\/user-uuid-888\/[0-9a-f-]+\.pdf$/),
         validKycPdf.buffer,
-        expect.objectContaining({ contentType: 'application/pdf' }),
-      );
-      // Verify signed URL created with 900 seconds (15 minutes)
-      expect(mockStorage.createSignedUrl).toHaveBeenCalledWith(
-        expect.stringMatching(/^user-uuid-888\/[0-9a-f-]+\.pdf$/),
-        900,
+        expect.objectContaining({ contentType: 'application/pdf', isPublic: false }),
       );
       expect(result.expiresIn).toBe(900);
-      expect(result.url).toBe('https://storage.livora.pe/signed/kyc-doc.pdf?token=exp900');
+      expect(result.url).toContain('https://media.grupolivoralabs.com/kyc/user-uuid-888/');
     });
 
-    it('3.7 getPresignedKycUrl queries livora-kyc-private bucket with 900s expiration', async () => {
-      const signedUrl = await uploadsService.getPresignedKycUrl('user-uuid-888/dni-scan.pdf', 900);
+    it('3.7 getPresignedKycUrl queries private storage with 900s expiration', async () => {
+      const signedUrl = await uploadsService.getPresignedKycUrl('kyc/user-uuid-888/dni-scan.pdf', 900);
 
-      expect(mockClient.storage.from).toHaveBeenCalledWith('livora-kyc-private');
-      expect(mockStorage.createSignedUrl).toHaveBeenCalledWith('user-uuid-888/dni-scan.pdf', 900);
-      expect(signedUrl).toBe('https://storage.livora.pe/signed/kyc-doc.pdf?token=exp900');
+      expect(mockStorageService.getSignedUrl).toHaveBeenCalledWith('kyc/user-uuid-888/dni-scan.pdf', 900);
+      expect(signedUrl).toBe('https://media.grupolivoralabs.com/kyc/user-uuid-888/dni-scan.pdf?token=exp900');
     });
   });
 });

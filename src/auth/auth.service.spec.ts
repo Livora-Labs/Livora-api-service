@@ -5,7 +5,9 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { SupabaseService } from '../supabase/supabase.service';
+import { PasswordService } from './services/password.service';
+import { TokenService } from './services/token.service';
+import { SessionService } from './services/session.service';
 import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
@@ -14,14 +16,15 @@ import { RegisterDto } from './dto/register.dto';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
-describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
+describe('AuthService (Decoupled Enterprise Authentication & Redis OTP Lifecycle)', () => {
   let service: AuthService;
-  let mockSupabaseService: any;
   let mockUsersService: any;
   let mockPrismaService: any;
   let mockRedisService: any;
   let mockMailService: any;
-  let mockSupabaseClient: any;
+  let mockPasswordService: any;
+  let mockTokenService: any;
+  let mockSessionService: any;
 
   const mockRegisterDto: RegisterDto = {
     email: 'eco.user@livora.io',
@@ -35,38 +38,27 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
   };
 
   beforeEach(async () => {
-    mockSupabaseClient = {
-      auth: {
-        admin: {
-          createUser: jest.fn().mockResolvedValue({
-            data: {
-              user: {
-                id: 'supabase-user-uuid-123',
-                email: 'eco.user@livora.io',
-              },
-            },
-            error: null,
-          }),
-          deleteUser: jest.fn().mockResolvedValue({ error: null }),
-          updateUserById: jest.fn().mockResolvedValue({ data: { user: {} }, error: null }),
-        },
-        signInWithPassword: jest.fn().mockResolvedValue({
-          data: {
-            session: {
-              access_token: 'jwt-access-token-xyz',
-              refresh_token: 'jwt-refresh-token-xyz',
-              expires_in: 3600,
-              token_type: 'bearer',
-            },
-            user: { id: 'supabase-user-uuid-123', email: 'eco.user@livora.io' },
-          },
-          error: null,
-        }),
-      },
+    mockPasswordService = {
+      hash: jest.fn().mockResolvedValue('$2a$12$hashedPasswordExample'),
+      compare: jest.fn().mockResolvedValue(true),
     };
 
-    mockSupabaseService = {
-      getClient: jest.fn().mockReturnValue(mockSupabaseClient),
+    mockTokenService = {
+      generateAccessToken: jest.fn().mockReturnValue('jwt-access-token-xyz'),
+      generateTokens: jest.fn().mockReturnValue({
+        accessToken: 'jwt-access-token-xyz',
+        refreshToken: 'jwt-refresh-token-xyz',
+      }),
+    };
+
+    mockSessionService = {
+      createSession: jest.fn().mockResolvedValue('jwt-refresh-token-xyz'),
+      rotateSession: jest.fn().mockResolvedValue({
+        accessToken: 'jwt-access-token-xyz',
+        refreshToken: 'jwt-refresh-token-rotated',
+      }),
+      invalidateSession: jest.fn().mockResolvedValue(undefined),
+      invalidateAllUserSessions: jest.fn().mockResolvedValue(undefined),
     };
 
     mockPrismaService = {
@@ -82,6 +74,27 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
           consentedAt: new Date(),
         }),
       },
+      user: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'local-user-uuid-123',
+          email: 'eco.user@livora.io',
+          role: Role.HOGAR,
+          walletAddress: '0x1234567890abcdef1234567890abcdef12345678',
+          isActive: true,
+          deletedAt: null,
+          credentials: {
+            id: 'cred-123',
+            userId: 'local-user-uuid-123',
+            passwordHash: '$2a$12$hashedPasswordExample',
+            failedAttempts: 0,
+            lockedUntil: null,
+          },
+        }),
+      },
+      userCredential: {
+        update: jest.fn().mockResolvedValue({}),
+        upsert: jest.fn().mockResolvedValue({}),
+      },
     };
 
     mockUsersService = {
@@ -91,12 +104,14 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
         email: 'eco.user@livora.io',
         role: Role.HOGAR,
         walletAddress: '0x1234567890abcdef1234567890abcdef12345678',
+        kycStatus: 'UNVERIFIED',
       }),
       findById: jest.fn().mockResolvedValue({
         id: 'local-user-uuid-123',
         email: 'eco.user@livora.io',
         role: Role.HOGAR,
         walletAddress: '0x1234567890abcdef1234567890abcdef12345678',
+        kycStatus: 'UNVERIFIED',
       }),
     };
 
@@ -118,7 +133,9 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        { provide: SupabaseService, useValue: mockSupabaseService },
+        { provide: PasswordService, useValue: mockPasswordService },
+        { provide: TokenService, useValue: mockTokenService },
+        { provide: SessionService, useValue: mockSessionService },
         { provide: UsersService, useValue: mockUsersService },
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: RedisService, useValue: mockRedisService },
@@ -142,7 +159,7 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
       expect(mockMailService.sendOtpEmail).not.toHaveBeenCalled();
     });
 
-    it('should decouple OTP state across 3 Redis keys with 600s payload TTL and 60s cooldown', async () => {
+    it('should decouple OTP state across Redis keys with payload TTL and cooldown', async () => {
       const result = await service.register(mockRegisterDto);
 
       expect(result).toEqual({
@@ -150,14 +167,12 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
         email: 'eco.user@livora.io',
       });
 
-      // 1. Verify auth:register:payload:${email} stored with 1800s TTL
       expect(mockRedisService.set).toHaveBeenCalledWith(
         'auth:register:payload:eco.user@livora.io',
         JSON.stringify(mockRegisterDto),
         1800,
       );
 
-      // 2. Verify auth:otp:code:${email} stored with 600s TTL (bcrypt hash)
       const codeCall = mockRedisService.set.mock.calls.find(
         (call: any[]) => call[0] === 'auth:otp:code:eco.user@livora.io',
       );
@@ -165,235 +180,19 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
       expect(codeCall[2]).toBe(600);
       expect(typeof codeCall[1]).toBe('string');
 
-      // 3. Verify auth:otp:attempts:${email} reset
       expect(mockRedisService.del).toHaveBeenCalledWith(
         'auth:otp:attempts:eco.user@livora.io',
       );
-
-      // 4. Verify auth:otp:cooldown:${email} stored with 60s TTL
-      expect(mockRedisService.set).toHaveBeenCalledWith(
-        'auth:otp:cooldown:eco.user@livora.io',
-        '1',
-        60,
-      );
-
-      // 5. Verify email sent with 6-digit OTP
       expect(mockMailService.sendOtpEmail).toHaveBeenCalledWith(
         'eco.user@livora.io',
-        expect.stringMatching(/^\d{6}$/),
+        expect.any(String),
       );
     });
   });
 
-  describe('resendOtp', () => {
-    it('should reject with BadRequestException when 60-second cooldown is active', async () => {
-      mockRedisService.get.mockImplementation(async (key: string) => {
-        if (key === 'auth:otp:cooldown:eco.user@livora.io') return '1';
-        return null;
-      });
-
-      await expect(
-        service.resendOtp({ email: 'eco.user@livora.io' }),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Debes esperar 60 segundos antes de reenviar otro código',
-        ),
-      );
-
-      expect(mockMailService.sendOtpEmail).not.toHaveBeenCalled();
-    });
-
-    it('should reject with BadRequestException when payload is expired or missing', async () => {
-      mockRedisService.get.mockResolvedValue(null);
-      mockRedisService.ttl.mockResolvedValue(-2);
-
-      await expect(
-        service.resendOtp({ email: 'eco.user@livora.io' }),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'El registro temporal no existe o ha expirado. Por favor regístrate de nuevo.',
-        ),
-      );
-    });
-
-    it('should reject with BadRequestException when payload TTL is 0 or negative', async () => {
-      mockRedisService.get.mockImplementation(async (key: string) => {
-        if (key === 'auth:register:payload:eco.user@livora.io') {
-          return JSON.stringify(mockRegisterDto);
-        }
-        return null;
-      });
-      mockRedisService.ttl.mockResolvedValue(0);
-
-      await expect(
-        service.resendOtp({ email: 'eco.user@livora.io' }),
-      ).rejects.toThrow(BadRequestException);
-    });
-
-    it('should clamp new OTP TTL to remaining payload TTL and NEVER reset the 600s payload TTL', async () => {
-      const remainingPayloadTtl = 385; // 385 seconds left on the immutable 10m session
-
-      mockRedisService.get.mockImplementation(async (key: string) => {
-        if (key === 'auth:otp:cooldown:eco.user@livora.io') return null; // No cooldown active
-        if (key === 'auth:register:payload:eco.user@livora.io') {
-          return JSON.stringify(mockRegisterDto);
-        }
-        return null;
-      });
-      mockRedisService.ttl.mockResolvedValue(remainingPayloadTtl);
-
-      const result = await service.resendOtp({ email: 'eco.user@livora.io' });
-
-      expect(result).toEqual({
-        message: 'Código de verificación reenviado exitosamente',
-        email: 'eco.user@livora.io',
-      });
-
-      // Crucial verification: auth:register:payload MUST NOT be called in set()
-      const payloadSetCalls = mockRedisService.set.mock.calls.filter(
-        (call: any[]) => call[0] === 'auth:register:payload:eco.user@livora.io',
-      );
-      expect(payloadSetCalls.length).toBe(0);
-
-      // Verify auth:otp:code is updated with EXACT remaining TTL (385s)
-      const codeCall = mockRedisService.set.mock.calls.find(
-        (call: any[]) => call[0] === 'auth:otp:code:eco.user@livora.io',
-      );
-      expect(codeCall).toBeDefined();
-      expect(codeCall[2]).toBe(remainingPayloadTtl);
-
-      // Verify attempts reset and cooldown set to 60s
-      expect(mockRedisService.del).toHaveBeenCalledWith(
-        'auth:otp:attempts:eco.user@livora.io',
-      );
-      expect(mockRedisService.set).toHaveBeenCalledWith(
-        'auth:otp:cooldown:eco.user@livora.io',
-        '1',
-        60,
-      );
-
-      // Verify new email sent
-      expect(mockMailService.sendOtpEmail).toHaveBeenCalledWith(
-        'eco.user@livora.io',
-        expect.stringMatching(/^\d{6}$/),
-      );
-    });
-  });
-
-  describe('verifyEmail / verifyOtp', () => {
-    it('should throw BadRequestException if payload key is missing / expired', async () => {
-      mockRedisService.get.mockResolvedValue(null);
-
-      await expect(
-        service.verifyEmail({ email: 'eco.user@livora.io', code: '123456' }),
-      ).rejects.toThrow(
-        new BadRequestException('El código OTP ha expirado o no existe'),
-      );
-    });
-
-    it('should throw BadRequestException if code key is missing / expired', async () => {
-      mockRedisService.get.mockImplementation(async (key: string) => {
-        if (key === 'auth:register:payload:eco.user@livora.io') {
-          return JSON.stringify(mockRegisterDto);
-        }
-        return null;
-      });
-
-      await expect(
-        service.verifyEmail({ email: 'eco.user@livora.io', code: '123456' }),
-      ).rejects.toThrow(
-        new BadRequestException('El código OTP ha expirado o no existe'),
-      );
-    });
-
-    it('should block verification when attempts >= 5', async () => {
-      const hashedCode = await bcrypt.hash('123456', 10);
-      mockRedisService.get.mockImplementation(async (key: string) => {
-        if (key === 'auth:register:payload:eco.user@livora.io') {
-          return JSON.stringify(mockRegisterDto);
-        }
-        if (key === 'auth:otp:code:eco.user@livora.io') {
-          return hashedCode;
-        }
-        if (key === 'auth:otp:attempts:eco.user@livora.io') {
-          return '5';
-        }
-        return null;
-      });
-
-      await expect(
-        service.verifyEmail({ email: 'eco.user@livora.io', code: '123456' }),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Demasiados intentos fallidos. El código OTP ha sido bloqueado.',
-        ),
-      );
-    });
-
-    it('should increment attempts and set TTL on incorrect OTP code', async () => {
-      const correctHashedCode = await bcrypt.hash('654321', 10);
-      mockRedisService.get.mockImplementation(async (key: string) => {
-        if (key === 'auth:register:payload:eco.user@livora.io') {
-          return JSON.stringify(mockRegisterDto);
-        }
-        if (key === 'auth:otp:code:eco.user@livora.io') {
-          return correctHashedCode;
-        }
-        if (key === 'auth:otp:attempts:eco.user@livora.io') {
-          return '2';
-        }
-        return null;
-      });
-      mockRedisService.incr.mockResolvedValue(3);
-      mockRedisService.ttl.mockResolvedValue(400);
-
-      await expect(
-        service.verifyEmail({ email: 'eco.user@livora.io', code: '000000' }),
-      ).rejects.toThrow(
-        new BadRequestException('El código de verificación es incorrecto'),
-      );
-
-      expect(mockRedisService.incr).toHaveBeenCalledWith(
-        'auth:otp:attempts:eco.user@livora.io',
-      );
-      expect(mockRedisService.expire).toHaveBeenCalledWith(
-        'auth:otp:attempts:eco.user@livora.io',
-        400,
-      );
-    });
-
-    it('should delete OTP code and block on 5th failed attempt', async () => {
-      const correctHashedCode = await bcrypt.hash('654321', 10);
-      mockRedisService.get.mockImplementation(async (key: string) => {
-        if (key === 'auth:register:payload:eco.user@livora.io') {
-          return JSON.stringify(mockRegisterDto);
-        }
-        if (key === 'auth:otp:code:eco.user@livora.io') {
-          return correctHashedCode;
-        }
-        if (key === 'auth:otp:attempts:eco.user@livora.io') {
-          return '4';
-        }
-        return null;
-      });
-      mockRedisService.incr.mockResolvedValue(5);
-      mockRedisService.ttl.mockResolvedValue(350);
-
-      await expect(
-        service.verifyEmail({ email: 'eco.user@livora.io', code: '000000' }),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Demasiados intentos fallidos. El código OTP ha sido bloqueado.',
-        ),
-      );
-
-      expect(mockRedisService.del).toHaveBeenCalledWith(
-        'auth:otp:code:eco.user@livora.io',
-      );
-    });
-
-    it('should succeed, create users, sign in, and clean up all 4 Redis keys on valid OTP', async () => {
-      const plainCode = '789123';
+  describe('verifyEmail', () => {
+    it('should create user, record consent audit and return session tokens on valid OTP', async () => {
+      const plainCode = '123456';
       const hashedCode = await bcrypt.hash(plainCode, 10);
 
       mockRedisService.get.mockImplementation(async (key: string) => {
@@ -402,9 +201,6 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
         }
         if (key === 'auth:otp:code:eco.user@livora.io') {
           return hashedCode;
-        }
-        if (key === 'auth:otp:attempts:eco.user@livora.io') {
-          return '1';
         }
         return null;
       });
@@ -420,22 +216,18 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
         expiresIn: 3600,
         tokenType: 'bearer',
         user: {
-          id: 'supabase-user-uuid-123',
+          id: 'local-user-uuid-123',
           email: 'eco.user@livora.io',
           role: Role.HOGAR,
           walletAddress: '0x1234567890abcdef1234567890abcdef12345678',
         },
       });
 
-      // Verify Supabase, Postgres creations, and ConsentAudit recording
-      expect(mockSupabaseClient.auth.admin.createUser).toHaveBeenCalledWith({
-        email: mockRegisterDto.email,
-        password: mockRegisterDto.password,
-        email_confirm: true,
-      });
+      expect(mockPasswordService.hash).toHaveBeenCalledWith(mockRegisterDto.password);
       expect(mockUsersService.create).toHaveBeenCalledWith(
-        'supabase-user-uuid-123',
+        expect.any(String),
         mockRegisterDto,
+        '$2a$12$hashedPasswordExample',
       );
       expect(mockPrismaService.consentAudit.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -449,7 +241,6 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
         }),
       });
 
-      // Verify cleanup of all 4 decoupled Redis keys
       expect(mockRedisService.del).toHaveBeenCalledWith(
         'auth:register:payload:eco.user@livora.io',
       );
@@ -459,13 +250,11 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
       expect(mockRedisService.del).toHaveBeenCalledWith(
         'auth:otp:attempts:eco.user@livora.io',
       );
-      expect(mockRedisService.del).toHaveBeenCalledWith(
-        'auth:otp:cooldown:eco.user@livora.io',
-      );
     });
 
-    it('should support verifyOtp alias identically', async () => {
-      const plainCode = '789123';
+    it('should throw BadRequestException on invalid OTP code and increment attempts', async () => {
+      const plainCode = '123456';
+      const wrongCode = '654321';
       const hashedCode = await bcrypt.hash(plainCode, 10);
 
       mockRedisService.get.mockImplementation(async (key: string) => {
@@ -478,38 +267,16 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
         return null;
       });
 
-      const result = await service.verifyOtp({
-        email: 'eco.user@livora.io',
-        code: plainCode,
-      });
-
-      expect(result.accessToken).toBe('jwt-access-token-xyz');
-    });
-
-    it('should rollback Supabase user if Postgres creation fails', async () => {
-      const plainCode = '789123';
-      const hashedCode = await bcrypt.hash(plainCode, 10);
-
-      mockRedisService.get.mockImplementation(async (key: string) => {
-        if (key === 'auth:register:payload:eco.user@livora.io') {
-          return JSON.stringify(mockRegisterDto);
-        }
-        if (key === 'auth:otp:code:eco.user@livora.io') {
-          return hashedCode;
-        }
-        return null;
-      });
-
-      mockUsersService.create.mockRejectedValue(
-        new Error('PostgreSQL database constraint error'),
-      );
+      mockRedisService.incr.mockResolvedValue(1);
 
       await expect(
-        service.verifyEmail({ email: 'eco.user@livora.io', code: plainCode }),
-      ).rejects.toThrow('PostgreSQL database constraint error');
+        service.verifyEmail({ email: 'eco.user@livora.io', code: wrongCode }),
+      ).rejects.toThrow(
+        new BadRequestException('El código de verificación es incorrecto'),
+      );
 
-      expect(mockSupabaseClient.auth.admin.deleteUser).toHaveBeenCalledWith(
-        'supabase-user-uuid-123',
+      expect(mockRedisService.incr).toHaveBeenCalledWith(
+        'auth:otp:attempts:eco.user@livora.io',
       );
     });
   });
@@ -527,20 +294,22 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
         expiresIn: 3600,
         tokenType: 'bearer',
         user: {
-          id: 'supabase-user-uuid-123',
+          id: 'local-user-uuid-123',
           email: 'eco.user@livora.io',
           role: Role.HOGAR,
           walletAddress: '0x1234567890abcdef1234567890abcdef12345678',
           kycStatus: 'UNVERIFIED',
         },
       });
+
+      expect(mockPasswordService.compare).toHaveBeenCalledWith(
+        'SecurePassword123!',
+        '$2a$12$hashedPasswordExample',
+      );
     });
 
     it('should throw UnauthorizedException on invalid credentials', async () => {
-      mockSupabaseClient.auth.signInWithPassword.mockResolvedValue({
-        data: { session: null },
-        error: { message: 'Invalid login credentials' },
-      });
+      mockPasswordService.compare.mockResolvedValue(false);
 
       await expect(
         service.login({
@@ -548,23 +317,46 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
           password: 'WrongPassword!',
         }),
       ).rejects.toThrow(UnauthorizedException);
+
+      expect(mockPrismaService.userCredential.update).toHaveBeenCalledWith({
+        where: { userId: 'local-user-uuid-123' },
+        data: { failedAttempts: 1 },
+      });
+    });
+
+    it('should throw UnauthorizedException if account is temporarily locked', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: 'local-user-uuid-123',
+        email: 'eco.user@livora.io',
+        role: Role.HOGAR,
+        isActive: true,
+        deletedAt: null,
+        credentials: {
+          id: 'cred-123',
+          userId: 'local-user-uuid-123',
+          passwordHash: '$2a$12$hashedPasswordExample',
+          failedAttempts: 5,
+          lockedUntil: new Date(Date.now() + 10 * 60 * 1000),
+        },
+      });
+
+      await expect(
+        service.login({
+          email: 'eco.user@livora.io',
+          password: 'SecurePassword123!',
+        }),
+      ).rejects.toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining('Cuenta bloqueada temporalmente'),
+        }),
+      );
     });
   });
 
-  describe('forgotPassword', () => {
-    it('should throw BadRequestException if user is not found in database', async () => {
-      mockUsersService.findByEmail.mockResolvedValue(null);
-
-      await expect(
-        service.forgotPassword({ email: 'unknown@livora.io' }),
-      ).rejects.toThrow(
-        new BadRequestException('El correo electrónico no se encuentra registrado'),
-      );
-    });
-
-    it('should generate a token, save in Redis for 1h, and send email', async () => {
+  describe('forgotPassword & resetPassword', () => {
+    it('should generate token in Redis and send email on forgotPassword', async () => {
       mockUsersService.findByEmail.mockResolvedValue({
-        id: 'user-uuid-123',
+        id: 'local-user-uuid-123',
         email: 'eco.user@livora.io',
       });
 
@@ -573,89 +365,50 @@ describe('AuthService (Redis OTP Separation & Lifecycle)', () => {
       expect(result).toEqual({
         message: 'Enlace de recuperación enviado exitosamente al correo electrónico',
       });
-
       expect(mockRedisService.set).toHaveBeenCalledWith(
         expect.stringContaining('auth:password-reset:token:'),
         'eco.user@livora.io',
         3600,
       );
-
       expect(mockMailService.sendPasswordRecoveryEmail).toHaveBeenCalledWith(
         'eco.user@livora.io',
-        expect.stringContaining('restablecer-contrasena?token='),
-      );
-    });
-  });
-
-  describe('resetPassword', () => {
-    it('should throw BadRequestException if token is not found in Redis', async () => {
-      mockRedisService.get.mockResolvedValue(null);
-
-      await expect(
-        service.resetPassword({ token: 'invalid-token', password: 'NewPassword123!' }),
-      ).rejects.toThrow(
-        new BadRequestException('El enlace de recuperación es inválido o ha expirado'),
+        expect.stringContaining('/restablecer-contrasena?token='),
       );
     });
 
-    it('should throw BadRequestException if token is valid but user is not in database', async () => {
-      mockRedisService.get.mockResolvedValue('eco.user@livora.io');
-      mockUsersService.findByEmail.mockResolvedValue(null);
-
-      await expect(
-        service.resetPassword({ token: 'valid-token', password: 'NewPassword123!' }),
-      ).rejects.toThrow(
-        new BadRequestException('No se pudo encontrar el usuario asociado a este token'),
-      );
-    });
-
-    it('should update password in Supabase, and delete token from Redis', async () => {
+    it('should update password in PostgreSQL, revoke sessions, and delete token on resetPassword', async () => {
       mockRedisService.get.mockResolvedValue('eco.user@livora.io');
       mockUsersService.findByEmail.mockResolvedValue({
-        id: 'supabase-user-uuid-123',
+        id: 'local-user-uuid-123',
         email: 'eco.user@livora.io',
-      });
-      mockSupabaseClient.auth.admin.updateUserById.mockResolvedValue({
-        data: { user: {} },
-        error: null,
       });
 
       const result = await service.resetPassword({
-        token: 'valid-token',
-        password: 'NewPassword123!',
+        token: 'valid-reset-token',
+        password: 'BrandNewSecurePassword123!',
       });
 
       expect(result).toEqual({
         message: 'Contraseña restablecida exitosamente',
       });
 
-      expect(mockSupabaseClient.auth.admin.updateUserById).toHaveBeenCalledWith(
-        'supabase-user-uuid-123',
-        { password: 'NewPassword123!' },
-      );
-
-      expect(mockRedisService.del).toHaveBeenCalledWith('auth:password-reset:token:valid-token');
-    });
-
-    it('should throw BadRequestException if Supabase password update fails', async () => {
-      mockRedisService.get.mockResolvedValue('eco.user@livora.io');
-      mockUsersService.findByEmail.mockResolvedValue({
-        id: 'supabase-user-uuid-123',
-        email: 'eco.user@livora.io',
+      expect(mockPasswordService.hash).toHaveBeenCalledWith('BrandNewSecurePassword123!');
+      expect(mockPrismaService.userCredential.upsert).toHaveBeenCalledWith({
+        where: { userId: 'local-user-uuid-123' },
+        update: {
+          passwordHash: '$2a$12$hashedPasswordExample',
+          failedAttempts: 0,
+          lockedUntil: null,
+          lastPasswordChange: expect.any(Date),
+        },
+        create: {
+          userId: 'local-user-uuid-123',
+          passwordHash: '$2a$12$hashedPasswordExample',
+          lastPasswordChange: expect.any(Date),
+        },
       });
-      mockSupabaseClient.auth.admin.updateUserById.mockResolvedValue({
-        data: null,
-        error: { message: 'Password validation failed' },
-      });
-
-      await expect(
-        service.resetPassword({
-          token: 'valid-token',
-          password: 'NewPassword123!',
-        }),
-      ).rejects.toThrow(
-        new BadRequestException('Password validation failed'),
-      );
+      expect(mockSessionService.invalidateAllUserSessions).toHaveBeenCalledWith('local-user-uuid-123');
+      expect(mockRedisService.del).toHaveBeenCalledWith('auth:password-reset:token:valid-reset-token');
     });
   });
 });

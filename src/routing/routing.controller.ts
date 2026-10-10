@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, ParseFloatPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RoutingService } from './routing.service';
 import { RoutingRequestDto } from './dto/routing-request.dto';
 import { RoutingResponseDto } from './dto/routing-response.dto';
@@ -9,7 +9,7 @@ import { OptimizeTripDto } from './dto/optimize-trip.dto';
 @ApiTags('Routing')
 @ApiBearerAuth()
 @Controller('routing')
-@UseGuards(SupabaseAuthGuard)
+@UseGuards(JwtAuthGuard)
 export class RoutingController {
   constructor(private readonly routingService: RoutingService) {}
 

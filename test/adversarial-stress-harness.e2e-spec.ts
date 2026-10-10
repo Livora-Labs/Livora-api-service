@@ -8,7 +8,6 @@ import { UsersService } from '../src/users/users.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { MailService } from '../src/common/services/mail.service';
 import { ConfigService } from '@nestjs/config';
-import { SupabaseService } from '../src/supabase/supabase.service';
 import { CryptoUtil } from '../src/common/utils/crypto.util';
 import * as zlib from 'zlib';
 
@@ -17,7 +16,6 @@ describe('Adversarial Stress & Edge Case Harness (Challenger 1)', () => {
   let usersService: UsersService;
   let mockPrismaService: any;
   let mockMailService: any;
-  let mockSupabaseService: any;
   let mockConfigService: any;
 
   // In-memory mock database state
@@ -157,6 +155,14 @@ describe('Adversarial Stress & Edge Case Harness (Challenger 1)', () => {
           return { count: initialLen - dbBetaSignups.length };
         }),
       },
+      walletVault: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({}),
+      },
+      userCredential: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       $executeRaw: jest.fn().mockResolvedValue(1),
       $queryRaw: jest.fn().mockResolvedValue([]),
       $transaction: jest.fn(async (cb: (tx: any) => Promise<any>) => {
@@ -167,16 +173,6 @@ describe('Adversarial Stress & Edge Case Harness (Challenger 1)', () => {
     mockMailService = {
       sendComplaintConfirmationEmail: jest.fn().mockResolvedValue(undefined),
       sendOtpEmail: jest.fn().mockResolvedValue(undefined),
-    };
-
-    mockSupabaseService = {
-      getClient: jest.fn().mockReturnValue({
-        auth: {
-          admin: {
-            deleteUser: jest.fn().mockResolvedValue({ error: null }),
-          },
-        },
-      }),
     };
 
     mockConfigService = {
@@ -192,7 +188,6 @@ describe('Adversarial Stress & Edge Case Harness (Challenger 1)', () => {
         UsersService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: MailService, useValue: mockMailService },
-        { provide: SupabaseService, useValue: mockSupabaseService },
         { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();

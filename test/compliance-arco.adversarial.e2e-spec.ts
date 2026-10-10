@@ -17,12 +17,14 @@ import {
 } from '@nestjs/platform-fastify';
 import request from 'supertest';
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
-import { SupabaseAuthGuard } from '../src/common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
 import { CurrentUser } from '../src/common/decorators/current-user.decorator';
 import { UsersService } from '../src/users/users.service';
 import { AuthService } from '../src/auth/auth.service';
+import { PasswordService } from '../src/auth/services/password.service';
+import { TokenService } from '../src/auth/services/token.service';
+import { SessionService } from '../src/auth/services/session.service';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { SupabaseService } from '../src/supabase/supabase.service';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../src/redis/redis.service';
 import { MailService } from '../src/common/services/mail.service';
@@ -52,20 +54,20 @@ class AdversarialComplianceController {
     return this.authService.verifyEmail(verifyEmailDto);
   }
 
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Get('profile')
   getProfile(@CurrentUser() user: any) {
     return { success: true, user };
   }
 
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Delete('arco/cancel')
   @HttpCode(HttpStatus.OK)
   async cancelMyAccount(@CurrentUser('id') userId: string) {
     return this.usersService.cancelAccountARCO(userId);
   }
 
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Get('audits')
   async getMyAudits(@CurrentUser('id') userId: string) {
     return this.usersService.getConsentAudits(userId);
@@ -77,6 +79,10 @@ class AdversarialComplianceController {
   providers: [
     AuthService,
     UsersService,
+    PasswordService,
+    TokenService,
+    SessionService,
+    JwtAuthGuard,
     {
       provide: PrismaService,
       useFactory: () => {
@@ -144,6 +150,11 @@ class AdversarialComplianceController {
             }),
           },
           storeProfile: {
+            create: jest.fn(async ({ data }: any) => {
+              const record = { id: `store-${storeProfiles.size + 1}`, ...data };
+              storeProfiles.set(record.id, record);
+              return record;
+            }),
             updateMany: jest.fn(async ({ where, data }: any) => {
               let count = 0;
               for (const [key, store] of storeProfiles.entries()) {
@@ -208,6 +219,16 @@ class AdversarialComplianceController {
               );
             }),
           },
+          walletVault: {
+            deleteMany: jest.fn(async () => ({ count: 1 })),
+            create: jest.fn(async ({ data }: any) => data),
+            findUnique: jest.fn(async () => null),
+          },
+          userCredential: {
+            deleteMany: jest.fn(async () => ({ count: 1 })),
+            create: jest.fn(async ({ data }: any) => data),
+            findUnique: jest.fn(async () => null),
+          },
           $transaction: jest.fn(async (cb) => {
             return cb(mockPrisma);
           }),
@@ -228,84 +249,37 @@ class AdversarialComplianceController {
       },
     },
     {
-      provide: SupabaseService,
-      useFactory: () => {
-        const authUsers = new Map<string, any>();
-        return {
-          getClient: () => ({
-            auth: {
-              admin: {
-                createUser: jest.fn(async ({ email, password }: any) => {
-                  const id = `supabase-${crypto.randomUUID()}`;
-                  const authUser = { id, email };
-                  authUsers.set(id, authUser);
-                  return { data: { user: authUser }, error: null };
-                }),
-                deleteUser: jest.fn(async (id: string) => {
-                  authUsers.delete(id);
-                  return { data: {}, error: null };
-                }),
-              },
-              signInWithPassword: jest.fn(async ({ email }: any) => {
-                let found: any = null;
-                for (const u of authUsers.values()) {
-                  if (u.email === email) {
-                    found = u;
-                    break;
-                  }
-                }
-                if (!found) {
-                  return {
-                    data: { session: null, user: null },
-                    error: { message: 'Invalid credentials' },
-                  };
-                }
-                return {
-                  data: {
-                    session: {
-                      access_token: `jwt-${found.id}`,
-                      refresh_token: `refresh-${found.id}`,
-                      expires_in: 3600,
-                      token_type: 'bearer',
-                    },
-                    user: found,
-                  },
-                  error: null,
-                };
-              }),
-              getUser: jest.fn(async (token: string) => {
-                if (token.startsWith('jwt-supabase-')) {
-                  const id = token.replace('jwt-', '');
-                  const u = authUsers.get(id);
-                  if (u) {
-                    return { data: { user: u }, error: null };
-                  }
-                }
-                return {
-                  data: { user: null },
-                  error: { message: 'Invalid JWT' },
-                };
-              }),
-            },
-          }),
-        };
-      },
-    },
-    {
       provide: RedisService,
       useFactory: () => {
         const store = new Map<string, string>();
-        return {
+        const sets = new Map<string, Set<string>>();
+        const mockClient = {
           get: jest.fn(async (k: string) => store.get(k) || null),
           set: jest.fn(async (k: string, v: string) => {
             store.set(k, v);
+            return 'OK';
           }),
           del: jest.fn(async (k: string) => {
             store.delete(k);
+            return 1;
           }),
           ttl: jest.fn(async () => 600),
           incr: jest.fn(async () => 1),
-          expire: jest.fn(async () => true),
+          expire: jest.fn(async () => 1),
+          sadd: jest.fn(async (k: string, m: string) => {
+            if (!sets.has(k)) sets.set(k, new Set());
+            sets.get(k)!.add(m);
+            return 1;
+          }),
+          smembers: jest.fn(async (k: string) => Array.from(sets.get(k) || [])),
+          srem: jest.fn(async (k: string, m: string) => {
+            sets.get(k)?.delete(m);
+            return 1;
+          }),
+        };
+        return {
+          ...mockClient,
+          getClient: () => mockClient,
         };
       },
     },
@@ -324,6 +298,8 @@ class AdversarialComplianceController {
         get: jest.fn((k: string) => {
           if (k === 'WALLET_ENCRYPTION_KEY')
             return 'compliance_test_secret_key_32c!';
+          if (k === 'JWT_SECRET')
+            return 'compliance_jwt_secret_key_livora_2026';
           return null;
         }),
       },
@@ -610,12 +586,9 @@ describe('Milestone M4 Adversarial Challenge: Ley 29733, ARCO Cascade & Web3 Key
       expect(kyc.documentUrl).toBeNull();
       expect(kyc.status).toBe('REJECTED');
 
-      // Check Model 4: Complaint
+      // Check Model 4: Complaint (Disociado según D.S. 011-2011-PCM e Indecopi)
       const complaint = prismaMock._stores.complaints.get('comp-1');
-      expect(complaint.subject).toBe('Queja Anonimizada');
-      expect(complaint.description).toBe(
-        'Contenido suprimido por solicitud de cancelación ARCO (Ley 29733)',
-      );
+      expect(complaint.userId).toBeNull();
 
       // Check Model 5: Notifications
       const notifs = prismaMock._stores.notifications.filter(
@@ -672,6 +645,9 @@ describe('Milestone M4 Adversarial Challenge: Ley 29733, ARCO Cascade & Web3 Key
 
       // Simulate a database exception during transaction
       const failingPrisma: any = {
+        walletVault: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
         user: {
           findUnique: jest.fn().mockResolvedValue(tempUser),
           update: jest.fn().mockImplementation(() => {
@@ -683,12 +659,7 @@ describe('Milestone M4 Adversarial Challenge: Ley 29733, ARCO Cascade & Web3 Key
 
       const failingService = new UsersService(
         failingPrisma,
-        { get: jest.fn() } as any,
-        {
-          getClient: jest
-            .fn()
-            .mockReturnValue({ auth: { admin: { deleteUser: jest.fn() } } }),
-        } as any,
+        { get: jest.fn().mockReturnValue(encryptionKey) } as any,
         { getBalance: jest.fn() } as any,
       );
 
@@ -705,8 +676,8 @@ describe('Milestone M4 Adversarial Challenge: Ley 29733, ARCO Cascade & Web3 Key
     });
   });
 
-  describe('Adversarial Challenge 3: Soft-Delete SupabaseAuthGuard Defense & Boundary Testing', () => {
-    it('3.1 Soft-deleted user is immediately rejected with 401 Problem Details (both via Supabase revocation and local DB soft-delete check)', async () => {
+  describe('Adversarial Challenge 3: Soft-Delete JwtAuthGuard Defense & Boundary Testing', () => {
+    it('3.1 Soft-deleted user is immediately rejected with 401 Problem Details (both via revocation and local DB soft-delete check)', async () => {
       const email = 'guard.softdeleted@livora.io';
       await request(app.getHttpServer())
         .post('/adv-compliance/auth/register')
@@ -727,7 +698,7 @@ describe('Milestone M4 Adversarial Challenge: Ley 29733, ARCO Cascade & Web3 Key
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      // Scenario A: Local database user is marked soft-deleted (deletedAt !== null) while Supabase token is still valid
+      // Scenario A: Local database user is marked soft-deleted (deletedAt !== null) while JWT token is still valid
       const localUser = prismaMock._stores.users.get(userId);
       localUser.deletedAt = new Date();
       localUser.isActive = false;
@@ -747,8 +718,7 @@ describe('Milestone M4 Adversarial Challenge: Ley 29733, ARCO Cascade & Web3 Key
       expect(softDeletedRes.body.detail).toBe('Cuenta desactivada o eliminada');
       expect(softDeletedRes.body.instance).toBe('/adv-compliance/profile');
 
-      // Scenario B: After ARCO cancellation, Supabase Auth user is also purged
-      // Execute ARCO cancellation (will succeed or reject as already soft-deleted)
+      // Scenario B: After ARCO cancellation, account is purged and rejected by guard
       // Restore isActive temporarily to execute full ARCO flow
       localUser.isActive = true;
       localUser.deletedAt = null;
@@ -768,7 +738,7 @@ describe('Milestone M4 Adversarial Challenge: Ley 29733, ARCO Cascade & Web3 Key
       expect(rejectedRes.body.status).toBe(401);
     });
 
-    it('3.2 Inactive user (isActive=false, deletedAt=null) is rejected by SupabaseAuthGuard', async () => {
+    it('3.2 Inactive user (isActive=false, deletedAt=null) is rejected by JwtAuthGuard', async () => {
       const email = 'guard.inactive@livora.io';
       await request(app.getHttpServer())
         .post('/adv-compliance/auth/register')

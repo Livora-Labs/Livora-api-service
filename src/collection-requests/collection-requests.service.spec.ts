@@ -10,6 +10,7 @@ import { RequestStatus } from '@prisma/client';
 
 import { ConfigService } from '@nestjs/config';
 import { BlockchainService } from '../blockchain/services/blockchain.service';
+import { CollectionAuctionService } from '../collections/services/collection-auction.service';
 
 describe('CollectionsService - verifyPin', () => {
   let service: CollectionsService;
@@ -31,7 +32,7 @@ describe('CollectionsService - verifyPin', () => {
     get: jest.fn(),
     set: jest.fn(),
     setNX: jest.fn().mockResolvedValue(true),
-    del: jest.fn(),
+    del: jest.fn().mockResolvedValue(1),
   };
 
   beforeEach(async () => {
@@ -53,11 +54,12 @@ describe('CollectionsService - verifyPin', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('mock-val') },
         },
-        { provide: WebsocketsService, useValue: {} },
+        { provide: WebsocketsService, useValue: { emitCollectionUpdated: jest.fn() } },
         {
           provide: NotificationsService,
           useValue: { sendPushNotification: jest.fn().mockReturnValue(Promise.resolve(true)) },
         },
+        { provide: CollectionAuctionService, useValue: {} },
       ],
     }).compile();
 

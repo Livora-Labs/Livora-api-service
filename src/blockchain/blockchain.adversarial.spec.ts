@@ -382,6 +382,9 @@ describe('Milestone M2 Adversarial Test Suite: Web3 Blockchain Resiliency & Circ
                 findUnique: jest.fn(),
                 findMany: jest.fn(),
               },
+              walletVault: {
+                findUnique: jest.fn(),
+              },
               inventoryItem: {
                 findFirst: jest.fn(),
                 update: jest.fn(),
@@ -512,7 +515,7 @@ describe('Milestone M2 Adversarial Test Suite: Web3 Blockchain Resiliency & Circ
       const secret = Keypair.random().secret();
       const encryptedKey = CryptoUtil.encrypt(secret, encryptionKey);
 
-      prisma.user.findUnique = jest.fn().mockResolvedValue({
+      prisma.walletVault.findUnique = jest.fn().mockResolvedValue({
         encryptedPrivateKey: encryptedKey,
       } as any);
 
@@ -550,7 +553,7 @@ describe('Milestone M2 Adversarial Test Suite: Web3 Blockchain Resiliency & Circ
       const secret = Keypair.random().secret();
       const encryptedKey = CryptoUtil.encrypt(secret, encryptionKey);
 
-      prisma.user.findUnique = jest.fn().mockResolvedValue({
+      prisma.walletVault.findUnique = jest.fn().mockResolvedValue({
         encryptedPrivateKey: encryptedKey,
       } as any);
 
@@ -580,7 +583,7 @@ describe('Milestone M2 Adversarial Test Suite: Web3 Blockchain Resiliency & Circ
       } as unknown as Job<any>;
 
       // Malformed ciphertext
-      prisma.user.findUnique = jest.fn().mockResolvedValue({
+      prisma.walletVault.findUnique = jest.fn().mockResolvedValue({
         encryptedPrivateKey: 'invalid_iv:invalid_ciphertext',
       } as any);
 
@@ -606,6 +609,7 @@ describe('Milestone M2 Adversarial Test Suite: Web3 Blockchain Resiliency & Circ
             provide: PrismaService,
             useValue: {
               user: { findUnique: jest.fn() },
+              walletVault: { findUnique: jest.fn() },
               redemptionTransaction: {
                 findMany: jest.fn().mockResolvedValue([]),
               },
@@ -653,6 +657,10 @@ describe('Milestone M2 Adversarial Test Suite: Web3 Blockchain Resiliency & Circ
       prisma.user.findUnique.mockResolvedValue({
         id: 'user-subsidized-fail',
         email: 'victim@livora.earth',
+        walletAddress: userKeypair.publicKey(),
+      } as any);
+
+      prisma.walletVault.findUnique.mockResolvedValue({
         encryptedPrivateKey: encryptedKey,
       } as any);
 

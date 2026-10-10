@@ -93,14 +93,14 @@ describe('RoleThrottlerGuard', () => {
   });
 
   it('should resolve JWT in canActivate and isolate users behind identical CGNAT IP', async () => {
-    process.env.SUPABASE_JWT_SECRET = 'test_jwt_secret_key_for_cgnat_test!';
+    process.env.JWT_SECRET = 'test_jwt_secret_key_for_cgnat_test!';
     const tokenUser1 = jwt.sign(
       { sub: 'cgnat-user-1', role: Role.HOGAR },
-      process.env.SUPABASE_JWT_SECRET,
+      process.env.JWT_SECRET,
     );
     const tokenUser2 = jwt.sign(
       { sub: 'cgnat-user-2', role: Role.ADMIN },
-      process.env.SUPABASE_JWT_SECRET,
+      process.env.JWT_SECRET,
     );
 
     const cgnatIp = '181.176.50.10';

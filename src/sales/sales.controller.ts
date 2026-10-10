@@ -15,14 +15,14 @@ import { SalesService } from './sales.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { CreateCertificateDto } from '../certificates/dto/create-certificate.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Sales & Certificates')
 @ApiBearerAuth()
-@UseGuards(SupabaseAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller()
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}

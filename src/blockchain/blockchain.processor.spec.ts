@@ -34,7 +34,29 @@ describe('BlockchainProcessor', () => {
             },
             user: {
               findUnique: jest.fn(),
+              findMany: jest.fn(),
             },
+            walletVault: {
+              findUnique: jest.fn(),
+            },
+            batch: {
+              findUnique: jest.fn(),
+              update: jest.fn(),
+            },
+            inventoryItem: {
+              findFirst: jest.fn().mockResolvedValue(null),
+              create: jest.fn(),
+            },
+            inventoryMovement: {
+              create: jest.fn(),
+            },
+            $transaction: jest.fn(async (cb) =>
+              cb({
+                batch: { update: jest.fn() },
+                inventoryItem: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn() },
+                inventoryMovement: { create: jest.fn() },
+              }),
+            ),
           },
         },
         {
@@ -111,7 +133,7 @@ describe('BlockchainProcessor', () => {
         'livora_wallet_aes256_secret!',
       );
 
-      prisma.user.findUnique.mockResolvedValue({
+      prisma.walletVault.findUnique.mockResolvedValue({
         encryptedPrivateKey: encryptedKey,
       } as any);
 
@@ -122,8 +144,8 @@ describe('BlockchainProcessor', () => {
 
       const result = await processor.process(job);
 
-      expect(prisma.user.findUnique).toHaveBeenCalledWith({
-        where: { id: jobData.fromUserId },
+      expect(prisma.walletVault.findUnique).toHaveBeenCalledWith({
+        where: { userId: jobData.fromUserId },
         select: { encryptedPrivateKey: true },
       });
 
@@ -186,7 +208,7 @@ describe('BlockchainProcessor', () => {
         'livora_wallet_aes256_secret!',
       );
 
-      prisma.user.findUnique.mockResolvedValue({
+      prisma.walletVault.findUnique.mockResolvedValue({
         encryptedPrivateKey: encryptedKey,
       } as any);
 
@@ -219,9 +241,7 @@ describe('BlockchainProcessor', () => {
         id: 'job-3',
       } as unknown as Job<any>;
 
-      prisma.user.findUnique.mockResolvedValue({
-        encryptedPrivateKey: null,
-      } as any);
+      prisma.walletVault.findUnique.mockResolvedValue(null);
 
       await expect(processor.process(job)).rejects.toThrow(
         'El usuario user-no-key no posee una clave privada registrada',
@@ -426,7 +446,7 @@ describe('BlockchainProcessor', () => {
         'livora_wallet_aes256_secret!',
       );
 
-      prisma.user.findUnique.mockResolvedValue({
+      prisma.walletVault.findUnique.mockResolvedValue({
         encryptedPrivateKey: encryptedKey,
       } as any);
 
@@ -468,7 +488,7 @@ describe('BlockchainProcessor', () => {
         'livora_wallet_aes256_secret!',
       );
 
-      prisma.user.findUnique.mockResolvedValue({
+      prisma.walletVault.findUnique.mockResolvedValue({
         encryptedPrivateKey: encryptedKey,
       } as any);
 

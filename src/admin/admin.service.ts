@@ -15,11 +15,7 @@ import {
 } from '../blockchain/blockchain.constants';
 import { BlockchainService } from '../blockchain/services/blockchain.service';
 import { StellarRpcManagerService } from '../blockchain/services/stellar-rpc-manager.service';
-import { CryptoUtil } from '../common/utils/crypto.util';
-import {
-  AuditLogBufferService,
-  AuditLogQueryParams,
-} from '../common/services/audit-log-buffer.service';
+import { AuditLogBufferService } from '../common/services/audit-log-buffer.service';
 import { CreateKycApplicationDto } from '../kyc/dto/create-kyc-application.dto';
 import { CreateB2bApplicationDto } from '../b2b/dto/create-b2b-application.dto';
 import { UpdateKycStatusDto } from './dto/update-kyc-status.dto';
@@ -31,13 +27,16 @@ import { LedgerAuditQueryDto, ServerLogsQueryDto } from './dto/audit-query.dto';
 import { AdminResetPasswordDto } from './dto/admin-reset-password.dto';
 import * as bcrypt from 'bcryptjs';
 import { AuthService } from '../auth/auth.service';
-import { Role } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UploadsService } from '../uploads/uploads.service';
+import { AdminKycService } from './services/admin-kyc.service';
+import { AdminAuditService } from './services/admin-audit.service';
 
 @Injectable()
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
+  private readonly adminKycService: AdminKycService;
+  private readonly adminAuditService: AdminAuditService;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -48,7 +47,6 @@ export class AdminService {
     @InjectQueue(BLOCKCHAIN_DLQ)
     private readonly blockchainDlq?: Queue,
     @Optional()
-    @InjectQueue(BLOCKCHAIN_QUEUE)
     private readonly stellarRpcManager?: StellarRpcManagerService,
     @Optional()
     private readonly auditLogBuffer?: AuditLogBufferService,
@@ -62,139 +60,88 @@ export class AdminService {
     private readonly notificationsService?: NotificationsService,
     @Optional()
     private readonly uploadsService?: UploadsService,
-  ) {}
-
-  async createKycApplication(userId: string, dto: CreateKycApplicationDto) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        profilePhotoUrl: dto.selfieUrl ?? undefined,
-        dniDocumentNumber: dto.documentNumber ?? undefined,
-        dniPhotoUrl: dto.documentUrl ?? undefined,
-        selfiePhotoUrl: dto.selfieUrl ?? undefined,
-        kycStatus: 'PENDING',
-      },
-    }).catch(() => {});
-
-    if (dto.taxIdRuc || dto.businessName || dto.documentUrl) {
-      await this.prisma.storeProfile.updateMany({
-        where: { userId },
-        data: {
-          ruc: dto.taxIdRuc ?? undefined,
-          businessName: dto.businessName ?? undefined,
-          bankAccount: dto.bankCci ?? undefined,
-          logoUrl: dto.documentUrl ?? undefined,
-        },
-      }).catch(() => {});
-
-      if (dto.businessName) {
-        await this.prisma.user.update({
-          where: { id: userId },
-          data: { name: dto.businessName },
-        }).catch(() => {});
-      }
-    }
-
-    return this.prisma.kycApplication.create({
-      data: {
-        userId,
-        documentUrl: dto.documentUrl,
-        documentUrlBack: dto.documentUrlBack,
-        selfieUrl: dto.selfieUrl,
-        documentNumber: dto.documentNumber,
-        transportType: dto.transportType,
-        vehiclePlate: dto.vehiclePlate,
-        associationName: dto.associationName,
-        taxIdRuc: dto.taxIdRuc,
-        businessName: dto.businessName,
-        bankCci: dto.bankCci,
-        status: 'PENDING',
-      },
-    });
+    @Optional()
+    adminKycService?: AdminKycService,
+    @Optional()
+    adminAuditService?: AdminAuditService,
+  ) {
+    this.adminKycService =
+      adminKycService ||
+      new AdminKycService(
+        this.prisma,
+        this.configService as any,
+        this.blockchainService as any,
+        this.notificationsService,
+        this.uploadsService,
+      );
+    this.adminAuditService =
+      adminAuditService ||
+      new AdminAuditService(
+        this.prisma,
+        this.blockchainQueue,
+        this.blockchainDlq,
+        this.stellarRpcManager,
+        this.auditLogBuffer,
+      );
   }
 
-  /**
-   * Estado KYC del propio recolector. Devuelve NOT_SUBMITTED si aún no envió nada,
-   * o el estado de su última solicitud (PENDING | APPROVED | REJECTED).
-   */
+  // --- KYC Delegations ---
+
+  async createKycApplication(userId: string, dto: CreateKycApplicationDto) {
+    return this.adminKycService.createKycApplication(userId, dto);
+  }
+
   async getMyKycApplication(userId: string) {
-    const readPrisma =
-      (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
-    const app = await readPrisma.kycApplication.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!app) {
-      return { status: 'NOT_SUBMITTED' };
-    }
-
-    return {
-      status: app.status,
-      documentUrl: app.documentUrl,
-      createdAt: app.createdAt,
-      updatedAt: app.updatedAt,
-    };
+    return this.adminKycService.getMyKycApplication(userId);
   }
 
   async createB2bApplication(dto: CreateB2bApplicationDto) {
-    return {
-      status: 'RECEIVED',
-      message:
-        'Solicitud B2B recibida exitosamente. Nuestro equipo se pondrá en contacto.',
-      companyName: dto.companyName,
-      email: dto.email,
-      taxId: dto.taxId,
-      createdAt: new Date().toISOString(),
-    };
+    return this.adminKycService.createB2bApplication(dto);
   }
 
   async getKycApplications(query: PaginationQueryDto) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
-    const skip = (page - 1) * limit;
-
-    // Solo se listan solicitudes KYC formales que los usuarios enviaron explícitamente a través de sus formularios.
-    const readPrisma =
-      (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
-
-    const apps = await readPrisma.kycApplication.findMany({
-      skip,
-      take: limit,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            phone: true,
-            address: true,
-            role: true,
-            userStatus: true,
-            kycStatus: true,
-            profilePhotoUrl: true,
-            isActive: true,
-            createdAt: true,
-            storeProfile: true,
-          },
-        },
-      },
-    });
-
-    if (this.uploadsService) {
-      return Promise.all(
-        apps.map(async (app) => ({
-          ...app,
-          documentUrl: await this.uploadsService!.getFreshSignedUrl(app.documentUrl),
-          documentUrlBack: await this.uploadsService!.getFreshSignedUrl(app.documentUrlBack),
-          selfieUrl: await this.uploadsService!.getFreshSignedUrl(app.selfieUrl),
-        }))
-      );
-    }
-
-    return apps;
+    return this.adminKycService.getKycApplications(query);
   }
+
+  async updateUserKycStatus(userId: string, dto: UpdateKycStatusDto) {
+    return this.adminKycService.updateUserKycStatus(userId, dto);
+  }
+
+  // --- Audit & Operations Delegations ---
+
+  async getBlockchainHealth() {
+    return this.adminAuditService.getBlockchainHealth();
+  }
+
+  async getFinancialReconciliation() {
+    return this.adminAuditService.getFinancialReconciliation();
+  }
+
+  async getLedgerAudit(query: LedgerAuditQueryDto) {
+    return this.adminAuditService.getLedgerAudit(query);
+  }
+
+  async getQueueAudit() {
+    return this.adminAuditService.getQueueAudit();
+  }
+
+  async retryQueueJob(jobId: string) {
+    return this.adminAuditService.retryQueueJob(jobId);
+  }
+
+  async retryOutboxEvent(eventId: string) {
+    return this.adminAuditService.retryOutboxEvent(eventId);
+  }
+
+  async getServerLogs(query: ServerLogsQueryDto) {
+    return this.adminAuditService.getServerLogs(query);
+  }
+
+  async retryPaymentMint(paymentIdentifier: string) {
+    return this.adminAuditService.retryPaymentMint(paymentIdentifier);
+  }
+
+  // --- User Management & Complaints ---
 
   async getUsers(query: FindUsersAdminQueryDto) {
     const page = query.page ?? 1;
@@ -333,186 +280,6 @@ export class AdminService {
     };
   }
 
-  async updateUserKycStatus(userId: string, dto: UpdateKycStatusDto) {
-    const kycApp = await this.prisma.kycApplication.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      include: { user: true },
-    });
-
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      throw new NotFoundException('Usuario no encontrado');
-    }
-
-    const currentRetry = kycApp?.retryCount ?? 0;
-    let newStatus = dto.status;
-    let incrementRetry = currentRetry;
-
-    if (dto.status === 'OBSERVED') {
-      incrementRetry = currentRetry + 1;
-      if (incrementRetry > 3) {
-        newStatus = 'REJECTED';
-      }
-    }
-
-    let updatedApp: any = null;
-    if (kycApp) {
-      updatedApp = await this.prisma.kycApplication.update({
-        where: { id: kycApp.id },
-        data: {
-          status: newStatus,
-          observationNotes: dto.observationNotes ?? kycApp.observationNotes,
-          retryCount: incrementRetry,
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              role: true,
-              isActive: true,
-            },
-          },
-        },
-      });
-    } else if (user.role === Role.TIENDA) {
-      const storeProfile = await this.prisma.storeProfile.findUnique({
-        where: { userId: user.id },
-      });
-      updatedApp = await this.prisma.kycApplication.create({
-        data: {
-          userId: user.id,
-          status: newStatus,
-          documentType: 'RUC',
-          documentNumber: storeProfile?.ruc || null,
-          taxIdRuc: storeProfile?.ruc || null,
-          businessName: storeProfile?.businessName || user.name || 'Comercio Aliado',
-          bankCci: storeProfile?.bankAccount || null,
-          documentUrl: storeProfile?.logoUrl || null,
-          observationNotes: dto.observationNotes || null,
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              role: true,
-              isActive: true,
-            },
-          },
-        },
-      }).catch(() => null);
-    }
-
-    // Activar o suspender usuario según el estado KYC y patrocinar cuenta en Stellar
-    if (newStatus === 'APPROVED') {
-      const updateData: any = {
-        isActive: true,
-        kycStatus: 'APPROVED',
-        kycVerifiedAt: new Date(),
-      };
-      if (user.role === 'RECOLECTOR' && kycApp?.selfieUrl) {
-        updateData.profilePhotoUrl = kycApp.selfieUrl;
-      }
-
-      // Patrocinar cuenta Stellar (Sponsored Reserves CAP-0033)
-      if (user.walletAddress && !user.isWalletSponsored && this.blockchainService) {
-        try {
-          let decryptedSecret: string | undefined;
-          if (user.encryptedPrivateKey) {
-            const encryptionKey =
-              this.configService?.get<string>('WALLET_ENCRYPTION_KEY') ||
-              this.configService?.get<string>('ENCRYPTION_KEY') ||
-              process.env.WALLET_ENCRYPTION_KEY ||
-              process.env.ENCRYPTION_KEY;
-            if (encryptionKey) {
-              decryptedSecret = CryptoUtil.decrypt(
-                user.encryptedPrivateKey,
-                encryptionKey,
-              );
-            }
-          }
-          this.logger.log(
-            `Patrocinando cuenta Stellar para usuario ${user.id} (${user.walletAddress})...`,
-          );
-          await this.blockchainService.sponsorAccountCreation(
-            user.walletAddress,
-            decryptedSecret,
-          );
-          updateData.isWalletSponsored = true;
-        } catch (sponsorErr: any) {
-          this.logger.error(
-            `Error al patrocinar cuenta Stellar para usuario ${userId}: ${sponsorErr.message}`,
-          );
-        }
-      }
-
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: updateData,
-      });
-
-      // Notificación multicanal de verificación aprobada
-      if (this.notificationsService) {
-        const title = user.role === Role.TIENDA
-          ? 'Comercio Verificado'
-          : 'Verificación KYC Aprobada';
-        const body = user.role === Role.TIENDA
-          ? 'Tu comercio ha sido verificado con éxito. Ya puedes cobrar y recibir recompensas LIVO.'
-          : 'Tu cuenta ha sido verificada con éxito. Ya estás habilitado para operar en Livora.';
-        this.notificationsService.sendPushNotification(user.id, title, body, {
-          type: 'KYC_APPROVED',
-          role: user.role,
-        }).catch(() => {});
-      }
-    } else if (newStatus === 'REJECTED') {
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          isActive: user.role === 'RECOLECTOR' ? false : user.isActive,
-          kycStatus: 'REJECTED',
-          kycRejectionReason:
-            dto.observationNotes || 'Rechazado en revisión administrativa',
-        },
-      });
-
-      if (this.notificationsService) {
-        this.notificationsService.sendPushNotification(
-          user.id,
-          'Expediente de Verificación Rechazado',
-          `Tu solicitud de verificación no fue aprobada: ${dto.observationNotes || 'Verifica los requisitos reglamentarios'}`,
-          { type: 'KYC_REJECTED', role: user.role },
-        ).catch(() => {});
-      }
-    } else if (newStatus === 'OBSERVED') {
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          kycStatus: 'OBSERVED',
-          kycRejectionReason:
-            dto.observationNotes || 'Observado en revisión administrativa',
-        },
-      });
-
-      if (this.notificationsService) {
-        this.notificationsService.sendPushNotification(
-          user.id,
-          'Expediente Observado',
-          `Tu expediente requiere subsanación: ${dto.observationNotes || 'Revisa tus documentos en la aplicación'}`,
-          { type: 'KYC_OBSERVED', role: user.role },
-        ).catch(() => {});
-      }
-    }
-
-    return updatedApp || { userId, status: newStatus };
-  }
-
   async updateUserStatus(userId: string, dto: UpdateUserStatusDto) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -571,7 +338,6 @@ export class AdminService {
       message: '',
     };
 
-    // 1. Si se especificó nueva contraseña manual, actualizar en PostgreSQL
     if (dto.newPassword) {
       const passwordHash = await bcrypt.hash(dto.newPassword, 12);
       await this.prisma.userCredential.upsert({
@@ -591,7 +357,6 @@ export class AdminService {
       results.passwordUpdated = true;
     }
 
-    // 2. Si se solicitó enviar correo de recuperación, disparar authService.forgotPassword
     if (dto.sendResetEmail) {
       if (!this.authService) {
         throw new BadRequestException('Servicio de correo de recuperación no disponible');
@@ -611,423 +376,6 @@ export class AdminService {
     return results;
   }
 
-  /**
-   * Obtiene la salud real, latencia en ms y bloque ledger activo del cluster Stellar RPC.
-   * Cero mocks: interroga en tiempo real a los nodos configurados (QuickNode / Soroban).
-   */
-  async getBlockchainHealth() {
-    if (this.stellarRpcManager) {
-      return this.stellarRpcManager.getRealHealthAndLatency();
-    }
-
-    return {
-      status: 'unknown',
-      network: 'Stellar Testnet',
-      latency: 'N/A',
-      blockNumber: 0,
-      activeNodeUrl: 'N/A',
-      timestamp: new Date().toISOString(),
-      nodes: [],
-    };
-  }
-
-  /**
-   * Auditoría y Reconciliación de Partida Doble (Zero Loss Assurance).
-   * Compara matemáticamente el saldo en Account.cachedBalance contra
-   * sum(CREDIT - DEBIT) en ledger_entries para detectar fugas o desajustes de saldo.
-   */
-  async getFinancialReconciliation() {
-    const readPrisma =
-      (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
-
-    // Obtener todas las cuentas con sus asientos contables
-    const accounts = await readPrisma.account.findMany({
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            role: true,
-            walletAddress: true,
-          },
-        },
-        ledgerEntries: {
-          select: {
-            entryType: true,
-            amount: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    let totalCirculatingTokens = 0;
-    let totalTreasuryTokens = 0;
-    let totalCredits = 0;
-    let totalDebits = 0;
-
-    const discrepancies: Array<{
-      accountId: string;
-      userId: string | null;
-      userEmail: string | null;
-      accountType: string;
-      cachedBalance: number;
-      calculatedLedgerBalance: number;
-      variance: number;
-    }> = [];
-
-    for (const account of accounts) {
-      const cached = Number(account.cachedBalance);
-
-      if (account.accountType === 'USER_WALLET') {
-        totalCirculatingTokens += cached;
-      } else {
-        totalTreasuryTokens += cached;
-      }
-
-      let accountCredits = 0;
-      let accountDebits = 0;
-
-      for (const entry of account.ledgerEntries) {
-        const amt = Number(entry.amount);
-        if (entry.entryType === 'CREDIT') {
-          accountCredits += amt;
-          totalCredits += amt;
-        } else {
-          accountDebits += amt;
-          totalDebits += amt;
-        }
-      }
-
-      const calculated = accountCredits - accountDebits;
-      const variance = Math.abs(cached - calculated);
-
-      // Tolerancia micrométrica para redondeos de punto flotante en BD
-      if (variance > 0.0000001) {
-        discrepancies.push({
-          accountId: account.id,
-          userId: account.userId,
-          userEmail: account.user?.email || null,
-          accountType: account.accountType,
-          cachedBalance: cached,
-          calculatedLedgerBalance: calculated,
-          variance: Number(variance.toFixed(7)),
-        });
-      }
-    }
-
-    const totalRedemptions = await readPrisma.redemptionTransaction.count();
-    const completedRedemptions = await readPrisma.redemptionTransaction.count({
-      where: { status: 'COMPLETED' },
-    });
-
-    return {
-      timestamp: new Date().toISOString(),
-      isReconciled: discrepancies.length === 0,
-      summary: {
-        totalAccountsAudited: accounts.length,
-        totalCirculatingTokens: Number(totalCirculatingTokens.toFixed(7)),
-        totalTreasuryTokens: Number(totalTreasuryTokens.toFixed(7)),
-        totalCredits: Number(totalCredits.toFixed(7)),
-        totalDebits: Number(totalDebits.toFixed(7)),
-        netLedgerBalance: Number((totalCredits - totalDebits).toFixed(7)),
-        totalRedemptions,
-        completedRedemptions,
-      },
-      discrepanciesCount: discrepancies.length,
-      discrepancies,
-    };
-  }
-
-  /**
-   * Consulta paginada y filtrada de asientos contables en el Libro Mayor (LedgerEntry).
-   * Permite rastrear asientos por Correlation ID, Hash Stellar o búsqueda de texto.
-   */
-  async getLedgerAudit(query: LedgerAuditQueryDto) {
-    const page = query.page ?? 1;
-    const limit = Math.min(query.limit ?? 20, 100);
-    const skip = (page - 1) * limit;
-
-    const readPrisma =
-      (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
-
-    const where: any = {};
-
-    if (query.correlationId) {
-      where.correlationId = query.correlationId;
-    }
-
-    if (query.txHash) {
-      where.txHash = { contains: query.txHash, mode: 'insensitive' };
-    }
-
-    if (query.search && query.search.trim()) {
-      const term = query.search.trim();
-      where.OR = [
-        { description: { contains: term, mode: 'insensitive' } },
-        { txHash: { contains: term, mode: 'insensitive' } },
-        {
-          account: {
-            user: {
-              email: { contains: term, mode: 'insensitive' },
-            },
-          },
-        },
-      ];
-    }
-
-    const [items, total] = await Promise.all([
-      readPrisma.ledgerEntry.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          account: {
-            select: {
-              id: true,
-              accountType: true,
-              cachedBalance: true,
-              user: {
-                select: {
-                  id: true,
-                  email: true,
-                  role: true,
-                  walletAddress: true,
-                },
-              },
-            },
-          },
-        },
-      }),
-      readPrisma.ledgerEntry.count({ where }),
-    ]);
-
-    return {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-      items,
-    };
-  }
-
-  /**
-   * Auditoría de colas de procesamiento asíncrono (BullMQ) y eventos Outbox.
-   */
-  async getQueueAudit() {
-    let queueStats = {
-      waiting: 0,
-      active: 0,
-      completed: 0,
-      failed: 0,
-      delayed: 0,
-      dlqCount: 0,
-    };
-
-    const failedJobs: Array<{
-      id: string | undefined;
-      name: string;
-      data: any;
-      failedReason: string | undefined;
-      timestamp: number | undefined;
-      queue: string;
-    }> = [];
-
-    if (this.blockchainQueue) {
-      const [waiting, active, completed, failed, delayed] = await Promise.all([
-        this.blockchainQueue.getWaitingCount(),
-        this.blockchainQueue.getActiveCount(),
-        this.blockchainQueue.getCompletedCount(),
-        this.blockchainQueue.getFailedCount(),
-        this.blockchainQueue.getDelayedCount(),
-      ]);
-
-      queueStats = {
-        ...queueStats,
-        waiting,
-        active,
-        completed,
-        failed,
-        delayed,
-      };
-
-      const rawFailed = await this.blockchainQueue.getFailed(0, 15);
-      failedJobs.push(
-        ...rawFailed.map((j) => ({
-          id: j.id,
-          name: j.name,
-          data: j.data,
-          failedReason: j.failedReason,
-          timestamp: j.timestamp,
-          queue: BLOCKCHAIN_QUEUE,
-        })),
-      );
-    }
-
-    if (this.blockchainDlq) {
-      const dlqCount = await this.blockchainDlq.getWaitingCount();
-      queueStats.dlqCount = dlqCount;
-
-      const rawDlqJobs = await this.blockchainDlq.getJobs(
-        ['waiting', 'active', 'failed'],
-        0,
-        15,
-      );
-      failedJobs.push(
-        ...rawDlqJobs.map((j) => ({
-          id: j.id,
-          name: j.name,
-          data: j.data,
-          failedReason: j.failedReason,
-          timestamp: j.timestamp,
-          queue: BLOCKCHAIN_DLQ,
-        })),
-      );
-    }
-
-    const readPrisma =
-      (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
-
-    const [pendingOutboxCount, failedOutboxCount, outboxEvents] =
-      await Promise.all([
-        readPrisma.outboxEvent.count({ where: { status: 'PENDING' } }),
-        readPrisma.outboxEvent.count({ where: { status: 'FAILED' } }),
-        readPrisma.outboxEvent.findMany({
-          where: { status: { in: ['FAILED', 'PENDING'] } },
-          take: 15,
-          orderBy: { createdAt: 'desc' },
-        }),
-      ]);
-
-    const pendingPayments = await readPrisma.paymentTransaction.findMany({
-      where: {
-        status: 'COMPLETED',
-        blockchainStatus: { in: ['PENDING', 'FAILED_BLOCKCHAIN'] },
-      },
-      take: 15,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        user: {
-          select: {
-            email: true,
-            walletAddress: true,
-          },
-        },
-      },
-    });
-
-    return {
-      timestamp: new Date().toISOString(),
-      queueStats,
-      failedJobs,
-      outboxStats: {
-        pending: pendingOutboxCount,
-        failed: failedOutboxCount,
-        recentEvents: outboxEvents,
-      },
-      pendingPayments,
-    };
-  }
-
-  /**
-   * Reintenta manualmente un trabajo de la cola BullMQ o lo promociona de la DLQ.
-   */
-  async retryQueueJob(jobId: string) {
-    if (this.blockchainQueue) {
-      const job = await this.blockchainQueue.getJob(jobId);
-      if (job) {
-        await job.retry();
-        this.logger.log(
-          `[AdminAudit] Trabajo ${jobId} reintentado en BLOCKCHAIN_QUEUE`,
-        );
-        return {
-          status: 'SUCCESS',
-          message: `Trabajo ${jobId} re-encolado para ejecución inmediata`,
-          queue: BLOCKCHAIN_QUEUE,
-        };
-      }
-    }
-
-    if (this.blockchainDlq) {
-      const dlqJob = await this.blockchainDlq.getJob(jobId);
-      if (dlqJob && this.blockchainQueue) {
-        await this.blockchainQueue.add(dlqJob.name, dlqJob.data, {
-          attempts: 5,
-          backoff: { type: 'exponential', delay: 2000 },
-        });
-        await dlqJob.remove();
-        this.logger.log(
-          `[AdminAudit] Trabajo DLQ ${jobId} promocionado a BLOCKCHAIN_QUEUE`,
-        );
-        return {
-          status: 'SUCCESS',
-          message: `Trabajo ${jobId} restaurado desde DLQ a la cola primaria`,
-          queue: BLOCKCHAIN_QUEUE,
-        };
-      }
-    }
-
-    throw new NotFoundException(
-      `Trabajo ${jobId} no encontrado en las colas de ejecución`,
-    );
-  }
-
-  /**
-   * Restablece un evento Outbox fallido a estado PENDING para que el cron/worker lo reprocese.
-   */
-  async retryOutboxEvent(eventId: string) {
-    const event = await this.prisma.outboxEvent.findUnique({
-      where: { id: eventId },
-    });
-
-    if (!event) {
-      throw new NotFoundException('Evento Outbox no encontrado');
-    }
-
-    const updated = await this.prisma.outboxEvent.update({
-      where: { id: eventId },
-      data: {
-        status: 'PENDING',
-        retryCount: 0,
-        errorMessage: null,
-      },
-    });
-
-    this.logger.log(
-      `[AdminAudit] Evento Outbox ${eventId} restablecido a PENDING`,
-    );
-
-    return {
-      status: 'SUCCESS',
-      message: 'Evento Outbox restablecido a PENDING para reprocesamiento',
-      event: updated,
-    };
-  }
-
-  /**
-   * Consulta el buffer circular de logs operativos del servidor.
-   */
-  async getServerLogs(query: ServerLogsQueryDto) {
-    if (!this.auditLogBuffer) {
-      return {
-        total: 0,
-        limit: 50,
-        skip: 0,
-        items: [],
-        stats: { totalBuffered: 0, errors: 0, warnings: 0, info: 0 },
-      };
-    }
-
-    return this.auditLogBuffer.query({
-      level: query.level,
-      correlationId: query.correlationId,
-      search: query.search,
-      limit: query.limit,
-      skip: query.skip,
-    });
-  }
-
   async updateComplaintStatus(
     complaintId: string,
     dto: UpdateComplaintStatusDto,
@@ -1044,73 +392,5 @@ export class AdminService {
       where: { id: complaintId },
       data: { status: dto.status },
     });
-  }
-
-  async retryPaymentMint(paymentIdentifier: string) {
-    const payment = await this.prisma.paymentTransaction.findFirst({
-      where: {
-        OR: [{ id: paymentIdentifier }, { purchaseNumber: paymentIdentifier }],
-      },
-      include: { user: true },
-    });
-
-    if (!payment) {
-      throw new NotFoundException('Transacción de pago no encontrada');
-    }
-
-    if (payment.status !== 'COMPLETED') {
-      throw new BadRequestException(
-        'Solo se puede reintentar el minteo de pagos confirmados fiduciariamente (COMPLETED)',
-      );
-    }
-
-    if (payment.blockchainStatus === 'MINTED') {
-      return {
-        message: 'Los tokens ya fueron minteados exitosamente en la blockchain',
-        txHash: payment.txHash,
-      };
-    }
-
-    if (!payment.user.walletAddress) {
-      throw new BadRequestException(
-        'El usuario no posee una billetera Stellar configurada',
-      );
-    }
-
-    if (this.blockchainQueue) {
-      const job = await this.blockchainQueue.add(
-        'izipay-mint-tokens',
-        {
-          userId: payment.userId,
-          walletAddress: payment.user.walletAddress,
-          amount: Number(payment.tokenAmount),
-          purchaseNumber: payment.purchaseNumber,
-        },
-        {
-          attempts: 5,
-          backoff: { type: 'exponential', delay: 2000 },
-        },
-      );
-
-      await this.prisma.paymentTransaction.update({
-        where: { id: payment.id },
-        data: { blockchainStatus: 'PENDING' },
-      });
-
-      return {
-        status: 'QUEUED',
-        jobId: job.id,
-        purchaseNumber: payment.purchaseNumber,
-        tokenAmount: payment.tokenAmount,
-        walletAddress: payment.user.walletAddress,
-        message:
-          'Trabajo de minteo re-encolado en Stellar Soroban exitosamente',
-      };
-    }
-
-    return {
-      status: 'ERROR',
-      message: 'Cola de blockchain no disponible en el servidor',
-    };
   }
 }

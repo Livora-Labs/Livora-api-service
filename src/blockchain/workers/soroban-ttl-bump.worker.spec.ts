@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { Keypair, rpc as StellarRpc } from '@stellar/stellar-sdk';
+import { getQueueToken } from '@nestjs/bullmq';
+import { STELLAR_MAINTENANCE_QUEUE } from '../blockchain.constants';
 import { SorobanTtlBumpWorker, TTL_BUMP_JOB_NAME } from './soroban-ttl-bump.worker';
 import { StellarRpcManagerService } from '../services/stellar-rpc-manager.service';
 
@@ -38,7 +40,7 @@ describe('SorobanTtlBumpWorker', () => {
         SorobanTtlBumpWorker,
         { provide: StellarRpcManagerService, useValue: rpcManagerMock },
         { provide: ConfigService, useValue: configServiceMock },
-        { provide: 'BullQueue_blockchain-queue', useValue: queueMock },
+        { provide: getQueueToken(STELLAR_MAINTENANCE_QUEUE), useValue: queueMock },
       ],
     }).compile();
 

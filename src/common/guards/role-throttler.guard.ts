@@ -57,7 +57,7 @@ export class RoleThrottlerGuard extends ThrottlerGuard {
       return;
     }
 
-    const jwtSecret = process.env.SUPABASE_JWT_SECRET;
+    const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
       return;
     }

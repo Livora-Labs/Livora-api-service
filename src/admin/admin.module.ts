@@ -12,6 +12,8 @@ import { BLOCKCHAIN_QUEUE, BLOCKCHAIN_DLQ } from '../blockchain/blockchain.const
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WebsocketsModule } from '../websockets/websockets.module';
 import { UploadsModule } from '../uploads/uploads.module';
+import { AdminKycService } from './services/admin-kyc.service';
+import { AdminAuditService } from './services/admin-audit.service';
 
 @Module({
   imports: [
@@ -32,7 +34,7 @@ import { UploadsModule } from '../uploads/uploads.module';
     ),
   ],
   controllers: [AdminController],
-  providers: [AdminService, AuditLogBufferService],
-  exports: [AdminService],
+  providers: [AdminService, AdminKycService, AdminAuditService, AuditLogBufferService],
+  exports: [AdminService, AdminKycService, AdminAuditService],
 })
 export class AdminModule {}

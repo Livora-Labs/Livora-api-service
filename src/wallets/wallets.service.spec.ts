@@ -26,6 +26,11 @@ describe('WalletsService', () => {
           useValue: {
             user: {
               findUnique: jest.fn(),
+              findFirst: jest.fn().mockResolvedValue(null),
+            },
+            walletTransfer: {
+              create: jest.fn().mockResolvedValue({}),
+              findMany: jest.fn().mockResolvedValue([]),
             },
             redemptionTransaction: {
               findMany: jest.fn().mockResolvedValue([]),
@@ -39,6 +44,13 @@ describe('WalletsService', () => {
             },
             storeProfile: {
               findFirst: jest.fn().mockResolvedValue(null),
+            },
+            walletVault: {
+              findUnique: jest.fn().mockResolvedValue({
+                encryptedPrivateKey: encryptedKey,
+              }),
+              upsert: jest.fn().mockResolvedValue({}),
+              deleteMany: jest.fn().mockResolvedValue({}),
             },
           },
         },
@@ -131,8 +143,8 @@ describe('WalletsService', () => {
       prisma.user.findUnique.mockResolvedValue({
         id: 'user-no-key',
         email: 'nokey@livora.earth',
-        encryptedPrivateKey: null,
       } as any);
+      prisma.walletVault.findUnique.mockResolvedValueOnce(null);
 
       await expect(
         service.sendTransaction('user-no-key', {

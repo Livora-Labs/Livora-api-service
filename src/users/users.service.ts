@@ -149,6 +149,15 @@ export class UsersService implements OnModuleInit {
         });
       }
 
+      if (encryptedPrivateKey) {
+        await tx.walletVault.create({
+          data: {
+            userId: user.id,
+            encryptedPrivateKey,
+          },
+        });
+      }
+
       // Auto-aprovisionar perfil de tienda inicial si el rol es TIENDA
       if (registerDto.role === Role.TIENDA) {
         await tx.storeProfile.create({
@@ -212,6 +221,11 @@ export class UsersService implements OnModuleInit {
           longitude: null,
           marketingAccepted: false,
         },
+      });
+
+      // 1.1 Destruir registro aislado en WalletVault
+      await tx.walletVault.deleteMany({
+        where: { userId: id },
       });
 
       // 2. Anonimizar perfil de tienda si existe

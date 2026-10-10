@@ -17,17 +17,18 @@ import { BlockchainService } from '../src/blockchain/services/blockchain.service
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { WebsocketsService } from '../src/websockets/websockets.service';
 import { WebsocketsGateway } from '../src/websockets/websockets.gateway';
-import { SupabaseAuthGuard } from '../src/common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
 
 import { CentersController } from '../src/centers/centers.controller';
 import { CentersService } from '../src/centers/centers.service';
 import { CollectionsController } from '../src/collections/collections.controller';
 import { CollectionsService } from '../src/collections/collections.service';
+import { CollectionAuctionService } from '../src/collections/services/collection-auction.service';
 import { BatchesController } from '../src/batches/batches.controller';
 import { BatchesService } from '../src/batches/batches.service';
 import { IpfsService } from '../src/blockchain/services/ipfs.service';
-import { SupabaseService } from '../src/supabase/supabase.service';
+import { TokenService } from '../src/auth/services/token.service';
 import { IzipayClient } from '../src/payments/services/izipay.client';
 import { ConfigService } from '@nestjs/config';
 import { CryptoUtil } from '../src/common/utils/crypto.util';
@@ -89,12 +90,13 @@ describe('E2E Real Process Suite: Lotes Segmentados por Acopio (Multi-Batch Coll
         IpfsService,
         WebsocketsService,
         WebsocketsGateway,
+        TokenService,
         NotificationsService,
         BlockchainProcessor,
         CentersService,
         CollectionsService,
+        CollectionAuctionService,
         BatchesService,
-        SupabaseService,
         IzipayClient,
         {
           provide: ConfigService,
@@ -116,17 +118,15 @@ describe('E2E Real Process Suite: Lotes Segmentados por Acopio (Multi-Batch Coll
                 return workerKeypair.secret();
               if (key === 'USE_CONTENT_CID')
                 return 'true';
-              if (key === 'SUPABASE_URL')
-                return 'https://test-livora.supabase.co';
-              if (key === 'SUPABASE_SERVICE_ROLE_KEY')
-                return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy';
+              if (key === 'JWT_SECRET')
+                return 'livora_test_jwt_secret';
               return def !== undefined ? def : null;
             }),
           },
         },
       ],
     })
-      .overrideGuard(SupabaseAuthGuard)
+      .overrideGuard(JwtAuthGuard)
       .useValue({
         canActivate: (context: any) => {
           const req = context.switchToHttp().getRequest();

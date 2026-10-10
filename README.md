@@ -23,7 +23,7 @@ Proyecto presentado en la **Hackathon Ethereum Lima 2026** (transicionado a Stel
 Apps (HOGAR / RECOLECTOR / CENTRO)
         │  REST + JWT · WebSockets
         ▼
-API Gateway NestJS ──► Supabase Auth (IdP) · PostgreSQL+PostGIS (Prisma) · Redis (BullMQ)
+API Gateway NestJS ──► Native JWT Auth · PostgreSQL+PostGIS (Prisma) · Redis (BullMQ) · Cloudflare R2
         │  pesaje industrial → HTTP 202 + job encolado
         ▼
 Worker asíncrono ──► IPFS/Pinata (manifiesto → CID)
@@ -42,7 +42,7 @@ El cálculo de incentivos ocurre **dentro del contrato**: el backend solo report
 
 ## 🧰 Stack
 
-NestJS 11 · TypeScript · Prisma · PostgreSQL 16 + PostGIS · Redis 7 + BullMQ · Socket.IO · Supabase Auth · **@stellar/stellar-sdk** · IPFS (Pinata) · **Rust + Soroban SDK** · Docker
+NestJS 11 · TypeScript · Prisma · PostgreSQL 16 + PostGIS · Redis 7 + BullMQ · Socket.IO · Native JWT (Argon2/Bcrypt) · Cloudflare R2 & Turnstile · **@stellar/stellar-sdk** · IPFS (Pinata) · **Rust + Soroban SDK** · Docker
 
 ---
 
@@ -79,7 +79,8 @@ Completar en `.env`:
 | Variable | Descripción |
 |---|---|
 | `DATABASE_URL` | Conexión a Postgres (el compose local expone el puerto definido en `DB_PORT`) |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_JWT_SECRET` | Proyecto de Supabase Auth (gratuito) |
+| `JWT_SECRET` | Clave secreta para firma y verificación de tokens de sesión JWT |
+| `CLOUDFLARE_R2_*` | Credenciales de Cloudflare R2 (S3-compatible) para almacenamiento |
 | `WALLET_ENCRYPTION_KEY` | Clave de 32 bytes para cifrar las billeteras custodiales |
 | `STELLAR_RPC_URL` | RPC de Stellar/Soroban Testnet: `https://soroban-testnet.stellar.org` |
 | `STELLAR_HORIZON_URL` | Horizon de Stellar Testnet: `https://horizon-testnet.stellar.org` |

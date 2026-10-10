@@ -19,13 +19,13 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { UploadsService } from './uploads.service';
 
 @ApiTags('Uploads')
 @ApiBearerAuth()
 @Controller('uploads')
-@UseGuards(SupabaseAuthGuard)
+@UseGuards(JwtAuthGuard)
 export class UploadsController {
   constructor(private readonly uploadsService: UploadsService) {}
 

@@ -2,8 +2,7 @@ import { Module } from '@nestjs/common';
 import { UploadsController } from './uploads.controller';
 import { UploadsService } from './uploads.service';
 
-// SupabaseService (Storage) y UsersService (usado por el guard) son módulos
-// @Global, por lo que no requieren imports explícitos aquí.
+// R2StorageService y UsersService (usado por el guard) son módulos globales/inyectables
 @Module({
   controllers: [UploadsController],
   providers: [UploadsService],

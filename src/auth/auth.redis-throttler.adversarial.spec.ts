@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { SupabaseService } from '../supabase/supabase.service';
+import { PasswordService } from './services/password.service';
+import { TokenService } from './services/token.service';
+import { SessionService } from './services/session.service';
 import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
@@ -13,11 +15,12 @@ import * as bcrypt from 'bcryptjs';
 describe('Adversarial M3 Verification — Redis OTP State Lifecycle & Attacks', () => {
   jest.setTimeout(30000);
   let service: AuthService;
-  let mockSupabaseService: any;
   let mockUsersService: any;
   let mockRedisService: any;
   let mockMailService: any;
-  let mockSupabaseClient: any;
+  let mockPasswordService: any;
+  let mockTokenService: any;
+  let mockSessionService: any;
 
   // In-memory simulated Redis with TTL tracking
   let redisMemory: Map<string, { value: string; expiresAt: number }>;
@@ -89,32 +92,26 @@ describe('Adversarial M3 Verification — Redis OTP State Lifecycle & Attacks', 
       }),
     };
 
-    mockSupabaseClient = {
-      auth: {
-        admin: {
-          createUser: jest.fn().mockResolvedValue({
-            data: { user: { id: 'supabase-adv-id-123', email: testEmail } },
-            error: null,
-          }),
-          deleteUser: jest.fn().mockResolvedValue({ error: null }),
-        },
-        signInWithPassword: jest.fn().mockResolvedValue({
-          data: {
-            session: {
-              access_token: 'adv-jwt-access-token',
-              refresh_token: 'adv-jwt-refresh-token',
-              expires_in: 3600,
-              token_type: 'bearer',
-            },
-            user: { id: 'supabase-adv-id-123', email: testEmail },
-          },
-          error: null,
-        }),
-      },
+    mockPasswordService = {
+      hash: jest.fn().mockResolvedValue('$2a$12$mockPasswordHash'),
+      compare: jest.fn().mockResolvedValue(true),
     };
 
-    mockSupabaseService = {
-      getClient: jest.fn().mockReturnValue(mockSupabaseClient),
+    mockTokenService = {
+      generateAccessToken: jest.fn().mockReturnValue('adv-jwt-access-token'),
+      generateTokens: jest.fn().mockReturnValue({
+        accessToken: 'adv-jwt-access-token',
+        refreshToken: 'adv-jwt-refresh-token',
+      }),
+    };
+
+    mockSessionService = {
+      createSession: jest.fn().mockResolvedValue('adv-jwt-refresh-token'),
+      rotateSession: jest.fn().mockResolvedValue({
+        accessToken: 'adv-jwt-access-token',
+        refreshToken: 'adv-jwt-refresh-token-rot',
+      }),
+      revokeSession: jest.fn().mockResolvedValue(undefined),
     };
 
     mockUsersService = {
@@ -155,7 +152,9 @@ describe('Adversarial M3 Verification — Redis OTP State Lifecycle & Attacks', 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        { provide: SupabaseService, useValue: mockSupabaseService },
+        { provide: PasswordService, useValue: mockPasswordService },
+        { provide: TokenService, useValue: mockTokenService },
+        { provide: SessionService, useValue: mockSessionService },
         { provide: UsersService, useValue: mockUsersService },
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: RedisService, useValue: mockRedisService },

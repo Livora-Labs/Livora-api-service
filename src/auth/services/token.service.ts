@@ -18,7 +18,6 @@ export class TokenService {
   constructor(private readonly configService: ConfigService) {
     this.jwtSecret =
       this.configService.get<string>('JWT_SECRET') ||
-      this.configService.get<string>('SUPABASE_JWT_SECRET') ||
       'livora_production_jwt_super_secret_key_2026_stlr_eco_security';
   }
 

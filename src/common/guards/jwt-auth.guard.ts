@@ -56,10 +56,8 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Cuenta desactivada o eliminada');
     }
 
-    request.user = user;
+    const { encryptedPrivateKey, encryptionIv, encryptionTag, ...safeUser } = user as any;
+    request.user = safeUser;
     return true;
   }
 }
-
-// Alias de retrocompatibilidad para no quebrar controladores existentes
-export const SupabaseAuthGuard = JwtAuthGuard;

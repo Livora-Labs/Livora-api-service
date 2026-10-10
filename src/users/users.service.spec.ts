@@ -40,6 +40,11 @@ describe('UsersService', () => {
       consentAudit: {
         findMany: jest.fn().mockResolvedValue([]),
       },
+      walletVault: {
+        create: jest.fn().mockResolvedValue({ id: 'vault-1' }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn(),
+      },
       $transaction: jest.fn(async (cb) => {
         return cb(mockPrismaService);
       }),
@@ -79,7 +84,7 @@ describe('UsersService', () => {
       });
 
       await expect(
-        service.create('supabase-id', {
+        service.create('test-user-id', {
           email: 'user@livora.io',
           password: 'Password123!',
           role: Role.HOGAR,
@@ -90,7 +95,7 @@ describe('UsersService', () => {
     it('should generate wallet and create user in database', async () => {
       mockPrismaService.user.findUnique.mockResolvedValue(null);
       mockPrismaService.user.create.mockResolvedValue({
-        id: 'supabase-id',
+        id: 'test-user-id',
         email: 'user@livora.io',
         role: Role.HOGAR,
         walletAddress: 'GDABC123...',
@@ -99,13 +104,13 @@ describe('UsersService', () => {
         deletedAt: null,
       });
 
-      const result = await service.create('supabase-id', {
+      const result = await service.create('test-user-id', {
         email: 'user@livora.io',
         password: 'Password123!',
         role: Role.HOGAR,
       });
 
-      expect(result.id).toBe('supabase-id');
+      expect(result.id).toBe('test-user-id');
       expect(result.walletAddress).toBe('GDABC123...');
       expect((result as any).encryptedPrivateKey).toBeUndefined();
     });
@@ -148,7 +153,7 @@ describe('UsersService', () => {
       );
     });
 
-    it('should perform multi-table atomic transaction and Supabase deletion on valid ARCO request', async () => {
+    it('should perform multi-table atomic transaction and account anonymization on valid ARCO request', async () => {
       const activeUser = {
         id: 'user-1234-5678',
         email: 'citizen@livora.io',

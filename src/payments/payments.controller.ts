@@ -23,7 +23,7 @@ import { Role } from '@prisma/client';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentSessionDto } from './dto/create-payment-session.dto';
 import { IzipayIpnDto } from './dto/izipay-ipn.dto';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -34,7 +34,7 @@ export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Post(['izipay/session', 'crear-token', '/api/pagos/crear-token'])
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.RECOLECTOR, Role.TIENDA)
   @ApiBearerAuth()
   @ApiOperation({
@@ -105,7 +105,7 @@ export class PaymentsController {
   }
 
   @Get('me/transactions')
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.RECOLECTOR, Role.TIENDA)
   @ApiBearerAuth()
   @ApiOperation({

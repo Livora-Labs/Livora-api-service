@@ -7,8 +7,7 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import { Role } from '@prisma/client';
 import { AppModule } from '../../src/app.module';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { RedisService } from '../../src/redis/redis.service';
-import { SupabaseService } from '../../src/supabase/supabase.service';
+import { JwtAuthGuard } from '../../src/common/guards/jwt-auth.guard';
 import { BlockchainService } from '../../src/blockchain/services/blockchain.service';
 import { StellarRpcManagerService } from '../../src/blockchain/services/stellar-rpc-manager.service';
 import { UsersService } from '../../src/users/users.service';
@@ -69,19 +68,15 @@ describe('Lifecycle E2E: Full Operational & Web3 Lifecycle Flow', () => {
   const currentAuthUserId = householdId;
 
   beforeAll(async () => {
-    const supabaseMock = {
-      getClient: () => ({
-        auth: {
-          getUser: jest.fn().mockImplementation((token: string) => {
-            const uid = token.replace('Bearer ', '').trim();
-            const user = mockUsers[uid] || mockUsers[currentAuthUserId];
-            return Promise.resolve({
-              data: { user: { id: user.id, email: user.email } },
-              error: null,
-            });
-          }),
-        },
-      }),
+    const mockAuthGuard = {
+      canActivate: (context: any) => {
+        const req = context.switchToHttp().getRequest();
+        const authHeader = req.headers?.authorization || '';
+        const uid = authHeader.replace(/^Bearer /i, '').trim();
+        const user = mockUsers[uid] || mockUsers[currentAuthUserId];
+        req.user = user;
+        return true;
+      },
     };
 
     const blockchainMock = {
@@ -125,8 +120,8 @@ describe('Lifecycle E2E: Full Operational & Web3 Lifecycle Flow', () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
-      .overrideProvider(SupabaseService)
-      .useValue(supabaseMock)
+      .overrideGuard(JwtAuthGuard)
+      .useValue(mockAuthGuard)
       .overrideProvider(BlockchainService)
       .useValue(blockchainMock)
       .overrideProvider(StellarRpcManagerService)

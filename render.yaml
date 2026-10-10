@@ -14,11 +14,17 @@ services:
         value: 3000
       - key: DATABASE_URL
         sync: false
-      - key: SUPABASE_URL
+      - key: JWT_SECRET
         sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
+      - key: CLOUDFLARE_R2_ACCOUNT_ID
         sync: false
-      - key: SUPABASE_JWT_SECRET
+      - key: CLOUDFLARE_R2_ACCESS_KEY_ID
+        sync: false
+      - key: CLOUDFLARE_R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: CLOUDFLARE_R2_BUCKET_NAME
+        sync: false
+      - key: CLOUDFLARE_R2_PUBLIC_URL
         sync: false
       - key: WALLET_ENCRYPTION_KEY
         sync: false

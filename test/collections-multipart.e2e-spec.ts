@@ -12,7 +12,7 @@ import {
 } from '../src/common/filters/global-exception.filter';
 import { CollectionsController } from '../src/collections/collections.controller';
 import { CollectionsService } from '../src/collections/collections.service';
-import { SupabaseAuthGuard } from '../src/common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/common/guards/roles.guard';
 import { Role, RequestStatus } from '@prisma/client';
 
@@ -37,7 +37,7 @@ describe('Fastify Multipart & CollectionsController (e2e)', () => {
         },
       ],
     })
-      .overrideGuard(SupabaseAuthGuard)
+      .overrideGuard(JwtAuthGuard)
       .useValue({
         canActivate: (context: any) => {
           const req = context.switchToHttp().getRequest();

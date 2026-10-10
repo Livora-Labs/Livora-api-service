@@ -41,6 +41,7 @@ describe('StoresService', () => {
       },
       user: {
         findUnique: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
       },
       $executeRaw: jest.fn().mockResolvedValue(1),
       $queryRaw: jest.fn().mockResolvedValue([
@@ -132,7 +133,14 @@ describe('StoresService', () => {
         },
         include: {
           user: {
-            select: { id: true, email: true, role: true, walletAddress: true },
+            select: {
+              id: true,
+              email: true,
+              role: true,
+              walletAddress: true,
+              latitude: true,
+              longitude: true,
+            },
           },
         },
       });

@@ -3,9 +3,9 @@
 ### ==============================================================================
 
 @baseUrl = http://localhost:3000
-@storeToken = YOUR_TIENDA_SUPABASE_TOKEN
-@householdToken = YOUR_HOGAR_SUPABASE_TOKEN
-@adminToken = YOUR_ADMIN_SUPABASE_TOKEN
+@storeToken = YOUR_TIENDA_JWT_TOKEN
+@householdToken = YOUR_HOGAR_JWT_TOKEN
+@adminToken = YOUR_ADMIN_JWT_TOKEN
 
 ### ------------------------------------------------------------------------------
 ### Escenario 1: Crear perfil de tienda (Rol: TIENDA)
@@ -67,5 +67,5 @@ Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
-  "receiptUrl": "https://supabase.co/storage/v1/object/public/receipts/comprobante-987.pdf"
+  "receiptUrl": "https://media.grupolivoralabs.com/receipts/comprobante-987.pdf"
 }

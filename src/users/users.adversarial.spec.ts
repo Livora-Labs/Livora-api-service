@@ -49,6 +49,11 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
         findMany: jest.fn().mockResolvedValue([]),
         create: jest.fn(),
       },
+      walletVault: {
+        create: jest.fn().mockResolvedValue({ id: 'vault-adv-1' }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn(),
+      },
       $transaction: jest.fn(async (cb) => {
         return cb(mockPrisma);
       }),
@@ -86,20 +91,20 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
         deletedAt: null,
       }));
 
-      const created = await service.create('supabase-uuid-adv-1', {
+      const created = await service.create('adv-uuid-user-1', {
         email: 'wallet.adv@livora.io',
         password: 'Password123!',
         role: Role.HOGAR,
       });
 
-      expect(created.id).toBe('supabase-uuid-adv-1');
+      expect(created.id).toBe('adv-uuid-user-1');
       expect(created.walletAddress).toBeDefined();
       // Verify ed25519 Stellar public key using SDK StrKey validator
       expect(StrKey.isValidEd25519PublicKey(created.walletAddress!)).toBe(true);
 
-      // Verify create call received valid AES-256-GCM cipher payload
-      const prismaCreateCall = mockPrisma.user.create.mock.calls[0][0];
-      const encryptedKey = prismaCreateCall.data.encryptedPrivateKey;
+      // Verify walletVault received valid AES-256-GCM cipher payload
+      const vaultCreateCall = mockPrisma.walletVault.create.mock.calls[0][0];
+      const encryptedKey = vaultCreateCall.data.encryptedPrivateKey;
       expect(encryptedKey).toBeDefined();
 
       // Verify decryption recovers a valid Stellar secret key (S-address)
@@ -117,7 +122,7 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
       });
 
       await expect(
-        service.create('supabase-new-id', {
+        service.create('adv-new-id', {
           email: 'existing@livora.io',
           password: 'Password123!',
           role: Role.HOGAR,
@@ -200,6 +205,11 @@ describe('UsersService & Compliance Adversarial Unit Tests', () => {
 
       // Verify UserCredential delete
       expect(mockPrisma.userCredential.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-multi-rel-1' },
+      });
+
+      // Verify WalletVault delete
+      expect(mockPrisma.walletVault.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'user-multi-rel-1' },
       });
     });

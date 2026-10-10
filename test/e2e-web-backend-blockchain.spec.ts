@@ -28,7 +28,7 @@ import * as crypto from 'crypto';
 import { Keypair } from '@stellar/stellar-sdk';
 
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
-import { SupabaseAuthGuard } from '../src/common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/common/guards/roles.guard';
 import { Roles } from '../src/common/decorators/roles.decorator';
 import { CurrentUser } from '../src/common/decorators/current-user.decorator';
@@ -36,7 +36,6 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { RedisService } from '../src/redis/redis.service';
 import { MailService } from '../src/common/services/mail.service';
 import { ConfigService } from '@nestjs/config';
-import { SupabaseService } from '../src/supabase/supabase.service';
 import { UsersService } from '../src/users/users.service';
 
 // -----------------------------------------------------------------------------
@@ -308,7 +307,7 @@ class E2EIntegrationController {
 
   @Get('dashboard/hogar')
   @Roles(Role.HOGAR)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   async getDashboardHogar(@CurrentUser() user: any) {
     const dbUser = Array.from(this.users.values()).find((u) => u.id === user.id);
     if (!dbUser) throw new BadRequestException('Usuario no encontrado');
@@ -323,7 +322,7 @@ class E2EIntegrationController {
 
   @Post('centro/reception')
   @Roles(Role.CENTRO_ACOPIO)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   async receiveWeighedBatch(@Body() dto: CreateBatchWeighedDto) {
     // 1. Enqueue job / async processing simulation
     const batchId = `bat-${crypto.randomBytes(4).toString('hex')}`;
@@ -365,7 +364,7 @@ class E2EIntegrationController {
 
   @Post('redemptions/qr')
   @Roles(Role.TIENDA)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   async generateQr(@Body() dto: CreateQrRedemptionDto) {
     const qrCodeRef = `LIVORA-QR-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
     return {
@@ -377,7 +376,7 @@ class E2EIntegrationController {
 
   @Post('redemptions/confirm/:qrCodeRef')
   @Roles(Role.HOGAR)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   async confirmRedemption(
     @CurrentUser() user: any,
     @Param('qrCodeRef') qrCodeRef: string,
@@ -426,7 +425,7 @@ class E2EIntegrationController {
 
   @Post('sales')
   @Roles(Role.ADMIN)
-  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   async createSale(@Body() dto: CreateB2BSaleDto) {
     const merma = 0.05;
     const maxAllowedSale = this.totalHistoricInputs * (1 - merma);
@@ -479,10 +478,6 @@ class E2EIntegrationController {
           return null;
         }),
       },
-    },
-    {
-      provide: SupabaseService,
-      useValue: {},
     },
     {
       provide: UsersService,
@@ -545,7 +540,7 @@ describe('Pruebas E2E de Integración Frontend -> Backend -> Stellar Soroban', (
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [TestE2EIntegrationModule],
     })
-      .overrideGuard(SupabaseAuthGuard)
+      .overrideGuard(JwtAuthGuard)
       .useValue(mockAuthGuard)
       .compile();
 

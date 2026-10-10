@@ -1,26 +1,23 @@
 /**
  * ==============================================================================
- * LIVORA - SCRIPT DE GENERACIÓN Y GESTIÓN DE ADMINISTRADORES
+ * LIVORA - SCRIPT DE GENERACIÓN Y GESTIÓN DE ADMINISTRADORES (NATIVO POSTGRESQL)
  * ==============================================================================
  * Crea o promueve usuarios al rol ADMIN en el sistema Livora:
- *  1. Registra o actualiza el usuario en Supabase Auth con confirmación automática.
- *  2. Genera una billetera Web3 en Stellar y cifra la clave privada con AES-256-GCM
- *     (PBKDF2-SHA512 NIST standard compatible con CryptoUtil del backend).
- *  3. Crea o actualiza el registro en PostgreSQL (Prisma) asignando rol ADMIN y estado ACTIVE.
- *  4. Asegura la creación de la cuenta de doble partida (Account: USER_WALLET, LIVORA).
+ *  1. Registra o actualiza el usuario en PostgreSQL (Prisma) con rol ADMIN y estado ACTIVE.
+ *  2. Hashea la contraseña con Bcrypt (12 rondas OWASP) en UserCredential.
+ *  3. Genera una billetera Web3 en Stellar y almacena la clave cifrada en WalletVault
+ *     (PBKDF2-SHA512 + AES-256-GCM compatible con CryptoUtil del backend).
+ *  4. Asegura la creación de la cuenta contable de doble partida (Account: USER_WALLET, LIVORA).
  * 
  * USO:
  *   # Modo interactivo:
- *   node scripts/create_admin.js
+ *   npm run admin:create
  * 
  *   # Modo por argumentos CLI:
- *   node scripts/create_admin.js --email admin@livora.pe --password "MiClaveSegura2026!*" --name "Administrador Principal" --phone "+51987654321"
+ *   node scripts/create_admin.js --email admin@livora.pe --password "MiClaveSegura2026!*" --name "Administrador Principal"
  * 
  *   # Modo producción (carga .env.production):
- *   node scripts/create_admin.js --prod --email admin@livora.pe --password "MiClaveSegura2026!*" --name "Admin Prod"
- * 
- *   # Modo lote (JSON):
- *   node scripts/create_admin.js --batch ./admins.json
+ *   node scripts/create_admin.js --prod --email admin@livora.pe --password "MiClaveSegura2026!*"
  * ==============================================================================
  */
 
@@ -54,14 +51,11 @@ Opciones:
   --help, -h              Muestra esta pantalla de ayuda
 
 Ejemplos:
-  # Interactivo (te solicita email y contraseña en la consola):
+  # Interactivo:
   npm run admin:create
 
   # Por comando directo:
   node scripts/create_admin.js --email admin@livora.pe --password "Admin2026!*" --name "Super Admin"
-
-  # En producción:
-  node scripts/create_admin.js --prod --email admin@livora.pe --password "Admin2026!*"
 ====================================================================
 `);
   process.exit(0);
@@ -84,7 +78,6 @@ const customEnv = getArgValue('--env-file');
 function resolveEnvFile() {
   if (customEnv) return customEnv;
   if (isProdFlag) return '.env.production';
-  // Si no se especificó nada, preferir .env, pero si solo existe .env.production, usarlo
   const candidates = [
     path.resolve(process.cwd(), '.env'),
     path.resolve(__dirname, '.env'),
@@ -128,7 +121,7 @@ if (!envLoaded) {
 }
 
 // ==============================================================================
-// 2. RESOLUCIÓN DE MÓDULOS DE BACKEND (Local o Global)
+// 3. RESOLUCIÓN DE MÓDULOS DE BACKEND
 // ==============================================================================
 function findBackendModules() {
   const candidates = [
@@ -156,11 +149,11 @@ function loadModule(name) {
 const { PrismaClient } = loadModule('@prisma/client');
 const { PrismaPg } = loadModule('@prisma/adapter-pg');
 const { Pool } = loadModule('pg');
-const { createClient } = loadModule('@supabase/supabase-js');
 const { Keypair } = loadModule('@stellar/stellar-sdk');
+const bcrypt = loadModule('bcryptjs');
 
 // ==============================================================================
-// 3. CRIPTOGRAFÍA AES-256-GCM (Estándar CryptoUtil de Livora)
+// 4. CRIPTOGRAFÍA AES-256-GCM (Estándar CryptoUtil de Livora)
 // ==============================================================================
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -188,7 +181,7 @@ function encryptPrivateKey(text, secretKey) {
   encrypted += cipher.final('hex');
   const authTag = cipher.getAuthTag().toString('hex');
 
-  key.fill(0); // Limpieza de memoria inmediata
+  key.fill(0);
 
   return `${salt.toString('hex')}:${iv.toString('hex')}:${authTag}:${encrypted}`;
 }
@@ -206,7 +199,7 @@ function getMasterEncryptionKey() {
 }
 
 // ==============================================================================
-// 4. INTERACCIÓN POR CONSOLA
+// 5. INTERACCIÓN POR CONSOLA
 // ==============================================================================
 function promptQuestion(query, isPassword = false) {
   return new Promise((resolve) => {
@@ -246,105 +239,44 @@ function promptQuestion(query, isPassword = false) {
 }
 
 // ==============================================================================
-// 5. LÓGICA PRINCIPAL DE CREACIÓN DE ADMINISTRADOR
+// 6. LÓGICA PRINCIPAL DE CREACIÓN DE ADMINISTRADOR
 // ==============================================================================
-async function createOrPromoteAdmin({ email, password, name, phone, address }, { prisma, supabase, encryptionKey }) {
+async function createOrPromoteAdmin({ email, password, name, phone, address }, { prisma, encryptionKey }) {
   console.log(`\n--------------------------------------------------------------------`);
   console.log(`[PROCESANDO] Administrador: ${email}`);
   console.log(`--------------------------------------------------------------------`);
 
-  let authUserId = null;
-  let isExistingUserInAuth = false;
-
-  // 1. Buscar si el usuario ya existe en Supabase Auth
-  try {
-    const { data: listData, error: listError } = await supabase.auth.admin.listUsers({ perPage: 1000 });
-    if (!listError && listData?.users) {
-      const existing = listData.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-      if (existing) {
-        authUserId = existing.id;
-        isExistingUserInAuth = true;
-        console.log(`  ℹ Usuario encontrado en Supabase Auth (ID: ${authUserId}). Actualizando credenciales...`);
-        
-        const updatePayload = {
-          email_confirm: true,
-          user_metadata: {
-            role: 'ADMIN',
-            name: name || existing.user_metadata?.name || 'Administrador Livora',
-          },
-        };
-        if (password) {
-          updatePayload.password = password;
-        }
-
-        const { error: updateError } = await supabase.auth.admin.updateUserById(authUserId, updatePayload);
-        if (updateError) {
-          throw new Error(`Error actualizando usuario en Supabase Auth: ${updateError.message}`);
-        }
-        console.log(`  ✔ Usuario actualizado con rol ADMIN en Supabase Auth.`);
-      }
-    }
-  } catch (err) {
-    console.warn(`  ⚠ Aviso al listar Supabase Auth: ${err.message}`);
-  }
-
-  // 2. Si no existe en Supabase Auth, crearlo
-  if (!isExistingUserInAuth) {
-    if (!password) {
-      throw new Error(`Para un nuevo usuario administrador se requiere una contraseña (--password).`);
-    }
-    console.log(`  --> Creando usuario en Supabase Auth...`);
-    const { data: createData, error: createError } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: {
-        role: 'ADMIN',
-        name: name || 'Administrador Livora',
-      },
-    });
-
-    if (createError || !createData?.user) {
-      throw new Error(`Error al crear usuario en Supabase Auth: ${createError?.message}`);
-    }
-
-    authUserId = createData.user.id;
-    console.log(`  ✔ Administrador creado en Supabase Auth (ID: ${authUserId}).`);
-  }
-
-  // 3. Verificar si el usuario ya existe en PostgreSQL
+  // 1. Verificar si el usuario ya existe en PostgreSQL
   const existingDbUser = await prisma.user.findFirst({
-    where: {
-      OR: [
-        { id: authUserId },
-        { email: email.toLowerCase() },
-      ],
-    },
-    include: { accounts: true },
+    where: { email: email.toLowerCase() },
+    include: { accounts: true, credentials: true },
   });
 
+  // 2. Verificar o generar clave Web3
   let walletAddress = existingDbUser?.walletAddress;
-  let encryptedPrivateKey = existingDbUser?.encryptedPrivateKey;
+  let newEncryptedPrivateKey = null;
 
-  // 4. Si no tiene billetera Web3 asignada, generar una nueva
-  if (!walletAddress || !encryptedPrivateKey) {
+  const existingVault = existingDbUser
+    ? await prisma.walletVault.findUnique({ where: { userId: existingDbUser.id } })
+    : null;
+
+  if (!walletAddress || !existingVault) {
     console.log(`  --> Generando par de claves Stellar Web3 para el Administrador...`);
     const keypair = Keypair.random();
     walletAddress = keypair.publicKey();
-    encryptedPrivateKey = encryptPrivateKey(keypair.secret(), encryptionKey);
+    newEncryptedPrivateKey = encryptPrivateKey(keypair.secret(), encryptionKey);
     console.log(`  ✔ Billetera Stellar generada: ${walletAddress}`);
   } else {
     console.log(`  ℹ Billetera Stellar existente conservada: ${walletAddress}`);
   }
 
-  // 5. Crear o actualizar en PostgreSQL
+  // 3. Crear o actualizar usuario en PostgreSQL
   let dbUser;
   if (existingDbUser) {
     console.log(`  --> Actualizando rol a ADMIN y activando en PostgreSQL...`);
     dbUser = await prisma.user.update({
       where: { id: existingDbUser.id },
       data: {
-        id: authUserId, // Sincroniza UUID con Supabase Auth si hubiese divergencia
         email: email.toLowerCase(),
         name: name || existingDbUser.name || 'Administrador Livora',
         phone: phone || existingDbUser.phone,
@@ -353,15 +285,18 @@ async function createOrPromoteAdmin({ email, password, name, phone, address }, {
         userStatus: 'ACTIVE',
         isActive: true,
         walletAddress,
-        encryptedPrivateKey,
       },
     });
     console.log(`  ✔ Registro en PostgreSQL actualizado.`);
   } else {
+    if (!password) {
+      throw new Error(`Para un nuevo usuario administrador se requiere una contraseña (--password).`);
+    }
+    const newUserId = crypto.randomUUID();
     console.log(`  --> Creando registro de Administrador en PostgreSQL...`);
     dbUser = await prisma.user.create({
       data: {
-        id: authUserId,
+        id: newUserId,
         email: email.toLowerCase(),
         name: name || 'Administrador Livora',
         phone: phone || null,
@@ -370,11 +305,45 @@ async function createOrPromoteAdmin({ email, password, name, phone, address }, {
         userStatus: 'ACTIVE',
         isActive: true,
         walletAddress,
-        encryptedPrivateKey,
         marketingAccepted: false,
       },
     });
-    console.log(`  ✔ Administrador registrado en PostgreSQL.`);
+    console.log(`  ✔ Administrador registrado en PostgreSQL (ID: ${dbUser.id}).`);
+  }
+
+  // 4. Actualizar WalletVault si se generó una nueva clave
+  if (newEncryptedPrivateKey) {
+    await prisma.walletVault.upsert({
+      where: { userId: dbUser.id },
+      update: {
+        encryptedPrivateKey: newEncryptedPrivateKey,
+      },
+      create: {
+        userId: dbUser.id,
+        encryptedPrivateKey: newEncryptedPrivateKey,
+      },
+    });
+    console.log(`  ✔ WalletVault seguro actualizado.`);
+  }
+
+  // 5. Actualizar UserCredential si se proporcionó contraseña
+  if (password) {
+    const passwordHash = await bcrypt.hash(password, 12);
+    await prisma.userCredential.upsert({
+      where: { userId: dbUser.id },
+      update: {
+        passwordHash,
+        failedAttempts: 0,
+        lockedUntil: null,
+        lastPasswordChange: new Date(),
+      },
+      create: {
+        userId: dbUser.id,
+        passwordHash,
+        lastPasswordChange: new Date(),
+      },
+    });
+    console.log(`  ✔ Credencial de acceso (Bcrypt) actualizada.`);
   }
 
   // 6. Asegurar Cuenta contable (USER_WALLET) en el Libro Mayor
@@ -412,39 +381,27 @@ async function createOrPromoteAdmin({ email, password, name, phone, address }, {
 }
 
 // ==============================================================================
-// 6. EJECUCIÓN PRINCIPAL
+// 7. EJECUCIÓN PRINCIPAL
 // ==============================================================================
 async function main() {
   console.log('====================================================================');
   console.log('         LIVORA - GENERADOR SEGURO DE ADMINISTRADORES               ');
   console.log('====================================================================');
 
-  // Validar variables críticas
   let databaseUrl = process.env.DATABASE_URL;
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
   if (!databaseUrl) {
     throw new Error('DATABASE_URL no está configurado en el entorno.');
   }
 
-  // Detección de ejecución en Host de Lightsail (fuera de contenedor Docker)
-  // Si la URL apunta al nombre interno del contenedor Docker 'livora_postgres:5432',
-  // se mapea automáticamente al puerto expuesto en el host (127.0.0.1:5434).
   const isInsideDocker = fs.existsSync('/.dockerenv');
   if (!isInsideDocker && databaseUrl.includes('livora_postgres:5432')) {
     const hostPort = process.env.DB_PORT || '5434';
     databaseUrl = databaseUrl.replace('livora_postgres:5432', `127.0.0.1:${hostPort}`);
-    console.log(`[HOST DOCKER BRIDGE] Ejecutando fuera de Docker: redirigiendo conexión PostgreSQL a 127.0.0.1:${hostPort}`);
-  }
-
-  if (!supabaseUrl || !supabaseServiceKey) {
-    throw new Error('SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY deben estar configurados.');
+    console.log(`[HOST DOCKER BRIDGE] Redirigiendo conexión PostgreSQL a 127.0.0.1:${hostPort}`);
   }
 
   const encryptionKey = getMasterEncryptionKey();
 
-  // Inicializar clientes
   const pool = new Pool({
     connectionString: databaseUrl,
     max: 2,
@@ -453,18 +410,13 @@ async function main() {
   const adapter = new PrismaPg(pool);
   const prisma = new PrismaClient({ adapter });
 
-  const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-
-  const context = { prisma, supabase, encryptionKey };
+  const context = { prisma, encryptionKey };
 
   try {
     const batchFile = getArgValue('--batch');
     const createdAdmins = [];
 
     if (batchFile) {
-      // Modo lote desde JSON
       const fullPath = path.resolve(process.cwd(), batchFile);
       if (!fs.existsSync(fullPath)) {
         throw new Error(`Archivo batch no encontrado: ${fullPath}`);
@@ -484,7 +436,6 @@ async function main() {
         createdAdmins.push(res);
       }
     } else {
-      // Modo individual (CLI o interactivo)
       let email = getArgValue('--email');
       let password = getArgValue('--password');
       let name = getArgValue('--name');
@@ -492,19 +443,25 @@ async function main() {
       let address = getArgValue('--address');
 
       if (!email) {
-        console.log('\n[MODO INTERACTIVO] Ingresa los datos del nuevo Administrador:');
-        email = await promptQuestion('Correo electrónico (Email): ');
-        password = await promptQuestion('Contraseña (mínimo 8 caracteres): ');
-        name = await promptQuestion('Nombre completo: ');
-        phone = await promptQuestion('Teléfono (opcional, ej. +51987654321): ');
-        address = await promptQuestion('Dirección (opcional): ');
+        console.log('\n[MODO INTERACTIVO] Ingresa los datos solicitados:');
+        email = await promptQuestion('  Correo electrónico del Administrador: ');
       }
 
       if (!email || !email.includes('@')) {
-        throw new Error('Debes proporcionar un correo electrónico válido.');
+        throw new Error('El correo electrónico proporcionado no es válido.');
       }
-      if (!password || password.length < 8) {
+
+      if (!password) {
+        password = await promptQuestion('  Contraseña (mínimo 8 caracteres): ', true);
+        console.log('');
+      }
+
+      if (password && password.length < 8) {
         throw new Error('La contraseña debe contener al menos 8 caracteres.');
+      }
+
+      if (!name) {
+        name = await promptQuestion('  Nombre completo (opcional, Enter para omitir): ');
       }
 
       const res = await createOrPromoteAdmin({ email, password, name, phone, address }, context);
@@ -512,19 +469,18 @@ async function main() {
     }
 
     console.log('\n====================================================================');
-    console.log('             RESUMEN DE ADMINISTRADORES REGISTRADOS                 ');
+    console.log('                     RESUMEN DE OPERACIÓN                           ');
     console.log('====================================================================');
     for (const a of createdAdmins) {
-      console.log(`• ID:         ${a.id}`);
-      console.log(`  Email:      ${a.email}`);
-      console.log(`  Nombre:     ${a.name}`);
-      console.log(`  Rol:        ${a.role}`);
-      console.log(`  Estado:     ${a.status}`);
-      console.log(`  Wallet Pub: ${a.walletAddress}`);
+      console.log(`  • ID:             ${a.id}`);
+      console.log(`    Email:          ${a.email}`);
+      console.log(`    Nombre:         ${a.name}`);
+      console.log(`    Rol:            ${a.role}`);
+      console.log(`    Estado:         ${a.status}`);
+      console.log(`    Billetera Web3: ${a.walletAddress}`);
       console.log('--------------------------------------------------------------------');
     }
-    console.log(`✔ Proceso completado exitosamente (${createdAdmins.length} administradores procesados).`);
-
+    console.log(`\n✔ Proceso completado exitosamente (${createdAdmins.length} administradores procesados).`);
   } finally {
     await prisma.$disconnect();
     await pool.end();
@@ -532,7 +488,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('\n❌ ERROR DURANTE LA GENERACIÓN DE ADMINISTRADORES:');
-  console.error(err.message || err);
+  console.error('\n❌ ERROR FATAL:', err.message);
   process.exit(1);
 });

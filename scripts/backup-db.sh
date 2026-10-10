@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Livora Database Automated Backup & Disaster Recovery (S3 / Supabase Storage)
+# Livora Database Automated Backup & Disaster Recovery (S3 / Cloudflare R2)
 # ==============================================================================
 set -euo pipefail
 
@@ -26,7 +26,7 @@ PGPASSWORD="${DB_PASSWORD:-livora_secret}" pg_dump -h "${DB_HOST}" -p "${DB_PORT
 BACKUP_SIZE=$(du -h "${BACKUP_PATH}" | cut -f1)
 echo "✅ Respaldo comprimido generado exitosamente: ${BACKUP_PATH} (Tamaño: ${BACKUP_SIZE})"
 
-# 2. Subida a AWS S3 / Supabase Storage S3-compatible si AWS CLI o S3_ENDPOINT está configurado
+# 2. Subida a AWS S3 / Cloudflare R2 (S3-compatible) si AWS CLI o S3_ENDPOINT está configurado
 if command -v aws &> /dev/null && [ -n "${S3_BUCKET}" ]; then
   echo "☁️ [$(date '+%Y-%m-%d %H:%M:%S')] Subiendo respaldo a S3: s3://${S3_BUCKET}/backups/${BACKUP_FILENAME}..."
   aws s3 cp "${BACKUP_PATH}" "s3://${S3_BUCKET}/backups/${BACKUP_FILENAME}" --storage-class STANDARD_IA

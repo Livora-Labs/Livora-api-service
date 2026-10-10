@@ -3,7 +3,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateKycApplicationDto {
   @ApiPropertyOptional({
-    example: 'https://storage.supabase.co/kyc/doc123.pdf',
+    example: 'https://media.grupolivoralabs.com/kyc/doc123.pdf',
     description: 'URL del documento de identidad (frente)',
   })
   @IsOptional()
@@ -11,7 +11,7 @@ export class CreateKycApplicationDto {
   documentUrl?: string;
 
   @ApiPropertyOptional({
-    example: 'https://storage.supabase.co/kyc/doc123_back.jpg',
+    example: 'https://media.grupolivoralabs.com/kyc/doc123_back.jpg',
     description: 'URL del reverso del documento de identidad',
   })
   @IsOptional()
@@ -19,7 +19,7 @@ export class CreateKycApplicationDto {
   documentUrlBack?: string;
 
   @ApiPropertyOptional({
-    example: 'https://storage.supabase.co/kyc/selfie123.jpg',
+    example: 'https://media.grupolivoralabs.com/kyc/selfie123.jpg',
     description: 'Foto de perfil / selfie obligatoria del recolector',
   })
   @IsOptional()

@@ -18,7 +18,7 @@ import { BlockchainService } from '../src/blockchain/services/blockchain.service
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { WebsocketsService } from '../src/websockets/websockets.service';
 import { WebsocketsGateway } from '../src/websockets/websockets.gateway';
-import { SupabaseAuthGuard } from '../src/common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/common/guards/roles.guard';
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
 import { DecimalTransformInterceptor } from '../src/common/interceptors/decimal-transform.interceptor';
@@ -27,6 +27,7 @@ import { CentersController } from '../src/centers/centers.controller';
 import { CentersService } from '../src/centers/centers.service';
 import { CollectionsController } from '../src/collections/collections.controller';
 import { CollectionsService } from '../src/collections/collections.service';
+import { CollectionAuctionService } from '../src/collections/services/collection-auction.service';
 import { PaymentsController } from '../src/payments/payments.controller';
 import { PaymentsService } from '../src/payments/payments.service';
 import { BatchesController } from '../src/batches/batches.controller';
@@ -37,8 +38,8 @@ import { WalletsController } from '../src/wallets/wallets.controller';
 import { WalletsService } from '../src/wallets/wallets.service';
 import { IzipayClient } from '../src/payments/services/izipay.client';
 import { IpfsService } from '../src/blockchain/services/ipfs.service';
+import { TokenService } from '../src/auth/services/token.service';
 import { ConfigService } from '@nestjs/config';
-import { SupabaseService } from '../src/supabase/supabase.service';
 import { CryptoUtil } from '../src/common/utils/crypto.util';
 import { BlockchainProcessor } from '../src/blockchain/blockchain.processor';
 import { Prisma } from '@prisma/client';
@@ -113,16 +114,17 @@ describe('E2E Full Operational & Financial Flow Suite (100% Real, Zero Mocks)', 
         IpfsService,
         WebsocketsService,
         WebsocketsGateway,
+        TokenService,
         NotificationsService,
         BlockchainProcessor,
         CentersService,
         CollectionsService,
+        CollectionAuctionService,
         PaymentsService,
         BatchesService,
         StoresService,
         WalletsService,
         IzipayClient,
-        SupabaseService,
         {
           provide: ConfigService,
           useValue: {
@@ -147,17 +149,15 @@ describe('E2E Full Operational & Financial Flow Suite (100% Real, Zero Mocks)', 
                 return 'VhoR0lSG9MmDZdIuA0nrmJrQOGQOrObXFxWGL1XwjJw72';
               if (key === 'USE_CONTENT_CID')
                 return 'true';
-              if (key === 'SUPABASE_URL')
-                return 'https://test-livora.supabase.co';
-              if (key === 'SUPABASE_SERVICE_ROLE_KEY')
-                return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy';
+              if (key === 'JWT_SECRET')
+                return 'livora_test_jwt_secret';
               return def !== undefined ? def : null;
             }),
           },
         },
       ],
     })
-      .overrideGuard(SupabaseAuthGuard)
+      .overrideGuard(JwtAuthGuard)
       .useValue({
         canActivate: (context: any) => {
           const req = context.switchToHttp().getRequest();

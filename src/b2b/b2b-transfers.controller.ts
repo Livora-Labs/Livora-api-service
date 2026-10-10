@@ -18,7 +18,7 @@ import {
   CreateB2bPurchaseRequestDto,
   AcceptB2bTransferDto,
 } from './dto/b2b-request.dto';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -27,7 +27,7 @@ import { RequireIdempotency } from '../common/decorators/require-idempotency.dec
 
 @ApiTags('B2B Transfers')
 @ApiBearerAuth()
-@UseGuards(SupabaseAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('b2b-transfers')
 export class B2bTransfersController {
   constructor(private readonly b2bTransfersService: B2bTransfersService) {}

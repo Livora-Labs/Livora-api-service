@@ -293,7 +293,7 @@ describe('Adversarial Challenge Suite: Challenger 2 (WP-02 Web3 Failover & CGNAT
 
     beforeEach(async () => {
       trackedKeys.length = 0;
-      process.env.SUPABASE_JWT_SECRET = JWT_SECRET;
+      process.env.JWT_SECRET = JWT_SECRET;
 
       storageMock = {
         increment: jest.fn().mockImplementation((key: string, ttl: number, limit: number) => {

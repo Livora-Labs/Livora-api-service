@@ -3,8 +3,8 @@
 ### ==============================================================================
 
 @baseUrl = http://localhost:3000
-@collectorToken = YOUR_RECOLECTOR_SUPABASE_TOKEN
-@centerToken = YOUR_CENTRO_ACOPIO_SUPABASE_TOKEN
+@collectorToken = YOUR_RECOLECTOR_JWT_TOKEN
+@centerToken = YOUR_CENTRO_ACOPIO_JWT_TOKEN
 
 ### ------------------------------------------------------------------------------
 ### Escenario 1: Obtener o crear lote abierto (Rol: RECOLECTOR)

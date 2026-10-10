@@ -25,7 +25,7 @@ import { UpdateBatchDto } from './dto/update-batch.dto';
 import { ReceiveBatchDto } from './dto/receive-batch.dto';
 import { FindBatchesQueryDto } from './dto/find-batches-query.dto';
 import { DisputeBatchDto } from './dto/dispute-batch.dto';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -37,7 +37,7 @@ import { RequireIdempotency } from '../common/decorators/require-idempotency.dec
 @ApiBearerAuth()
 @IpfsTransform()
 @Controller('batches')
-@UseGuards(SupabaseAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class BatchesController {
   constructor(private readonly batchesService: BatchesService) {}
 

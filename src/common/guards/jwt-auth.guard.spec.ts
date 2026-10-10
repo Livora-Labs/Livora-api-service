@@ -1,25 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
-import { SupabaseAuthGuard } from './supabase-auth.guard';
-import { SupabaseService } from '../../supabase/supabase.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { TokenService } from '../../auth/services/token.service';
 import { UsersService } from '../../users/users.service';
 import { Role } from '@prisma/client';
 
-describe('SupabaseAuthGuard', () => {
-  let guard: SupabaseAuthGuard;
-  let mockSupabaseService: any;
-  let mockUsersService: any;
-  let mockSupabaseClient: any;
+describe('JwtAuthGuard (Decoupled Authentication Guard)', () => {
+  let guard: JwtAuthGuard;
+  let mockTokenService: { verifyAccessToken: jest.Mock };
+  let mockUsersService: { findById: jest.Mock };
 
   beforeEach(async () => {
-    mockSupabaseClient = {
-      auth: {
-        getUser: jest.fn(),
-      },
-    };
-
-    mockSupabaseService = {
-      getClient: jest.fn().mockReturnValue(mockSupabaseClient),
+    mockTokenService = {
+      verifyAccessToken: jest.fn(),
     };
 
     mockUsersService = {
@@ -28,13 +21,13 @@ describe('SupabaseAuthGuard', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        SupabaseAuthGuard,
-        { provide: SupabaseService, useValue: mockSupabaseService },
+        JwtAuthGuard,
+        { provide: TokenService, useValue: mockTokenService },
         { provide: UsersService, useValue: mockUsersService },
       ],
     }).compile();
 
-    guard = module.get<SupabaseAuthGuard>(SupabaseAuthGuard);
+    guard = module.get<JwtAuthGuard>(JwtAuthGuard);
   });
 
   const createMockExecutionContext = (headers: Record<string, any> = {}) => {
@@ -68,11 +61,11 @@ describe('SupabaseAuthGuard', () => {
     );
   });
 
-  it('should throw UnauthorizedException if Supabase token is invalid or expired', async () => {
-    mockSupabaseClient.auth.getUser.mockResolvedValue({
-      data: { user: null },
-      error: { message: 'Invalid JWT' },
+  it('should throw UnauthorizedException if JWT token is invalid or expired', async () => {
+    mockTokenService.verifyAccessToken.mockImplementation(() => {
+      throw new Error('jwt expired');
     });
+
     const context = createMockExecutionContext({
       authorization: 'Bearer invalid.jwt.token',
     });
@@ -82,9 +75,10 @@ describe('SupabaseAuthGuard', () => {
   });
 
   it('should throw UnauthorizedException if local database user does not exist', async () => {
-    mockSupabaseClient.auth.getUser.mockResolvedValue({
-      data: { user: { id: 'supabase-uuid-1' } },
-      error: null,
+    mockTokenService.verifyAccessToken.mockReturnValue({
+      sub: 'user-uuid-1',
+      email: 'user@livora.io',
+      role: Role.HOGAR,
     });
     mockUsersService.findById.mockResolvedValue(null);
 
@@ -98,18 +92,19 @@ describe('SupabaseAuthGuard', () => {
     );
   });
 
-  it('should throw UnauthorizedException("Cuenta desactivada o eliminada") if user is soft-deleted (deletedAt !== null)', async () => {
-    mockSupabaseClient.auth.getUser.mockResolvedValue({
-      data: { user: { id: 'supabase-uuid-1' } },
-      error: null,
+  it('should throw UnauthorizedException if user is soft-deleted (deletedAt !== null)', async () => {
+    mockTokenService.verifyAccessToken.mockReturnValue({
+      sub: 'user-uuid-1',
+      email: 'deleted@livora.io',
+      role: Role.HOGAR,
     });
     mockUsersService.findById.mockResolvedValue({
-      id: 'supabase-uuid-1',
+      id: 'user-uuid-1',
       email: 'deleted_user@deleted.livora.org',
       role: Role.HOGAR,
       isActive: false,
       deletedAt: new Date(),
-    });
+    } as any);
 
     const context = createMockExecutionContext({
       authorization: 'Bearer valid.jwt.token',
@@ -119,18 +114,19 @@ describe('SupabaseAuthGuard', () => {
     );
   });
 
-  it('should throw UnauthorizedException("Cuenta desactivada o eliminada") if user is inactive (isActive === false)', async () => {
-    mockSupabaseClient.auth.getUser.mockResolvedValue({
-      data: { user: { id: 'supabase-uuid-1' } },
-      error: null,
+  it('should throw UnauthorizedException if user is inactive (isActive === false)', async () => {
+    mockTokenService.verifyAccessToken.mockReturnValue({
+      sub: 'user-uuid-1',
+      email: 'user@livora.io',
+      role: Role.HOGAR,
     });
     mockUsersService.findById.mockResolvedValue({
-      id: 'supabase-uuid-1',
+      id: 'user-uuid-1',
       email: 'user@livora.io',
       role: Role.HOGAR,
       isActive: false,
       deletedAt: null,
-    });
+    } as any);
 
     const context = createMockExecutionContext({
       authorization: 'Bearer valid.jwt.token',
@@ -140,20 +136,23 @@ describe('SupabaseAuthGuard', () => {
     );
   });
 
-  it('should pass and attach safeUser to request for active and non-deleted user', async () => {
-    mockSupabaseClient.auth.getUser.mockResolvedValue({
-      data: { user: { id: 'supabase-uuid-1' } },
-      error: null,
+  it('should pass and attach sanitized safeUser to request, stripping encryptedPrivateKey', async () => {
+    mockTokenService.verifyAccessToken.mockReturnValue({
+      sub: 'user-uuid-1',
+      email: 'active@livora.io',
+      role: Role.HOGAR,
     });
     mockUsersService.findById.mockResolvedValue({
-      id: 'supabase-uuid-1',
+      id: 'user-uuid-1',
       email: 'active@livora.io',
       role: Role.HOGAR,
       walletAddress: 'GAW123456...',
       encryptedPrivateKey: 'aes256-encrypted-key',
+      encryptionIv: 'iv-test',
+      encryptionTag: 'tag-test',
       isActive: true,
       deletedAt: null,
-    });
+    } as any);
 
     const context = createMockExecutionContext({
       authorization: 'Bearer valid.jwt.token',
@@ -164,8 +163,10 @@ describe('SupabaseAuthGuard', () => {
 
     const request = context.switchToHttp().getRequest();
     expect(request.user).toBeDefined();
-    expect(request.user.id).toBe('supabase-uuid-1');
+    expect(request.user.id).toBe('user-uuid-1');
     expect(request.user.email).toBe('active@livora.io');
     expect(request.user.encryptedPrivateKey).toBeUndefined();
+    expect(request.user.encryptionIv).toBeUndefined();
+    expect(request.user.encryptionTag).toBeUndefined();
   });
 });

@@ -9,6 +9,9 @@ import { RedisModule } from '../redis/redis.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RoutingModule } from '../routing/routing.module';
 
+import { StoreRedemptionsService } from './services/store-redemptions.service';
+import { StoreSettlementsService } from './services/store-settlements.service';
+
 @Module({
   imports: [
     RedisModule,
@@ -22,7 +25,15 @@ import { RoutingModule } from '../routing/routing.module';
     RoutingModule,
   ],
   controllers: [StoresController],
-  providers: [StoresService],
-  exports: [StoresService],
+  providers: [
+    StoresService,
+    StoreRedemptionsService,
+    StoreSettlementsService,
+  ],
+  exports: [
+    StoresService,
+    StoreRedemptionsService,
+    StoreSettlementsService,
+  ],
 })
 export class StoresModule {}

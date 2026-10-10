@@ -13,14 +13,14 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { GamificationService } from './gamification.service';
 import { ClaimRewardDto } from './dto/claim-reward.dto';
 
 @ApiTags('Gamification')
 @ApiBearerAuth()
-@UseGuards(SupabaseAuthGuard)
+@UseGuards(JwtAuthGuard)
 @Controller('gamification')
 export class GamificationController {
   constructor(private readonly gamificationService: GamificationService) {}

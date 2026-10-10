@@ -170,8 +170,62 @@ export class WalletsService {
   }
 
   /**
-   * POST /wallets/transactions
-   * El backend actúa como Relayer (Gas Subsidiado) construyendo una FeeBumpTransaction
+   * Helper de custodia: Obtiene y descifra la clave privada de un usuario desde WalletVault.
+   */
+  async getDecryptedPrivateKey(userId: string): Promise<string | null> {
+    const vault = await this.prisma.walletVault.findUnique({
+      where: { userId },
+    });
+
+    const encryptedKey = vault?.encryptedPrivateKey;
+    if (!encryptedKey) {
+      return null;
+    }
+
+    const encryptionKey =
+      this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
+      this.configService.get<string>('ENCRYPTION_KEY');
+    if (!encryptionKey && process.env.NODE_ENV !== 'test') {
+      throw new Error(
+        'CRITICAL SECURITY ERROR: La variable WALLET_ENCRYPTION_KEY es obligatoria para descifrar claves de custodia Web3.',
+      );
+    }
+    const finalKey = encryptionKey || 'test_isolated_wallet_encryption_key_32c';
+    return CryptoUtil.decrypt(encryptedKey, finalKey);
+  }
+
+  async storeWalletVault(
+    userId: string,
+    encryptedPrivateKey: string,
+    options?: { encryptionIv?: string; encryptionTag?: string; isSponsored?: boolean },
+  ): Promise<void> {
+    await this.prisma.walletVault.upsert({
+      where: { userId },
+      update: {
+        encryptedPrivateKey,
+        encryptionIv: options?.encryptionIv,
+        encryptionTag: options?.encryptionTag,
+        isSponsored: options?.isSponsored ?? false,
+      },
+      create: {
+        userId,
+        encryptedPrivateKey,
+        encryptionIv: options?.encryptionIv,
+        encryptionTag: options?.encryptionTag,
+        isSponsored: options?.isSponsored ?? false,
+      },
+    });
+  }
+
+  async deleteWalletVault(userId: string): Promise<void> {
+    await this.prisma.walletVault.deleteMany({
+      where: { userId },
+    });
+  }
+
+  /**
+   * Envía una transacción de transferencia entre billeteras utilizando la arquitectura
+   * gasless fee-bump / delegated signing:
    * firmada por el usuario en la transacción interna y subsidiada por la wallet relayer en la externa.
    */
   async sendTransaction(userId: string, dto: CreateTransactionDto) {
@@ -183,28 +237,10 @@ export class WalletsService {
       throw new NotFoundException('Usuario no encontrado');
     }
 
-    if (!user.encryptedPrivateKey) {
-      throw new BadRequestException(
-        'El usuario no posee una clave privada registrada para firmar la transacción',
-      );
-    }
-
-    const encryptionKey =
-      this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
-      this.configService.get<string>('ENCRYPTION_KEY');
-    if (!encryptionKey && process.env.NODE_ENV !== 'test') {
-      throw new Error(
-        'CRITICAL SECURITY ERROR: La variable WALLET_ENCRYPTION_KEY es obligatoria para firmar transacciones Web3.',
-      );
-    }
-    const finalKey = encryptionKey || 'test_isolated_wallet_encryption_key_32c';
-    const userSecretKey = CryptoUtil.decrypt(
-      user.encryptedPrivateKey,
-      finalKey,
-    );
+    const userSecretKey = await this.getDecryptedPrivateKey(userId);
     if (!userSecretKey) {
       throw new BadRequestException(
-        'No se pudo descifrar la clave privada del usuario',
+        'El usuario no posee una clave privada válida o registrada para firmar la transacción',
       );
     }
 

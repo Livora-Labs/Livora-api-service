@@ -9,8 +9,9 @@ import { ComplaintsController } from '../src/complaints/complaints.controller';
 import { ComplaintsService } from '../src/complaints/complaints.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { MailService } from '../src/common/services/mail.service';
+import { TurnstileService } from '../src/common/services/turnstile.service';
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
-import { SupabaseAuthGuard } from '../src/common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/common/guards/roles.guard';
 
 interface MockComplaintRecord {
@@ -158,9 +159,13 @@ describe('Libro de Reclamaciones Virtual - Complaints API (E2E Suite)', () => {
         ComplaintsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: MailService, useValue: mockMailService },
+        {
+          provide: TurnstileService,
+          useValue: { verifyToken: jest.fn().mockResolvedValue(true) },
+        },
       ],
     })
-      .overrideGuard(SupabaseAuthGuard)
+      .overrideGuard(JwtAuthGuard)
       .useValue({
         canActivate: (context: any) => {
           const req = context.switchToHttp().getRequest();

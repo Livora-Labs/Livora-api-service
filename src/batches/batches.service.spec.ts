@@ -139,7 +139,7 @@ describe('BatchesService', () => {
         },
         include: {
           requests: true,
-          destinationCenter: { select: { id: true, email: true } },
+          destinationCenter: { select: { id: true, email: true, name: true } },
         },
       });
     });

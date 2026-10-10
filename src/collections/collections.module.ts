@@ -7,6 +7,8 @@ import { BlockchainModule } from '../blockchain/blockchain.module';
 import { WebsocketsModule } from '../websockets/websockets.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
+import { CollectionAuctionService } from './services/collection-auction.service';
+
 @Module({
   imports: [
     PrismaModule,
@@ -16,7 +18,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     NotificationsModule,
   ],
   controllers: [CollectionsController],
-  providers: [CollectionsService],
-  exports: [CollectionsService],
+  providers: [CollectionsService, CollectionAuctionService],
+  exports: [CollectionsService, CollectionAuctionService],
 })
 export class CollectionsModule {}

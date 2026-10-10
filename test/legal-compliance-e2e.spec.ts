@@ -44,12 +44,14 @@ import * as crypto from 'crypto';
 import { Role } from '@prisma/client';
 
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
-import { SupabaseAuthGuard } from '../src/common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
 import { CurrentUser } from '../src/common/decorators/current-user.decorator';
 import { UsersService } from '../src/users/users.service';
 import { AuthService } from '../src/auth/auth.service';
+import { PasswordService } from '../src/auth/services/password.service';
+import { TokenService } from '../src/auth/services/token.service';
+import { SessionService } from '../src/auth/services/session.service';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { SupabaseService } from '../src/supabase/supabase.service';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../src/redis/redis.service';
 import { MailService } from '../src/common/services/mail.service';
@@ -492,20 +494,20 @@ export class ComplianceLegalController {
     return this.authService.verifyEmail(verifyEmailDto);
   }
 
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Get('profile')
   getProfile(@CurrentUser() user: any) {
     return { success: true, user };
   }
 
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Delete('arco/cancel')
   @HttpCode(HttpStatus.OK)
   async cancelMyAccount(@CurrentUser('id') userId: string) {
     return this.usersService.cancelAccountARCO(userId);
   }
 
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Get('audits')
   async getMyAudits(@CurrentUser('id') userId: string) {
     return this.usersService.getConsentAudits(userId);
@@ -707,6 +709,16 @@ let lastSentOtp = '';
               return { count: initialLen - remaining.length };
             }),
           },
+          walletVault: {
+            deleteMany: jest.fn(async () => ({ count: 1 })),
+            create: jest.fn(async ({ data }: any) => data),
+            findUnique: jest.fn(async () => null),
+          },
+          userCredential: {
+            deleteMany: jest.fn(async () => ({ count: 1 })),
+            create: jest.fn(async ({ data }: any) => data),
+            findUnique: jest.fn(async () => null),
+          },
           $transaction: jest.fn(async (cb) => {
             return cb(mockPrisma);
           }),
@@ -725,78 +737,51 @@ let lastSentOtp = '';
         return mockPrisma;
       },
     },
+    PasswordService,
+    TokenService,
+    SessionService,
     {
-      provide: SupabaseService,
-      useFactory: () => {
-        const usersByToken = new Map<string, any>();
-        let currentAuthUser: any = null;
-
-        return {
-          getClient: () => ({
-            auth: {
-              admin: {
-                createUser: jest.fn(async ({ email, password }: any) => {
-                  const id = `supabase-${crypto.randomUUID()}`;
-                  currentAuthUser = { id, email };
-                  return { data: { user: currentAuthUser }, error: null };
-                }),
-                deleteUser: jest.fn(async (id: string) => {
-                  if (currentAuthUser && currentAuthUser.id === id) {
-                    currentAuthUser = null;
-                  }
-                  return { data: {}, error: null };
-                }),
-              },
-              signInWithPassword: jest.fn(async ({ email }: any) => {
-                const token = `jwt-token-for-${email}`;
-                const user = currentAuthUser || {
-                  id: 'supabase-mock-id',
-                  email,
-                };
-                usersByToken.set(token, user);
-                return {
-                  data: {
-                    session: {
-                      access_token: token,
-                      refresh_token: `refresh-${token}`,
-                      expires_in: 3600,
-                      token_type: 'bearer',
-                    },
-                    user,
-                  },
-                  error: null,
-                };
-              }),
-              getUser: jest.fn(async (token: string) => {
-                const user = usersByToken.get(token);
-                if (user) {
-                  return { data: { user }, error: null };
-                }
-                return {
-                  data: { user: null },
-                  error: { message: 'Invalid JWT token' },
-                };
-              }),
-            },
-          }),
-        };
+      provide: ConfigService,
+      useValue: {
+        get: jest.fn((key: string) => {
+          if (key === 'JWT_SECRET')
+            return 'livora_production_jwt_super_secret_key_2026_stlr_eco_security';
+          return null;
+        }),
       },
     },
     {
       provide: RedisService,
       useFactory: () => {
         const store = new Map<string, string>();
-        return {
+        const sets = new Map<string, Set<string>>();
+        const mockClient = {
           get: jest.fn(async (k: string) => store.get(k) || null),
           set: jest.fn(async (k: string, v: string) => {
             store.set(k, v);
+            return 'OK';
           }),
           del: jest.fn(async (k: string) => {
             store.delete(k);
+            return 1;
           }),
           ttl: jest.fn(async () => 600),
           incr: jest.fn(async () => 1),
-          expire: jest.fn(async () => true),
+          expire: jest.fn(async () => 1),
+          sadd: jest.fn(async (k: string, m: string) => {
+            if (!sets.has(k)) sets.set(k, new Set());
+            sets.get(k)!.add(m);
+            return 1;
+          }),
+          smembers: jest.fn(async (k: string) => Array.from(sets.get(k) || [])),
+          srem: jest.fn(async (k: string, m: string) => {
+            sets.get(k)?.delete(m);
+            return 1;
+          }),
+        };
+        return {
+          ...mockClient,
+          getClient: () => mockClient,
         };
       },
     },
@@ -2104,7 +2089,7 @@ describe('Peruvian Legal Compliance & Web3 Custodial E2E Suite (Indecopi Ley 295
         expect(dbUser.isActive).toBe(false);
         expect(dbUser.deletedAt).toBeInstanceOf(Date);
         expect(dbUser.encryptedPrivateKey).toBeNull(); // Irreversibly purged
-        expect(dbUser.email).toMatch(/^deleted_supabase[-_]/); // Anonymized
+        expect(dbUser.email).toMatch(/^deleted_/); // Anonymized
         expect(dbUser.walletAddress).toBe(initialWallet); // Preserved for blockchain immutability
 
         // Step 5: Verify Complaint Record is retained for Indecopi regulatory compliance

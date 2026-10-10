@@ -18,7 +18,7 @@ export class UpdateSettlementStatusDto {
   @ApiPropertyOptional({
     description: 'URL del comprobante bancario (requerido si el estado pasa a PAID)',
     example:
-      'https://supabase.co/storage/v1/object/public/receipts/comprobante-bancario-123.pdf',
+      'https://media.grupolivoralabs.com/receipts/comprobante-bancario-123.pdf',
   })
   @IsOptional()
   @IsUrl({}, { message: 'receiptUrl debe ser una URL válida' })

@@ -18,7 +18,7 @@ const error5xxCounter = new Counter('http_5xx_errors');
 // ==============================================================================
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
 const IS_SMOKE = __ENV.SMOKE_TEST === 'true';
-const JWT_SECRET = __ENV.SUPABASE_JWT_SECRET || 'meP0Mxf3fhqPJo3tSbNs8QScrh3k0IKhgYvnNzWzjImYhxsaMXx1HSVKVtEKtE3kHBj4wLDk2jYjE1NnTuUDAw==';
+const JWT_SECRET = __ENV.JWT_SECRET || 'meP0Mxf3fhqPJo3tSbNs8QScrh3k0IKhgYvnNzWzjImYhxsaMXx1HSVKVtEKtE3kHBj4wLDk2jYjE1NnTuUDAw==';
 
 // Catálogo de usuarios precargados en la base de datos de Livora
 const USERS = {

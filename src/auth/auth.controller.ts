@@ -18,7 +18,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { RefreshDto } from './dto/refresh.dto';
-import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Auth')
@@ -108,7 +108,7 @@ export class AuthController {
   @Throttle({ auth_strict: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Post('change-password')
   @ApiOperation({ summary: 'Cambiar contraseña de usuario autenticado' })
   @ApiResponse({ status: 200, description: 'Contraseña cambiada exitosamente' })

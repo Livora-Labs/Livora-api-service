@@ -289,19 +289,12 @@ export class BlockchainProcessor extends WorkerHost {
         `[Paso D] Enviando notarización ESG on-chain a Soroban para sub-lote ${batchId} (Cero minteo; distribución financiera previa en puerta vía escrow)...`,
       );
       const centerWallet = batchRecord?.destinationCenter?.walletAddress || '';
-      let txHash: string | null = null;
-      try {
-        const receipt = await this.blockchainService.notarizeBatchReceipt(
-          batchId,
-          ipfsCid,
-          centerWallet,
-        );
-        txHash = receipt?.hash || null;
-      } catch (notarizeErr: any) {
-        this.logger.error(
-          `[Notarización Soroban Degradada] Advertencia para lote ${batchId}: ${notarizeErr.message}. Continuando con la acreditación física en almacén...`,
-        );
-      }
+      const receipt = await this.blockchainService.notarizeBatchReceipt(
+        batchId,
+        ipfsCid,
+        centerWallet,
+      );
+      const txHash: string | null = receipt?.hash || null;
 
       // -------------------------------------------------------------------
       // PASO E: Actualizar estado del lote a RECEIVED en PostgreSQL y cargar inventario
@@ -487,11 +480,11 @@ export class BlockchainProcessor extends WorkerHost {
     );
 
     try {
-      const user = await this.prisma.user.findUnique({
-        where: { id: fromUserId },
+      const vault = await this.prisma.walletVault.findUnique({
+        where: { userId: fromUserId },
         select: { encryptedPrivateKey: true },
       });
-      if (!user || !user.encryptedPrivateKey) {
+      if (!vault || !vault.encryptedPrivateKey) {
         throw new Error(
           `El usuario ${fromUserId} no posee una clave privada registrada`,
         );
@@ -501,7 +494,7 @@ export class BlockchainProcessor extends WorkerHost {
         this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
         'livora_wallet_aes256_secret!';
       let decryptedSecret: string | null = CryptoUtil.decrypt(
-        user.encryptedPrivateKey,
+        vault.encryptedPrivateKey,
         secretKey,
       );
       if (!decryptedSecret) {
@@ -603,14 +596,14 @@ export class BlockchainProcessor extends WorkerHost {
     );
 
     try {
-      const user = fromStoreUserId
-        ? await this.prisma.user.findUnique({
-            where: { id: fromStoreUserId },
+      const vault = fromStoreUserId
+        ? await this.prisma.walletVault.findUnique({
+            where: { userId: fromStoreUserId },
             select: { encryptedPrivateKey: true },
           })
         : null;
 
-      if (!user?.encryptedPrivateKey) {
+      if (!vault?.encryptedPrivateKey) {
         throw new Error(
           `El usuario de tienda ${fromStoreUserId} no posee una clave privada registrada para liquidación`,
         );
@@ -620,7 +613,7 @@ export class BlockchainProcessor extends WorkerHost {
         this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
         'livora_wallet_aes256_secret!';
       const decryptedSecret = CryptoUtil.decrypt(
-        user.encryptedPrivateKey,
+        vault.encryptedPrivateKey,
         secretKey,
       );
       if (!decryptedSecret) {
@@ -675,14 +668,14 @@ export class BlockchainProcessor extends WorkerHost {
     );
 
     try {
-      const storeUser = fromStoreUserId
-        ? await this.prisma.user.findUnique({
-            where: { id: fromStoreUserId },
+      const storeVault = fromStoreUserId
+        ? await this.prisma.walletVault.findUnique({
+            where: { userId: fromStoreUserId },
             select: { encryptedPrivateKey: true },
           })
         : null;
 
-      if (!storeUser?.encryptedPrivateKey || !toWallet) {
+      if (!storeVault?.encryptedPrivateKey || !toWallet) {
         throw new Error(
           'No se puede reembolsar: la tienda no posee clave privada registrada o la billetera de destino es inválida',
         );
@@ -692,7 +685,7 @@ export class BlockchainProcessor extends WorkerHost {
         this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
         'livora_wallet_aes256_secret!';
       const decryptedSecret = CryptoUtil.decrypt(
-        storeUser.encryptedPrivateKey,
+        storeVault.encryptedPrivateKey,
         secretKey,
       );
       const receipt = await this.blockchainService.executeSubsidizedTransfer(

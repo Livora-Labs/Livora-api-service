@@ -61,8 +61,8 @@ export class WebsocketsGateway
         }
       }
 
-      // El rol de la app (HOGAR/RECOLECTOR/...) vive en PostgreSQL, NO en el JWT
-      // de Supabase. Se consulta la BD como fuente de verdad para las salas.
+      // El rol de la app (HOGAR/RECOLECTOR/...) vive en PostgreSQL.
+      // Se consulta la BD como fuente de verdad para las salas.
       const dbUser = await this.prisma.user.findUnique({
         where: { id: userId },
         select: { role: true },
