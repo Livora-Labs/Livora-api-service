@@ -9,7 +9,7 @@
 
 ## 1. Resumen Arquitectónico
 
-El módulo de Autenticación y Gestión de Usuarios de **Livora** adopta un modelo de **Identidad Híbrido** combinando la robustez de **Supabase Auth** como Proveedor de Identidad (IdP) gestionado con la flexibilidad de **PostgreSQL + Prisma ORM** para los datos de dominio y trazabilidad.
+El módulo de Autenticación y Gestión de Usuarios de **Livora** adopta un modelo de **Identidad Nativo de Alta Seguridad** basado en **PostgreSQL + Prisma ORM** con hashing Bcrypt (12 rondas OWASP), credenciales aisladas en `UserCredential`, claves custodiales en `WalletVault` y sesiones con refresh tokens rotativos en **Redis**.
 
 ```
                     ┌─────────────────────────┐
@@ -23,18 +23,19 @@ El módulo de Autenticación y Gestión de Usuarios de **Livora** adopta un mode
                     │       (NestJS)          │
                     └────┬───────────────┬────┘
                          │               │
-  (Auth Admin & Login)   │               │   (Perfil Local & Billetera)
-                         ▼               ▼
-            ┌─────────────────┐     ┌─────────────────────┐
-            │  Supabase Auth  │     │ PostgreSQL (Prisma) │
-            │  (UUID Master)  │     │   Tabla: `users`    │
-            └─────────────────┘     └─────────────────────┘
+     (Credenciales &     │               │   (Sesiones Rotativas)
+      WalletVault)       ▼               ▼
+            ┌─────────────────────┐     ┌─────────────────────┐
+            │ PostgreSQL (Prisma) │     │   Redis Clustered   │
+            │ Tablas: `users`,    │     │   Prefijo: session: │
+            │ `user_credentials`  │     └─────────────────────┘
+            └─────────────────────┘
 ```
 
 ### Principios Clave:
-1. **Separación de Responsabilidades de Autenticación**: Supabase Auth gestiona el almacenamiento seguro de credenciales, hashing de contraseñas de usuarios y emisión/firma de Json Web Tokens (JWT).
-2. **Sincronización de UUID Master**: Al registrar un usuario, el UUID devuelto por Supabase Auth (`user.id`) se utiliza como Primary Key (`id`) de la tabla local `users` en PostgreSQL.
-3. **Billetera Custodial Web3 Automática**: Cada usuario registrado obtiene una billetera **Stellar** (clave pública `G...` y clave secreta `S...`) generada automáticamente con `@stellar/stellar-sdk` (`Keypair.random()`) al momento de la creación de su cuenta.
+1. **Seguridad y Cero Dependencias de IdP Externos**: El sistema gestiona directamente el almacenamiento seguro de credenciales con Bcrypt (12 rondas OWASP) y emisión/firma de Json Web Tokens (JWT) mediante `TokenService` y `PasswordService`.
+2. **Sesiones Rotativas en Redis**: Refresh tokens criptográficos con control de familias de sesión y detección de reuso para revocación inmediata en Redis.
+3. **Billetera Custodial Web3 Aislada**: Cada usuario registrado obtiene una billetera **Stellar** (clave pública `G...` y clave secreta `S...`) generada con `@stellar/stellar-sdk` (`Keypair.random()`), cifrada con AES-256-GCM y custodiada en la entidad satélite `WalletVault`.
 
 ---
 
@@ -54,7 +55,7 @@ Ubicación: `prisma/schema.prisma`
 
 | Campo | Tipo | Restricciones | Descripción |
 | :--- | :--- | :--- | :--- |
-| `id` | `String` | `@id @db.Uuid` | ID único sincronizado desde Supabase Auth (UUID v4). |
+| `id` | `String` | `@id @db.Uuid` | ID único criptográfico de la cuenta (UUID v4). |
 | `email` | `String` | `@unique` | Correo electrónico del usuario. |
 | `role` | `Role` | Enum `Role` | Rol asignado dentro de la plataforma. |
 | `walletAddress` | `String?` | `@unique` | Clave pública de la cuenta Stellar (`G...`). |
@@ -129,7 +130,7 @@ La clave privada nunca se almacena en texto plano. Se procesa mediante el helper
 
 ### 4.1. Registro de Usuario (`POST /auth/register`)
 
-Crea la cuenta en Supabase Auth, genera la billetera Web3 custodial cifrada y guarda el perfil local en PostgreSQL.
+Crea la solicitud de registro, hashea temporalmente el OTP en Redis y solicita la verificación por correo transaccional.
 
 - **URL:** `/auth/register`
 - **Método:** `POST`
@@ -166,7 +167,7 @@ Crea la cuenta en Supabase Auth, genera la billetera Web3 custodial cifrada y gu
 
 ### 4.2. Inicio de Sesión (`POST /auth/login`)
 
-Autentica las credenciales contra Supabase Auth y retorna los tokens JWT junto con el rol del usuario.
+Autentica las credenciales con Bcrypt contra `UserCredential`, crea una sesión en Redis y retorna los tokens JWT de acceso y refresco rotativo.
 
 - **URL:** `/auth/login`
 - **Método:** `POST`
@@ -201,7 +202,7 @@ Autentica las credenciales contra Supabase Auth y retorna los tokens JWT junto c
 ### 5.1. Estrategia JWT (`JwtStrategy`)
 - **Ubicación:** `src/auth/strategies/jwt.strategy.ts`
 - Extrae el token enviado en la cabecera HTTP: `Authorization: Bearer <accessToken>`.
-- Valida la firma del token utilizando la variable de entorno `SUPABASE_JWT_SECRET`.
+- Valida la firma del token utilizando la variable de entorno `JWT_SECRET`.
 - Método `validate(payload)`: Extrae `payload.sub` (UUID) y consulta en PostgreSQL a través de `UsersService.findById(payload.sub)` para inyectar el usuario autenticado (incluyendo su `role` y `walletAddress`) en el objeto `request.user`.
 
 ### 5.2. Decorador `@Roles(...)`
@@ -226,10 +227,8 @@ Ejemplo:
 # Database Configuration
 DATABASE_URL="postgresql://livora:livora_secret@localhost:5432/livora_db?schema=public"
 
-# Supabase Auth Configuration
-SUPABASE_URL=https://tu-proyecto.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key
-SUPABASE_JWT_SECRET=tu_jwt_secret
+# Native JWT Authentication
+JWT_SECRET=tu_jwt_secret_de_produccion_256_bits
 
 # Web3 Security Configuration
 WALLET_ENCRYPTION_KEY=tu_32_byte_secret_key

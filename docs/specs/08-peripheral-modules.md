@@ -178,7 +178,7 @@ Bajo la **Regla de Oro** de cero dependencias o servicios externos adicionales:
 
 ## 5. Seguridad y Estándares Globales
 
-1. **Guardias de Autenticación y Roles:** Todos los endpoints protegidos incorporan `@UseGuards(SupabaseAuthGuard, RolesGuard)` y el decorador custom `@Roles(Role.XYZ)`.
+1. **Guardias de Autenticación y Roles:** Todos los endpoints protegidos incorporan `@UseGuards(JwtAuthGuard, RolesGuard)` y el decorador custom `@Roles(Role.XYZ)`.
 2. **Documentación Swagger:** Cada método está decorado con `@ApiTags()`, `@ApiBearerAuth()` y `@ApiOperation()` para la documentación interactiva en `/api/docs`.
 3. **Manejo de Excepciones:** Todas las respuestas de error son interceptadas por el `GlobalExceptionFilter`, garantizando el envoltorio `{ "error": { "code", "message", "details" } }`.
 4. **Paginación:** Los endpoints de lectura masiva utilizan `PaginationQueryDto` para el control de `page`, `limit`, `sortBy` y `sortOrder`.

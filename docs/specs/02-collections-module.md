@@ -120,10 +120,10 @@ LIMIT ${limit} OFFSET ${skip};
 
 ## 4. Seguridad y Control de Acceso (RBAC)
 
-La seguridad del módulo se basa en el sistema de autenticación de Supabase (JWT) combinado con un Control de Acceso Basado en Roles (RBAC).
+La seguridad del módulo se basa en el sistema de autenticación nativa (JWT) combinado con un Control de Acceso Basado en Roles (RBAC).
 
 ### Guards Aplicados
-1. **`SupabaseAuthGuard`:** Valida que la petición incluya un token JWT de Supabase válido en el encabezado `Authorization: Bearer <token>` y parsea los datos del usuario a `req.user`.
+1. **`JwtAuthGuard`:** Valida que la petición incluya un token JWT válido en el encabezado `Authorization: Bearer <token>` y parsea los datos del usuario a `req.user`.
 2. **`RolesGuard`:** Compara los roles definidos en la ruta mediante el decorador `@Roles(...)` con el rol registrado en el usuario autenticado (`req.user.role`).
 
 ### Decoradores Personalizados

@@ -25,7 +25,7 @@ graph TD
     Client -->|WebSockets| WsAdapter[Redis Socket.io Adapter]
 
     %% Authentication & Services
-    Nest -->|Auth Sync| Supabase[Supabase Auth Provider]
+    Nest -->|Media Storage| CloudflareR2[Cloudflare R2 S3 Provider]
     Nest -->|Enviar Email| Brevo[Brevo SMTP API]
     Nest -->|Push Notifications| FCM[Firebase Cloud Messaging]
 
@@ -50,7 +50,7 @@ graph TD
     classDef external fill:#cc5500,stroke:#333,stroke-width:1px,color:#fff;
     classDef cache fill:#990000,stroke:#333,stroke-width:1px,color:#fff;
     class DB database;
-    class Supabase,Brevo,FCM,Pinata,StellarRPC,StellarNetwork external;
+    class CloudflareR2,Brevo,FCM,Pinata,StellarRPC,StellarNetwork external;
     class Redis cache;
 ```
 
@@ -86,7 +86,7 @@ graph TD
   - **Registro Temporal:** Al invocar `/auth/register`, los datos del DTO y el hash SHA-256 del código OTP generado de 6 dígitos se guardan en Redis (`otp:register:${email}`) con un tiempo de expiración (TTL) de 10 minutos (600 segundos).
   - **Cooldown:** Se crea un registro `otp:cooldown:${email}` con un TTL de 60 segundos para restringir el abuso en el reenvío de correos.
   - **Brevo:** Se utiliza el cliente `@getbrevo/brevo` para despachar el correo transaccional con el código. Si no se dispone de la API Key, el servicio imprime defensivamente el OTP en consola.
-  - **Confirmación:** Al invocar `/auth/verify-email`, se valida el OTP hasheado. Si es exitoso, se crea el usuario en Supabase Auth, luego en PostgreSQL (generando y cifrando sus credenciales Web3), se inicia sesión y finalmente se eliminan las claves de OTP de Redis.
+  - **Confirmación:** Al invocar `/auth/verify-email`, se valida el OTP hasheado. Si es exitoso, se crea el usuario directamente en PostgreSQL con password hasheado (Argon2/Bcrypt), generando y cifrando sus credenciales Web3, se inicia sesión y finalmente se eliminan las claves de OTP de Redis.
 * **Seguridad Perimetral:**
   - **Helmet:** Activado globalmente (`app.use(helmet({ contentSecurityPolicy: false }))`). Deshabilita CSP para evitar romper la UI de Swagger en desarrollo/staging.
   - **CORS:** Configurado dinámicamente mediante `CORS_ORIGIN` (soporta listas separadas por comas con fallback seguro a localhost).

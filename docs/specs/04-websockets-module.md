@@ -107,7 +107,7 @@ La autenticación se realiza de manera síncrona durante el **handshake inicial*
 ### Flujo de Validación JWT
 
 1. **Extracción del Token**: Se obtiene el JWT desde `client.handshake.query.token` (con fallback defensivo a `client.handshake.auth?.token`).
-2. **Verificación Criptográfica**: Se valida la firma y expiración del JWT contra la clave secreta `SUPABASE_JWT_SECRET` utilizando la librería `jsonwebtoken`.
+2. **Verificación Criptográfica**: Se valida la firma y expiración del JWT contra la clave secreta `JWT_SECRET` utilizando la librería `jsonwebtoken` o el servicio de tokens nativo.
 3. **Blindaje contra Conexiones Anónimas**: Si el token no está presente, es inválido, ha expirado o no contiene el claim `sub` (ID de usuario), el servidor ejecuta inmediatamente `client.disconnect()` rechazando la conexión antes de cualquier intercambio de datos.
 4. **Contexto de Sesión (`client.data.user`)**: Si la validación es exitosa, se almacena el payload decodificado en `client.data.user`:
    ```typescript
@@ -130,11 +130,11 @@ async handleConnection(client: Socket) {
       return;
     }
 
-    const jwtSecret = this.configService.get<string>('SUPABASE_JWT_SECRET');
-    const decoded = jwt.verify(token, jwtSecret) as SupabaseJwtPayload;
+    const jwtSecret = this.configService.get<string>('JWT_SECRET');
+    const decoded = jwt.verify(token, jwtSecret) as JwtPayload;
 
     const userId = decoded.sub;
-    const role = decoded.role || decoded.user_metadata?.role;
+    const role = decoded.role;
 
     if (!userId) {
       client.disconnect();
@@ -228,7 +228,7 @@ El módulo fue sometido a auditoría de QA y pasó satisfactoriamente las siguie
 ```typescript
 import { io, Socket } from 'socket.io-client';
 
-const collectorToken = 'YOUR_SUPABASE_RECOLECTOR_JWT';
+const collectorToken = 'YOUR_RECOLECTOR_JWT';
 
 const socket: Socket = io('http://localhost:3000', {
   transports: ['websocket'],
@@ -255,7 +255,7 @@ socket.on('disconnect', (reason) => {
 ```typescript
 import { io, Socket } from 'socket.io-client';
 
-const centerToken = 'YOUR_SUPABASE_CENTRO_ACOPIO_JWT';
+const centerToken = 'YOUR_CENTRO_ACOPIO_JWT';
 
 const socket: Socket = io('http://localhost:3000', {
   transports: ['websocket'],

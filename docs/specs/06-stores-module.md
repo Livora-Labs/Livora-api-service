@@ -140,7 +140,7 @@ El servicio `WebsocketsService` provee el método `emitStoreNotification` para a
 
 ## 4. Seguridad y Control de Acceso (RBAC)
 
-La autenticación se realiza de manera centralizada mediante `SupabaseAuthGuard` para validar los tokens JWT, y la autorización a través de `RolesGuard` y el decorador `@Roles(...)`.
+La autenticación se realiza de manera centralizada mediante `JwtAuthGuard` para validar los tokens JWT, y la autorización a través de `RolesGuard` y el decorador `@Roles(...)`.
 
 - **Control de Perfiles**: El perfil de tienda se vincula de manera forzada al identificador del usuario autenticado (`req.user.id`), protegiendo los datos contra suplantaciones.
 - **Validaciones de Canjes y Liquidaciones**:
@@ -226,6 +226,6 @@ Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
-  "receiptUrl": "https://supabase.co/storage/v1/object/public/receipts/comprobante-987.pdf"
+  "receiptUrl": "https://media.grupolivoralabs.com/receipts/comprobante-987.pdf"
 }
 ```

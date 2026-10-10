@@ -84,7 +84,7 @@ De aquí sale el **rol** y la **wallet** del usuario (guárdalos en el login/ver
 
 ### 2.3 Renovar sesión — `POST /auth/refresh` ✅ NUEVO (resuelve el bloqueante #1)
 
-Ya no muere la sesión a los 60 min ni hace falta la anon key de Supabase en la app:
+Ya no muere la sesión a los 60 min ni hacen falta claves de terceros en la app (autenticación nativa JWT):
 ```
 POST /auth/refresh
 { "refreshToken": "v1.Mr8..." }
@@ -137,14 +137,14 @@ POST /wallets/transactions        (relayer subsidia el gas)
 
 ## 5. WebSockets (tiempo real) — ✅ funcionando (verificado end-to-end)
 
-Sí hay gateway Socket.IO con adaptador Redis, **estable en Stellar**. Autenticación con el **mismo `accessToken`**, validado remotamente contra Supabase (soporta los tokens ES256 actuales). Verificado en vivo: conexión con token real → evento `connected {userId, role}` y unión a la sala del rol.
+Sí hay gateway Socket.IO con adaptador Redis, **estable en Stellar**. Autenticación con el **mismo `accessToken`**, validado mediante JWT nativo. Verificado en vivo: conexión con token real → evento `connected {userId, role}` y unión a la sala del rol.
 
 **Conexión:**
 ```js
 io('https://stellar.52.200.2.107.sslip.io', { auth: { token: accessToken } })
 // alternativa: ?token=<accessToken> en la query
 ```
-El JWT se valida contra `SUPABASE_JWT_SECRET`. Sin token → el server desconecta el socket.
+El JWT se valida criptográficamente con `JWT_SECRET`. Sin token → el server desconecta el socket.
 
 **Entrada a salas = automática por el servidor. NO tienes que emitir `join`.** Al conectar, el server te mete en tus salas según tu rol. Cuando termina, emite un evento **`connected` `{ userId, role }`** que puedes escuchar como confirmación.
 
@@ -155,13 +155,13 @@ El JWT se valida contra `SUPABASE_JWT_SECRET`. Sin token → el server desconect
 | CENTRO_ACOPIO | `center:<userId>` | `batch:completed` |
 | TIENDA | `store:<userId>` | `redemption:completed`, `settlement:paid` |
 
-> 🔧 **Corregido (2 bugs):** (1) el gateway validaba el JWT con `jwt.verify` HS256, pero Supabase emite **ES256** → la verificación fallaba siempre y **cortaba toda conexión** (con o sin token). Ahora usa `supabase.auth.getUser(token)` como el guard HTTP. (2) el rol se leía del JWT (`role: "authenticated"`); ahora se resuelve desde PostgreSQL. **Ya funciona** — mete `socket_io_client`, escucha `connected` + los eventos de sala; no más polling.
+> 🔧 **Autenticación Nativa:** El gateway valida la firma HMAC-SHA256 con `JWT_SECRET` y extrae el rol y claims directamente desde PostgreSQL/payload. **Ya funciona** — mete `socket_io_client`, escucha `connected` + los eventos de sala; no más polling.
 
 ---
 
 ## 6. Subida de archivos — ✅ IMPLEMENTADO (`POST /uploads`)
 
-Sube a Supabase Storage (bucket público `livora-uploads`) con la service key del backend y devuelve la URL pública. La app **solo hace multipart, sin credenciales de Storage**. Verificado end-to-end (201 + URL que sirve el archivo).
+Sube a Cloudflare R2 Storage (bucket S3 compatible `livora-uploads`) a través del backend y devuelve la URL pública (`https://media.grupolivoralabs.com/...`). La app **solo hace multipart, sin credenciales de Cloudflare**. Verificado end-to-end (201 + URL que sirve el archivo).
 
 **Contrato:**
 ```
@@ -176,7 +176,7 @@ POST /uploads          (Bearer, multipart/form-data)
 - **Tipos:** `image/jpeg`, `image/png`. Además `application/pdf` **solo** cuando `purpose=kyc`.
 - **Respuesta 201:**
   ```json
-  { "url": "https://...supabase.co/storage/v1/object/public/livora-uploads/collection/<uuid>.png",
+  { "url": "https://media.grupolivoralabs.com/collection/<uuid>.png",
     "purpose": "collection", "mimeType": "image/png", "size": 12345 }
   ```
 - Errores como el resto de la API (400 con `error.message` claro si el tipo/tamaño no cumple).

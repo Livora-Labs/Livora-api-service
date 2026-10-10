@@ -207,7 +207,7 @@ BullModule.registerQueue({
 
 La seguridad del módulo se soporta en la infraestructura común de la aplicación:
 
-- **`SupabaseAuthGuard`**: Valida el Token JWT emitido por Supabase en el encabezado `Authorization: Bearer <token>` e inyecta la entidad del usuario autenticado en `request.user`.
+- **`JwtAuthGuard`**: Valida el Token JWT en el encabezado `Authorization: Bearer <token>` e inyecta la entidad del usuario autenticado en `request.user`.
 - **`RolesGuard`**: Evalúa los roles asignados mediante la anotación `@Roles(...)`.
 - **Decoradores Decorativos y de Parámetros**:
   - `@Roles(Role.RECOLECTOR)`

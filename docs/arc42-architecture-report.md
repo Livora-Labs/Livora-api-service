@@ -95,7 +95,7 @@ graph TD
     ClientApp[Apps Móviles Flutter / Web Next.js] -->|HTTPS REST / WebSockets WSS| Caddy[Caddy 2 Reverse Proxy]
     Caddy -->|Proxy HTTP :3000| NestAPI[Livora API Gateway - NestJS Fastify]
     
-    NestAPI -->|Autenticación & Identidad| Supabase[Supabase Auth & Storage]
+    NestAPI -->|Almacenamiento de Medios S3| CloudflareR2[Cloudflare R2 Storage]
     NestAPI -->|Correos Transaccionales & OTP| Brevo[Brevo SMTP API]
     NestAPI -->|Notificaciones Push| FCM[Firebase Cloud Messaging]
     NestAPI -->|Persistencia Relacional & Geoespacial| Postgres[(PostgreSQL 16 + PostGIS)]
@@ -170,8 +170,7 @@ src/
 ├── redis/                  # Singleton de cliente ioredis para cache y locks
 ├── sales/                  # Registro de ventas de lotes industriales a empresas
 ├── stores/                 # Perfiles de tiendas, canjes QR y solicitudes de liquidación
-├── supabase/               # Integración de identidad y almacenamiento Supabase
-├── uploads/                # Gestión de subida de archivos multipart
+├── uploads/                # Gestión de subida de archivos multipart a Cloudflare R2
 ├── users/                  # Perfiles de usuario, consentimientos y soft-delete
 ├── wallets/                # Saldos EcoToken SEP-41 y transacciones subsidiadas
 └── websockets/             # Gateway Socket.IO con Redis Adapter
@@ -205,7 +204,6 @@ sequenceDiagram
     participant API as AuthController
     participant Redis as Redis Cache
     participant Brevo as Brevo SMTP API
-    participant Supabase as Supabase Auth
     participant DB as PostgreSQL (Prisma)
 
     Usuario->>API: POST /auth/register { email, password, role }
@@ -217,10 +215,10 @@ sequenceDiagram
 
     Usuario->>API: POST /auth/verify-email { email, code }
     API->>Redis: GET otp:register:email & Verifica Hash
-    API->>Supabase: admin.createUser({ email, password })
+    API->>API: Hash de contraseña con Bcrypt / Argon2
     API->>API: Keypair.random() (Genera clave pública G... y privada S...)
     API->>API: Cifra clave privada con AES-256-GCM
-    API->>DB: INSERT INTO users (id, email, role, walletAddress, encryptedPrivateKey)
+    API->>DB: INSERT INTO users (id, email, passwordHash, role, walletAddress, encryptedPrivateKey)
     API->>DB: INSERT INTO consent_audits (Versión T&C, IP, User-Agent)
     API->>Redis: DEL otp:register:email
     API-->>Usuario: HTTP 200 OK { accessToken, refreshToken, user }
@@ -333,7 +331,7 @@ graph TD
     subgraph Cloud_And_Web3_Services["Servicios Cloud & Red Blockchain"]
         StellarNetwork["Stellar Testnet (Soroban RPC: soroban-testnet.stellar.org)"]
         PinataIPFS["Pinata Cloud (api.pinata.cloud)"]
-        SupabaseCloud["Supabase (Auth & Object Storage)"]
+        CloudflareR2Cloud["Cloudflare R2 (Object Storage S3)"]
         BrevoSMTP["Brevo SMTP API (api.brevo.com)"]
     end
 
@@ -343,7 +341,7 @@ graph TD
     APIContainer -->|TCP 6379| RedisContainer
     APIContainer -->|HTTPS RPC| StellarNetwork
     APIContainer -->|HTTPS REST| PinataIPFS
-    APIContainer -->|HTTPS REST| SupabaseCloud
+    APIContainer -->|HTTPS S3 API| CloudflareR2Cloud
     APIContainer -->|HTTPS REST| BrevoSMTP
 ```
 
