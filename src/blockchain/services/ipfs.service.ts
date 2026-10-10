@@ -265,7 +265,7 @@ export class IpfsService {
 
     const gateway =
       this.configService.get<string>('IPFS_GATEWAY_URL') ||
-      'https://ipfs.io/ipfs/';
+      'https://gateway.pinata.cloud/ipfs/';
     const cleanGateway = gateway.endsWith('/') ? gateway : `${gateway}/`;
 
     // Si ya empieza con http:// o https://
