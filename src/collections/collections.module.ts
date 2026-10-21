@@ -7,7 +7,14 @@ import { BlockchainModule } from '../blockchain/blockchain.module';
 import { WebsocketsModule } from '../websockets/websockets.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
+// Servicios modulares y patrones de diseño (PUCP Disoft)
 import { CollectionAuctionService } from './services/collection-auction.service';
+import { CollectionLifecycleService } from './services/collection-lifecycle.service';
+import { CollectionVerificationService } from './services/collection-verification.service';
+import { CollectionTrackingService } from './services/collection-tracking.service';
+import { CollectionEscrowService } from './services/collection-escrow.service';
+import { CollectionsRepository } from './repositories/collections.repository';
+import { RewardCalculatorFactory } from './factories/reward-calculator.factory';
 
 @Module({
   imports: [
@@ -18,7 +25,25 @@ import { CollectionAuctionService } from './services/collection-auction.service'
     NotificationsModule,
   ],
   controllers: [CollectionsController],
-  providers: [CollectionsService, CollectionAuctionService],
-  exports: [CollectionsService, CollectionAuctionService],
+  providers: [
+    CollectionsService,
+    CollectionAuctionService,
+    CollectionLifecycleService,
+    CollectionVerificationService,
+    CollectionTrackingService,
+    CollectionEscrowService,
+    CollectionsRepository,
+    RewardCalculatorFactory,
+  ],
+  exports: [
+    CollectionsService,
+    CollectionAuctionService,
+    CollectionLifecycleService,
+    CollectionVerificationService,
+    CollectionTrackingService,
+    CollectionEscrowService,
+    CollectionsRepository,
+    RewardCalculatorFactory,
+  ],
 })
 export class CollectionsModule {}

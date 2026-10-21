@@ -6,6 +6,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { PasswordService } from './services/password.service';
 import { TokenService } from './services/token.service';
 import { SessionService } from './services/session.service';
+import { OtpService } from './services/otp.service';
 
 @Global()
 @Module({
@@ -16,6 +17,7 @@ import { SessionService } from './services/session.service';
     PasswordService,
     TokenService,
     SessionService,
+    OtpService,
     JwtStrategy,
   ],
   exports: [
@@ -23,6 +25,7 @@ import { SessionService } from './services/session.service';
     PasswordService,
     TokenService,
     SessionService,
+    OtpService,
     JwtStrategy,
     PassportModule,
   ],

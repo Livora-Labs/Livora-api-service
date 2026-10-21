@@ -1,20 +1,17 @@
 import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
   Injectable,
   Logger,
-  NotFoundException,
   Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { IpfsService } from '../blockchain/services/ipfs.service';
 import { BlockchainService } from '../blockchain/services/blockchain.service';
 import { WebsocketsService } from '../websockets/websockets.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { CryptoUtil } from '../common/utils/crypto.util';
+
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { FindCollectionsQueryDto } from './dto/find-collections-query.dto';
 import { UpdateCollectionStatusDto } from './dto/update-collection-status.dto';
@@ -25,15 +22,35 @@ import { AvailableCollectionsQueryDto } from './dto/available-collections-query.
 import { RateCollectionDto } from './dto/rate-collection.dto';
 import { EditCollectionRequestDto } from './dto/edit-collection-request.dto';
 import { CollectorTelemetryDto } from './dto/collector-telemetry.dto';
-import { BatchStatus, RequestStatus, Role, Prisma } from '@prisma/client';
-import { Keypair } from '@stellar/stellar-sdk';
-import { PaginatedResultDto } from '../common/dto/paginated-result.dto';
 
 import { CollectionAuctionService } from './services/collection-auction.service';
+import { CollectionLifecycleService } from './services/collection-lifecycle.service';
+import { CollectionVerificationService } from './services/collection-verification.service';
+import { CollectionTrackingService } from './services/collection-tracking.service';
+import { CollectionEscrowService } from './services/collection-escrow.service';
+import { CollectionsRepository } from './repositories/collections.repository';
+import { RewardCalculatorFactory } from './factories/reward-calculator.factory';
 
+/**
+ * CollectionsService - Fachada Orquestadora (PUCP Disoft - GoF Facade Pattern)
+ * Proporciona un punto de entrada unificado y de alto nivel a los subsistemas de recolección,
+ * eliminando el antipatrón The Blob y delegando responsabilidades a servicios cohesivos:
+ * - CollectionLifecycleService (Ciclo de vida, transiciones, cancelaciones, reclasificaciones)
+ * - CollectionVerificationService (Verificación multifactorial en campo, Chain of Resp, Strategy)
+ * - CollectionTrackingService (Telemetría en tiempo real, geocercas WGS-84, GPS tracking)
+ * - CollectionAuctionService (Subastas competitivas de centros de acopio)
+ * - CollectionEscrowService (Garantías y depósitos en custodia Stellar)
+ * - CollectionsRepository (Acceso a datos desacoplado, PostGIS spatial radar)
+ */
 @Injectable()
 export class CollectionsService {
   private readonly logger = new Logger(CollectionsService.name);
+  private readonly lifecycle: CollectionLifecycleService;
+  private readonly verification: CollectionVerificationService;
+  private readonly tracking: CollectionTrackingService;
+  private readonly escrow: CollectionEscrowService;
+  private readonly repo: CollectionsRepository;
+  private readonly rewardFactory: RewardCalculatorFactory;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -44,11 +61,60 @@ export class CollectionsService {
     private readonly auctionService: CollectionAuctionService,
     @Optional() private readonly configService?: ConfigService,
     @Optional() private readonly redisService?: RedisService,
-  ) {}
+    @Optional() lifecycleService?: CollectionLifecycleService,
+    @Optional() verificationService?: CollectionVerificationService,
+    @Optional() trackingService?: CollectionTrackingService,
+    @Optional() escrowService?: CollectionEscrowService,
+    @Optional() repository?: CollectionsRepository,
+    @Optional() rewardCalculatorFactory?: RewardCalculatorFactory,
+  ) {
+    this.repo = repository ?? new CollectionsRepository(this.prisma, this.redisService);
+    this.rewardFactory = rewardCalculatorFactory ?? new RewardCalculatorFactory();
+    this.escrow =
+      escrowService ??
+      new CollectionEscrowService(
+        this.prisma,
+        this.blockchainService,
+        this.rewardFactory,
+      );
+    this.lifecycle =
+      lifecycleService ??
+      new CollectionLifecycleService(
+        this.prisma,
+        this.escrow,
+        this.blockchainService,
+        this.notificationsService,
+        this.websocketsService,
+        this.configService,
+        this.ipfsService,
+        this.redisService,
+      );
+    this.verification =
+      verificationService ??
+      new CollectionVerificationService(
+        this.prisma,
+        this.repo,
+        this.rewardFactory,
+        this.blockchainService,
+        this.notificationsService,
+        this.websocketsService,
+        this.configService || (new ConfigService() as any),
+        this.redisService,
+      );
+    this.tracking =
+      trackingService ??
+      new CollectionTrackingService(
+        this.prisma,
+        this.websocketsService,
+        this.notificationsService,
+        this.redisService,
+      );
+  }
 
-  /**
-   * Crea una nueva solicitud de recolección (Rol HOGAR)
-   */
+  // ==========================================
+  // CICLO DE VIDA (Lifecycle Subsystem)
+  // ==========================================
+
   async create(
     userId: string,
     dto: CreateCollectionDto,
@@ -56,1752 +122,123 @@ export class CollectionsService {
       | { originalname: string; buffer: Buffer; mimetype: string }
       | Express.Multer.File,
   ) {
-    // 1. Verificar si el hogar ya tiene una solicitud activa
-    const activeRequest = await this.prisma.collectionRequest.findFirst({
-      where: {
-        householdId: userId,
-        status: {
-          in: [
-            RequestStatus.PENDING,
-            RequestStatus.AUCTION_ACTIVE,
-            RequestStatus.AUCTION_ASSIGNED,
-            RequestStatus.ACCEPTED,
-            RequestStatus.EN_ROUTE,
-            RequestStatus.ARRIVED,
-          ],
-        },
-      },
-    });
-
-    if (activeRequest) {
-      throw new BadRequestException(
-        'El hogar ya tiene una solicitud de recolección activa. Debe completarse o cancelarse antes de crear una nueva.',
-      );
-    }
-
-    const items = dto.itemsEstimated;
-    if (!items || typeof items !== 'object' || Object.keys(items).length === 0) {
-      throw new BadRequestException('itemsEstimated no puede estar vacío');
-    }
-    const totalKg = Object.values(items).reduce(
-      (sum, val) => sum + (Number(val) || 0),
-      0,
-    );
-    if (totalKg < 0.5) {
-      throw new BadRequestException('El peso total mínimo de recolección es de 0.5 kg');
-    }
-    for (const [mat, weight] of Object.entries(items)) {
-      const w = Number(weight);
-      if (isNaN(w) || w < 0.5) {
-        throw new BadRequestException(`El peso mínimo para ${mat} es de 0.5 kg`);
-      }
-      const parts = w.toString().split('.');
-      if (parts.length > 1 && parts[1].length > 2) {
-        throw new BadRequestException(`El peso de ${mat} no puede tener más de 2 decimales`);
-      }
-    }
-
-    // Generar PIN aleatorio de 4 dígitos (1000 - 9999)
-    const verificationPin = Math.floor(1000 + Math.random() * 9000).toString();
-
-    // Procesar la foto de forma opcional y formatear con IPFS gateway
-    let photoUrl = dto.photoUrl;
-    if (file) {
-      const cid = await this.uploadPhoto(file, userId);
-      photoUrl = this.ipfsService.getGatewayUrl(cid);
-    } else if (photoUrl) {
-      photoUrl = this.ipfsService.getGatewayUrl(photoUrl);
-    }
-
-    const householdUser = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, kycStatus: true, address: true },
-    });
-    const isDonation =
-      (dto as any).isDonation === true ||
-      householdUser?.kycStatus !== 'APPROVED';
-
-    const effectiveAddress =
-      dto.address && dto.address.trim().length > 0
-        ? dto.address.trim()
-        : (householdUser?.address || 'Ubicación seleccionada');
-
-    const assignmentMode = dto.assignmentMode === 'AUCTION' ? 'AUCTION' : 'AUTOMATIC';
-    const status =
-      assignmentMode === 'AUCTION'
-        ? RequestStatus.AUCTION_ACTIVE
-        : RequestStatus.PENDING;
-    const auctionExpiresAt =
-      assignmentMode === 'AUCTION'
-        ? new Date(Date.now() + 15 * 60 * 1000)
-        : null;
-
-    const newRequest = await this.prisma.collectionRequest.create({
-      data: {
-        status,
-        assignmentMode,
-        itemsEstimated: dto.itemsEstimated,
-        description: dto.description,
-        verificationPin,
-        address: effectiveAddress,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        photoUrl,
-        householdId: userId,
-        auctionExpiresAt,
-        isDonation,
-      },
-      include: {
-        household: {
-          select: { id: true, email: true, name: true },
-        },
-        assignedCenter: {
-          select: { id: true, name: true, email: true },
-        },
-        bids: {
-          include: {
-            center: { select: { id: true, name: true, email: true, address: true } },
-          },
-        },
-      },
-    });
-
-    // Persistir PIN en Redis con TTL estricto de 30 minutos (1800s)
-    if (this.redisService) {
-      await this.redisService.set(
-        `pin:collection:${newRequest.id}`,
-        verificationPin,
-        1800,
-      );
-    }
-
-    // Emitir en tiempo real a los Centros de Acopio y Recolectores (sin PIN)
-    this.websocketsService.emitCollectionCreated(this.stripPin(newRequest));
-
-    // Notificar a los Centros de Acopio sobre la nueva orden
-    this.prisma.user
-      .findMany({
-        where: {
-          role: Role.CENTRO_ACOPIO,
-          fcmToken: { not: null },
-        },
-        select: { id: true },
-      })
-      .then((centers) => {
-        for (const c of centers) {
-          this.notificationsService
-            .sendPushNotification(
-              c.id,
-              assignmentMode === 'AUCTION'
-                ? 'Nueva subasta de reciclaje disponible'
-                : 'Nueva solicitud de recolección automática',
-              'Ingresa para postular tu tarifario o tomar la solicitud.',
-              { requestId: newRequest.id },
-            )
-            .catch(() => {});
-        }
-      })
-      .catch(() => {});
-
-    return newRequest;
+    return this.lifecycle.create(userId, dto, file);
   }
 
-  /**
-   * Postular oferta de tarifario a una solicitud en modo Subasta (Rol: CENTRO_ACOPIO)
-   */
-  async submitBid(centerId: string, requestId: string, dto: SubmitBidDto) {
-    return this.auctionService.submitBid(centerId, requestId, dto);
-  }
-
-  /**
-   * Retirar propuesta de subasta antes de ser aceptada (Rol: CENTRO_ACOPIO)
-   */
-  async withdrawBid(centerId: string, requestId: string, bidId?: string) {
-    return this.auctionService.withdrawBid(centerId, requestId, bidId);
-  }
-
-  /**
-   * Hogar selecciona una propuesta ganadora en modo Subasta (Rol: HOGAR)
-   */
-  async selectBid(householdId: string, requestId: string, dto: SelectBidDto) {
-    return this.auctionService.selectBid(householdId, requestId, dto);
-  }
-
-  /**
-   * Centro de Acopio toma directamente una solicitud en modo Automático (Rol: CENTRO_ACOPIO)
-   */
-  async claimAutomatic(centerId: string, requestId: string) {
-    return this.auctionService.claimAutomatic(centerId, requestId);
-  }
-
-  /**
-   * Listar solicitudes de recolección
-   */
-  async findAll(user: { id: string; role: Role }, query: FindCollectionsQueryDto) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 15;
-    const skip = (page - 1) * limit;
-    const allowedSortFields = ['createdAt', 'updatedAt', 'status'];
-    const sanitizedSortBy = allowedSortFields.includes(query.sortBy || '')
-      ? query.sortBy!
-      : 'createdAt';
-    const sortOrder = (query.sortOrder || 'DESC').toLowerCase() as 'asc' | 'desc';
-    const readPrisma = (this.prisma.getReadClient && this.prisma.getReadClient()) || this.prisma;
-
-    let where: any;
-    let include: any;
-
-    if (user.role === Role.HOGAR) {
-      where = {
-        householdId: user.id,
-        ...(query.status ? { status: query.status } : {}),
-      };
-      include = {
-        assignedCenter: { select: { id: true, name: true, email: true, address: true } },
-        collector: { select: { id: true, name: true, email: true } },
-        bids: {
-          include: {
-            center: { select: { id: true, name: true, email: true, address: true } },
-          },
-        },
-        batch: true,
-      };
-    } else if (user.role === Role.CENTRO_ACOPIO) {
-      where = {
-        OR: [
-          {
-            status: { in: [RequestStatus.PENDING, RequestStatus.AUCTION_ACTIVE] },
-            assignmentMode: 'AUCTION',
-          },
-          {
-            status: RequestStatus.PENDING,
-            assignmentMode: 'AUTOMATIC',
-            assignedCenterId: null,
-          },
-          {
-            assignedCenterId: user.id,
-          },
-        ],
-      };
-      include = {
-        household: { select: { id: true, email: true, name: true, address: true } },
-        assignedCenter: { select: { id: true, name: true, email: true } },
-        bids: {
-          include: {
-            center: { select: { id: true, name: true, email: true, address: true } },
-          },
-        },
-      };
-    } else if (user.role === Role.RECOLECTOR) {
-      if (query.status) {
-        where = {
-          status: query.status,
-          ...(query.status === RequestStatus.PENDING
-            ? { assignedCenterId: { not: null }, collectorId: null }
-            : { collectorId: user.id }),
-        };
-      } else {
-        where = {
-          OR: [
-            {
-              status: RequestStatus.PENDING,
-              assignedCenterId: { not: null },
-              collectorId: null,
-            },
-            {
-              collectorId: user.id,
-              status: {
-                in: [
-                  RequestStatus.ACCEPTED,
-                  RequestStatus.EN_ROUTE,
-                  RequestStatus.ARRIVED,
-                  RequestStatus.AUCTION_ASSIGNED,
-                ],
-              },
-            },
-          ],
-        };
-      }
-      include = {
-        household: { select: { id: true, email: true, name: true, address: true } },
-        assignedCenter: { select: { id: true, name: true, email: true, address: true } },
-      };
-    } else if (user.role === Role.ADMIN) {
-      where = {};
-      include = {
-        household: { select: { id: true, email: true, name: true } },
-        assignedCenter: { select: { id: true, name: true, email: true } },
-        collector: { select: { id: true, email: true, name: true } },
-        bids: true,
-      };
-    } else {
-      throw new ForbiddenException('Rol no autorizado para listar solicitudes');
-    }
-
-    const [total, requests] = await Promise.all([
-      readPrisma.collectionRequest.count({ where }),
-      readPrisma.collectionRequest.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { [sanitizedSortBy]: sortOrder },
-        include,
-      }),
-    ]);
-
-    const sanitized = requests.map((r) =>
-      user.role === Role.HOGAR ? r : this.stripPin(r),
-    );
-    return new PaginatedResultDto(sanitized, total, page, limit);
-  }
-
-  /**
-   * GET /collection-requests/available (Rol: RECOLECTOR)
-   * Radar GPS avanzado resuelto al 100% en PostgreSQL mediante PostGIS (ST_DWithin, ST_Distance)
-   * e índice espacial GiST, con proyección segura (sin PIN) y verificación de lotes activos vía SQL.
-   */
-  async findAvailable(collectorId: string, query: AvailableCollectionsQueryDto) {
-    const lat = query.lat;
-    const lng = query.lng;
-    const radiusKm = query.radiusKm ?? 5;
-    const radiusMeters = radiusKm * 1000;
-    const page = (query as any).page ?? 1;
-    const limit = (query as any).limit ?? 15;
-
-    const centerFilter = query.centerId
-      ? Prisma.sql`AND cr."assignedCenterId" = ${query.centerId}::uuid`
-      : Prisma.empty;
-
-    const activeBatchesFilter = query.onlyActiveBatches
-      ? Prisma.sql`
-        AND EXISTS (
-          SELECT 1 FROM batches b
-          WHERE b."collectorId" = ${collectorId}::uuid
-            AND b.status = 'OPEN'
-            AND b."destinationCenterId" = cr."assignedCenterId"
-        )
-      `
-      : Prisma.empty;
-
-    const rawRows = await this.prisma.$queryRaw<any[]>`
-      SELECT 
-        cr.id,
-        cr.status,
-        cr."assignmentMode",
-        cr."itemsEstimated",
-        cr."actualWeights",
-        cr."photoUrl",
-        cr.description,
-        cr.latitude,
-        cr.longitude,
-        cr."householdId",
-        cr."collectorId",
-        cr."assignedCenterId",
-        cr."agreedRates",
-        cr."escrowLocked",
-        cr."batchId",
-        cr."createdAt",
-        cr."updatedAt",
-        ROUND(
-          6371000 * 2 * ASIN(SQRT(
-            POWER(SIN(RADIANS(cr.latitude - ${lat}) / 2), 2) +
-            COS(RADIANS(${lat})) * COS(RADIANS(cr.latitude)) *
-            POWER(SIN(RADIANS(cr.longitude - ${lng}) / 2), 2)
-          ))
-        )::int AS "distanceMeters",
-        ROUND(
-          (6371 * 2 * ASIN(SQRT(
-            POWER(SIN(RADIANS(cr.latitude - ${lat}) / 2), 2) +
-            COS(RADIANS(${lat})) * COS(RADIANS(cr.latitude)) *
-            POWER(SIN(RADIANS(cr.longitude - ${lng}) / 2), 2)
-          )))::numeric,
-          2
-        )::float AS "distanceKm",
-        jsonb_build_object(
-          'id', h.id,
-          'name', h.name,
-          'address', h.address,
-          'phone', h.phone
-        ) AS household,
-        CASE 
-          WHEN ac.id IS NOT NULL THEN
-            jsonb_build_object(
-              'id', ac.id,
-              'name', ac.name,
-              'email', ac.email,
-              'address', ac.address,
-              'phone', ac.phone
-            )
-          ELSE NULL
-        END AS "assignedCenter",
-        COALESCE(
-          (
-            SELECT jsonb_agg(
-              jsonb_build_object(
-                'id', b.id,
-                'requestId', b."requestId",
-                'centerId', b."centerId",
-                'proposedRates', b."proposedRates",
-                'totalEstimatedPenn', b."totalEstimatedPenn",
-                'totalEstimatedEco', b."totalEstimatedEco",
-                'status', b.status,
-                'center', jsonb_build_object(
-                  'id', bc.id,
-                  'name', bc.name,
-                  'email', bc.email,
-                  'address', bc.address
-                )
-              )
-            )
-            FROM acopio_bids b
-            JOIN users bc ON bc.id = b."centerId"
-            WHERE b."requestId" = cr.id
-          ),
-          '[]'::jsonb
-        ) AS bids
-      FROM collection_requests cr
-      JOIN users h ON h.id = cr."householdId"
-      LEFT JOIN users ac ON ac.id = cr."assignedCenterId"
-      WHERE cr.status = 'PENDING'
-        AND cr."assignedCenterId" IS NOT NULL
-        AND cr."collectorId" IS NULL
-        AND (
-          6371000 * 2 * ASIN(SQRT(
-            POWER(SIN(RADIANS(cr.latitude - ${lat}) / 2), 2) +
-            COS(RADIANS(${lat})) * COS(RADIANS(cr.latitude)) *
-            POWER(SIN(RADIANS(cr.longitude - ${lng}) / 2), 2)
-          ))
-        ) <= ${radiusMeters}
-        ${centerFilter}
-        ${activeBatchesFilter}
-      ORDER BY "distanceMeters" ASC;
-    `;
-
-    const total = rawRows.length;
-    const pagedRows = rawRows.slice((page - 1) * limit, page * limit);
-    return new PaginatedResultDto(pagedRows, total, page, limit);
-  }
-
-  /**
-   * Quita el PIN de verificación de una solicitud para proteger privacidad
-   */
-  private stripPin<T extends Record<string, any>>(row: T): T {
-    if (!row || typeof row !== 'object') return row;
-    const clone: any = { ...row };
-    delete clone.verificationPin;
-    return clone;
-  }
-
-  /**
-   * Obtener detalle de una solicitud por ID
-   */
-  async findOne(id: string, userId: string, role: string) {
-    const collectionRequest = await this.prisma.collectionRequest.findUnique({
-      where: { id },
-      include: {
-        household: { select: { id: true, email: true, name: true, address: true, phone: true } },
-        collector: { select: { id: true, email: true, name: true, phone: true, profilePhotoUrl: true, reputationScore: true } },
-        assignedCenter: { select: { id: true, name: true, email: true, address: true } },
-        bids: {
-          include: {
-            center: { select: { id: true, name: true, email: true, address: true } },
-          },
-        },
-        batch: true,
-      },
-    });
-
-    if (!collectionRequest) {
-      throw new NotFoundException('Solicitud de recolección no encontrada');
-    }
-
-    if (role === Role.HOGAR && collectionRequest.householdId !== userId) {
-      throw new ForbiddenException('No tienes permisos para ver esta solicitud');
-    }
-
-    if (this.redisService) {
-      try {
-        const cachedLoc = await this.redisService.get(`collector:loc:${id}`).catch(() => null);
-        if (cachedLoc) {
-          (collectionRequest as any).collectorLocation = JSON.parse(cachedLoc);
-        }
-      } catch (_) {
-        // Ignora errores transitorios de lectura de ubicación en caché
-      }
-    }
-
-    if (role !== Role.HOGAR) {
-      return this.stripPin(collectionRequest);
-    }
-    return collectionRequest;
-  }
-
-  /**
-   * Actualizar el estado de una solicitud (Aceptar con Escrow o Cancelar)
-   */
   async updateStatus(
     id: string,
     userId: string,
     role: string,
     dto: UpdateCollectionStatusDto,
   ) {
-    const collectionRequest = await this.prisma.collectionRequest.findUnique({
-      where: { id },
-    });
-
-    if (!collectionRequest) {
-      throw new NotFoundException('Solicitud de recolección no encontrada');
-    }
-
-    if (role === Role.RECOLECTOR) {
-      if (dto.status === RequestStatus.ACCEPTED) {
-        if (
-          collectionRequest.status !== RequestStatus.PENDING &&
-          collectionRequest.status !== RequestStatus.AUCTION_ASSIGNED
-        ) {
-          throw new ConflictException(
-            'Esta solicitud ya no está disponible para recolección',
-          );
-        }
-
-        if (!collectionRequest.assignedCenterId) {
-          throw new BadRequestException(
-            'La solicitud aún no tiene un Centro de Acopio asignado con tarifario.',
-          );
-        }
-
-        // Verificar que el recolector tenga KYC aprobado antes de salir a ruta
-        const collector = await this.prisma.user.findUnique({
-          where: { id: userId },
-        });
-
-        if (collector?.kycStatus !== 'APPROVED') {
-          throw new ForbiddenException(
-            'Tu cuenta de recolector debe estar verificada administrativamente (KYC aprobado) antes de poder aceptar recolecciones en campo.',
-          );
-        }
-
-        let requiredEscrow = 0;
-        if (!collectionRequest.isDonation) {
-          // Calcular garantía requerida en EcoTokens: 50% del valor estimado total (40% Hogar + 10% Livora)
-          const agreedRates = (collectionRequest.agreedRates as Record<string, number>) || {};
-          const items = (collectionRequest.itemsEstimated as Record<string, number>) || {};
-          let totalEstimatedPenn = 0;
-
-          for (const [mat, rawWeight] of Object.entries(items)) {
-            const weight = typeof rawWeight === 'number' ? rawWeight : parseFloat(String(rawWeight)) || 0;
-            const rate = agreedRates[mat] || agreedRates[mat.toUpperCase()] || 1.0;
-            totalEstimatedPenn += weight * rate;
-          }
-
-          requiredEscrow = parseFloat((totalEstimatedPenn * 0.70).toFixed(2));
-
-          // Consultar saldo disponible del recolector
-          let totalBalance = 0;
-
-          if (collector?.walletAddress) {
-            try {
-              const balStr = await this.blockchainService.getBalance(collector.walletAddress);
-              totalBalance = parseFloat(balStr) || 0;
-            } catch {
-              totalBalance = 0;
-            }
-          }
-
-          // Si no hay saldo on-chain, sumar depósitos Izipay completados como fallback
-          if (totalBalance === 0) {
-            const payments = await this.prisma.paymentTransaction.findMany({
-              where: { userId, status: 'COMPLETED' },
-              select: { tokenAmount: true },
-            });
-            totalBalance = payments.reduce((sum, p) => sum + Number(p.tokenAmount), 0);
-          }
-
-          // Sumar garantías activas actualmente retenidas
-          const activeEscrows = await this.prisma.collectionRequest.aggregate({
-            where: {
-              collectorId: userId,
-              status: RequestStatus.ACCEPTED,
-            },
-            _sum: { escrowLocked: true },
-          });
-
-          const currentLocked = Number(activeEscrows._sum.escrowLocked || 0);
-          const freeBalance = Math.max(0, totalBalance - currentLocked);
-
-          if (freeBalance < requiredEscrow) {
-            throw new BadRequestException(
-              `Saldo insuficiente en LIVOs. Se requiere una garantía de ${requiredEscrow.toFixed(2)} LIVO (40% Hogar + 10% Livora), pero tu saldo libre es de ${freeBalance.toFixed(2)} LIVO. Por favor recarga tu saldo vía Izipay.`,
-            );
-          }
-        }
-
-        // Buscar o crear sub-lote OPEN para la combinación (recolector + centro de acopio comprador)
-        let openBatch: any = null;
-        if (collectionRequest.assignedCenterId) {
-          openBatch = await this.prisma.batch.findFirst({
-            where: {
-              collectorId: userId,
-              destinationCenterId: collectionRequest.assignedCenterId,
-              status: BatchStatus.OPEN,
-            },
-          });
-
-          if (!openBatch) {
-            openBatch = await this.prisma.batch.create({
-              data: {
-                collectorId: userId,
-                destinationCenterId: collectionRequest.assignedCenterId,
-                status: BatchStatus.OPEN,
-              },
-            });
-          }
-        }
-
-        const batchId = openBatch ? openBatch.id : null;
-        const rowsAffected = await this.prisma.$executeRaw`
-          UPDATE collection_requests
-          SET status = 'ACCEPTED'::"RequestStatus",
-              "collectorId" = ${userId}::uuid,
-              "escrowLocked" = ${requiredEscrow}::numeric,
-              "batchId" = ${batchId}::uuid,
-              "updatedAt" = NOW()
-          WHERE id = ${id}::uuid
-            AND status IN ('PENDING'::"RequestStatus", 'AUCTION_ASSIGNED'::"RequestStatus")
-        `;
-
-        if (rowsAffected === 0) {
-          throw new ConflictException(
-            'Esta solicitud ya no está disponible para recolección',
-          );
-        }
-
-        const updated = await this.prisma.collectionRequest.findUnique({
-          where: { id },
-          include: {
-            household: { select: { id: true, email: true, name: true } },
-            assignedCenter: { select: { id: true, name: true, email: true } },
-            batch: true,
-          },
-        });
-
-        this.notificationsService
-          .sendPushNotification(
-            collectionRequest.householdId,
-            'Tu solicitud ha sido aceptada',
-            'Un recolector está en camino a tu ubicación para recoger los materiales.',
-            { requestId: id },
-          )
-          .catch(() => {});
-
-        if (updated) {
-          this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
-        }
-
-        return updated;
-      }
-
-      throw new BadRequestException(
-        'Un recolector únicamente puede cambiar el estado a ACCEPTED',
-      );
-    }
-
-    if (role === Role.HOGAR) {
-      if (collectionRequest.householdId !== userId) {
-        throw new ForbiddenException(
-          'No tienes permisos para actualizar una solicitud de otro hogar',
-        );
-      }
-
-      if (dto.status === RequestStatus.CANCELLED) {
-        if (
-          collectionRequest.status === RequestStatus.COMPLETED ||
-          collectionRequest.status === RequestStatus.CANCELLED
-        ) {
-          throw new BadRequestException(
-            'No se puede cancelar una solicitud finalizada o previamente cancelada',
-          );
-        }
-
-        const cancelled = await this.prisma.collectionRequest.update({
-          where: { id },
-          data: {
-            status: RequestStatus.CANCELLED,
-            escrowLocked: 0,
-          },
-          include: {
-            household: { select: { id: true, email: true, name: true, address: true } },
-            collector: { select: { id: true, name: true, phone: true } },
-            assignedCenter: { select: { id: true, name: true, email: true } },
-          },
-        });
-        this.websocketsService.emitCollectionUpdated(this.stripPin(cancelled));
-        return this.stripPin(cancelled);
-      }
-
-      throw new BadRequestException(
-        'Un hogar únicamente puede cambiar el estado a CANCELLED',
-      );
-    }
-
-    throw new ForbiddenException('Rol no autorizado para actualizar el estado');
+    return this.lifecycle.updateStatus(id, userId, role, dto);
   }
 
-  /**
-   * Verificar entrega física con PIN de 4 dígitos y liquidar tokens con pesos reales (Rol: RECOLECTOR)
-   */
-  async verifyPin(id: string, collectorId: string, dto: VerifyPinDto) {
-    const lockKey = `lock:verify:pin:${id}`;
-    if (this.redisService) {
-      const acquired = await this.redisService.setNX(lockKey, '1', 30);
-      if (!acquired) {
-        throw new ConflictException(
-          'Verificación en proceso, por favor espere',
-        );
-      }
-    }
-
-    try {
-      const collectionRequest = await this.prisma.collectionRequest.findUnique({
-        where: { id },
-        include: {
-          household: true,
-          collector: true,
-        },
-      });
-
-      if (!collectionRequest) {
-        throw new NotFoundException('Solicitud de recolección no encontrada');
-      }
-
-      if (
-        collectionRequest.status !== RequestStatus.ACCEPTED &&
-        collectionRequest.status !== RequestStatus.EN_ROUTE &&
-        collectionRequest.status !== RequestStatus.ARRIVED
-      ) {
-        throw new BadRequestException(
-          'La solicitud debe estar en estado ACCEPTED, EN_ROUTE o ARRIVED para verificar el PIN',
-        );
-      }
-
-      if (collectionRequest.collectorId !== collectorId) {
-        throw new ForbiddenException(
-          'Únicamente el recolector que aceptó la solicitud puede verificar el PIN',
-        );
-      }
-
-      // Protección contra ataques de fuerza bruta en PIN de 4 dígitos (máx 5 intentos en 15 min)
-      const attemptsKey = `attempts:pin:${id}`;
-      if (this.redisService) {
-        const attempts = await this.redisService.get(attemptsKey);
-        if (attempts && parseInt(attempts, 10) >= 5) {
-          throw new ForbiddenException(
-            'Demasiados intentos fallidos de PIN. Esta verificación ha sido bloqueada temporalmente por seguridad (15 minutos).',
-          );
-        }
-      }
-
-      let isPinValid = collectionRequest.verificationPin === dto.pin;
-      if (this.redisService) {
-        const cachedPin = await this.redisService.get(`pin:collection:${id}`);
-        if (cachedPin) {
-          isPinValid = cachedPin === dto.pin;
-        }
-      }
-
-      if (!isPinValid) {
-        if (this.redisService) {
-          const rawAttempts = await this.redisService.get(attemptsKey);
-          const count = (rawAttempts ? parseInt(rawAttempts, 10) : 0) + 1;
-          await this.redisService.set(attemptsKey, count.toString(), 900);
-          const remaining = Math.max(0, 5 - count);
-          if (count >= 5) {
-            throw new ForbiddenException(
-              'Límite de 5 intentos fallidos de PIN alcanzado. Verificación bloqueada temporalmente por 15 minutos.',
-            );
-          }
-          throw new BadRequestException(
-            `PIN de verificación incorrecto. Te quedan ${remaining} intento(s) antes del bloqueo.`,
-          );
-        }
-        throw new BadRequestException('PIN de verificación incorrecto o expirado');
-      }
-
-      // Limpiar PIN y contador de intentos fallidos en Redis tras verificación exitosa
-      if (this.redisService) {
-        await Promise.all([
-          this.redisService.del(`pin:collection:${id}`).catch(() => {}),
-          this.redisService.del(attemptsKey).catch(() => {}),
-        ]);
-      }
-
-      // Validar pesos reales si fueron provistos
-      if (dto.actualWeights && typeof dto.actualWeights === 'object') {
-        for (const [mat, weight] of Object.entries(dto.actualWeights)) {
-          const w = Number(weight);
-          if (isNaN(w) || w < 0.5) {
-            throw new BadRequestException(`El peso real ajustado para ${mat} debe ser de al menos 0.5 kg`);
-          }
-          const parts = w.toString().split('.');
-          if (parts.length > 1 && parts[1].length > 2) {
-            throw new BadRequestException(`El peso real de ${mat} no puede tener más de 2 decimales`);
-          }
-        }
-      }
-
-      // Calcular distribución según peso real medido en domicilio
-      const actualWeights =
-        dto.actualWeights && Object.keys(dto.actualWeights).length > 0
-          ? dto.actualWeights
-          : (collectionRequest.itemsEstimated as Record<string, number>) || {};
-
-      const agreedRates = (collectionRequest.agreedRates as Record<string, number>) || {};
-      let totalActualValue = 0;
-
-      for (const [mat, rawWeight] of Object.entries(actualWeights)) {
-        const weight = typeof rawWeight === 'number' ? rawWeight : parseFloat(String(rawWeight)) || 0;
-        const rate = agreedRates[mat] || agreedRates[mat.toUpperCase()] || 1.0;
-        totalActualValue += weight * rate;
-      }
-
-      const isDonation = collectionRequest.isDonation;
-      const hogarAmount = isDonation ? 0.00 : parseFloat((totalActualValue * 0.25).toFixed(2));
-      const treasuryAmount = parseFloat((totalActualValue * 0.05).toFixed(2));
-
-      const householdUser = collectionRequest.household;
-      const collectorUser = collectionRequest.collector;
-      const treasuryWallet =
-        (this.configService && this.configService.get<string>('LIVORA_TREASURY_WALLET')) ||
-        this.blockchainService.getWorkerAddress();
-
-      const encryptionKey =
-        (this.configService &&
-          (this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
-            this.configService.get<string>('ENCRYPTION_KEY'))) ||
-        (process.env.NODE_ENV === 'test'
-          ? 'test_isolated_wallet_encryption_key_32c'
-          : '');
-      if (!encryptionKey && process.env.NODE_ENV !== 'test') {
-        throw new Error(
-          'CRITICAL SECURITY ERROR: WALLET_ENCRYPTION_KEY es obligatoria para transferencias delegadas.',
-        );
-      }
-
-      let txHash: string | null = null;
-
-      // Acreditar 40% al Hogar en LIVOs (Stellar Soroban) solo si no es donación
-      if (!isDonation && householdUser?.walletAddress && hogarAmount > 0) {
-        let creditedOnChain = false;
-        const collectorVault = collectorUser
-          ? await this.prisma.walletVault.findUnique({
-              where: { userId: collectorUser.id },
-            })
-          : null;
-
-        if (collectorVault?.encryptedPrivateKey && encryptionKey) {
-          try {
-            const privKey = CryptoUtil.decrypt(collectorVault.encryptedPrivateKey, encryptionKey);
-            const keypair = Keypair.fromSecret(privKey);
-            const balStr = await this.blockchainService.getBalance(keypair.publicKey());
-            if (parseFloat(balStr) >= hogarAmount) {
-              const transferRes = await this.blockchainService.executeSubsidizedTransfer(
-                privKey,
-                householdUser.walletAddress,
-                hogarAmount,
-              );
-              txHash = transferRes?.hash || null;
-              creditedOnChain = true;
-            }
-          } catch (err: any) {
-            this.logger.warn(`Transferencia on-chain desde recolector omitida: ${err.message}. Acreditando vía Minter oficial.`);
-          }
-        }
-
-        // Si el recolector no tenía fondos on-chain o su cuenta no está fondeada en Stellar:
-        // El Minter oficial de Livora (Worker Keypair) acuña los LIVOs al Hogar
-        if (!creditedOnChain) {
-          try {
-            this.logger.log(`Acuñando ${hogarAmount} LIVOs hacia Hogar ${householdUser.walletAddress} vía Minter de Livora`);
-            const mintRes = await this.blockchainService.mintEcoTokens(
-              householdUser.walletAddress,
-              hogarAmount,
-            );
-            txHash = mintRes?.hash || null;
-            creditedOnChain = true;
-          } catch (err: any) {
-            this.logger.error(`Error al acuñar LIVOs para el Hogar: ${err.message}`);
-          }
-        }
-      }
-
-      // Transferir comisión a Tesorería de Livora en LIVOs si recolector tiene fondos on-chain
-      const collectorVaultForTreasury = collectorUser
-        ? await this.prisma.walletVault.findUnique({
-            where: { userId: collectorUser.id },
-          })
-        : null;
-
-      if (
-        collectorVaultForTreasury?.encryptedPrivateKey &&
-        treasuryWallet &&
-        treasuryAmount > 0 &&
-        treasuryWallet !== collectorUser?.walletAddress &&
-        encryptionKey
-      ) {
-        try {
-          const privKey = CryptoUtil.decrypt(collectorVaultForTreasury.encryptedPrivateKey, encryptionKey);
-          const keypair = Keypair.fromSecret(privKey);
-          const balStr = await this.blockchainService.getBalance(keypair.publicKey());
-          if (parseFloat(balStr) >= treasuryAmount) {
-            await this.blockchainService.executeSubsidizedTransfer(
-              privKey,
-              treasuryWallet,
-              treasuryAmount,
-            );
-          }
-        } catch (err: any) {
-          this.logger.warn(`Transferencia a Tesorería omitida: ${err.message}`);
-        }
-      }
-
-      // Obtener o crear sub-lote abierto (OPEN) para el recolector y el centro de acopio específico
-      let targetBatchId = collectionRequest.batchId;
-      if (!targetBatchId) {
-        let openBatch = await this.prisma.batch.findFirst({
-          where: {
-            collectorId,
-            destinationCenterId: collectionRequest.assignedCenterId,
-            status: BatchStatus.OPEN,
-          },
-        });
-
-        if (!openBatch && collectionRequest.assignedCenterId) {
-          openBatch = await this.prisma.batch.create({
-            data: {
-              collectorId,
-              destinationCenterId: collectionRequest.assignedCenterId,
-              status: BatchStatus.OPEN,
-            },
-          });
-        }
-        targetBatchId = openBatch ? openBatch.id : null;
-      }
-
-      // Actualización atómica condicional anti-race condition
-      const updatedCount = await this.prisma.$executeRaw`
-        UPDATE collection_requests
-        SET status = 'COMPLETED'::"RequestStatus",
-            "batchId" = ${targetBatchId}::uuid,
-            "actualWeights" = ${JSON.stringify(actualWeights)}::jsonb,
-            "escrowLocked" = 0,
-            "householdRewardEarned" = ${hogarAmount}::numeric,
-            "txHash" = ${txHash},
-            "updatedAt" = NOW()
-        WHERE id = ${id}::uuid AND status IN ('ACCEPTED'::"RequestStatus", 'EN_ROUTE'::"RequestStatus", 'ARRIVED'::"RequestStatus")
-      `;
-
-      if (updatedCount === 0) {
-        throw new BadRequestException(
-          'La solicitud ya fue procesada o no está en estado ACCEPTED, EN_ROUTE o ARRIVED',
-        );
-      }
-
-      const completed = await this.prisma.collectionRequest.findUnique({
-        where: { id },
-        include: {
-          household: { select: { id: true, email: true, name: true } },
-          assignedCenter: { select: { id: true, name: true, email: true } },
-        },
-      });
-
-      // Purgar telemetría y metadatos de ruta activa en Redis
-      if (this.redisService) {
-        await Promise.all([
-          this.redisService.del(`collection:active:${id}`).catch(() => {}),
-          this.redisService.del(`collector:loc:${id}`).catch(() => {}),
-          this.redisService.del(`route:collection:${id}`).catch(() => {}),
-        ]);
-      }
-
-      if (isDonation) {
-        this.notificationsService
-          .sendPushNotification(
-            collectionRequest.householdId,
-            'Recolección completada con éxito',
-            `¡Muchas gracias por tu donación ecológica! Tu impacto ambiental ha sido registrado positivamente en Livora.`,
-            { requestId: id },
-          )
-          .catch(() => {});
-      } else {
-        this.notificationsService
-          .sendPushNotification(
-            collectionRequest.householdId,
-            'Recolección completada con éxito',
-            `Se han acreditado ${hogarAmount.toFixed(2)} LIVOs a tu billetera por tu material reciclado.`,
-            { requestId: id },
-          )
-          .catch(() => {});
-      }
-
-      if (completed) {
-        this.websocketsService.emitCollectionUpdated(this.stripPin(completed));
-      }
-
-      return completed!;
-    } finally {
-      if (this.redisService) {
-        await this.redisService.del(lockKey);
-      }
-    }
-  }
-
-  /**
-   * Permite a un recolector liberar/abandonar una solicitud de recolección aceptada
-   * por contingencia operativa (avería vehicular, emergencia) y retornarla a PENDING
-   * para que otro recolector pueda atenderla de inmediato.
-   */
   async abandonCollectionRequest(
     id: string,
-    collectorUserId: string,
+    collectorId: string,
     reason?: string,
   ) {
-    const request = await this.prisma.collectionRequest.findUnique({
-      where: { id },
-    });
-
-    if (!request) {
-      throw new NotFoundException('Solicitud de recolección no encontrada');
-    }
-
-    if (request.collectorId !== collectorUserId) {
-      throw new ForbiddenException(
-        'Solo el recolector asignado puede liberar o reportar abandono de esta solicitud',
-      );
-    }
-
-    if (request.status !== RequestStatus.ACCEPTED) {
-      throw new BadRequestException(
-        `Solo solicitudes en estado ACCEPTED pueden ser abandonadas (Estado actual: ${request.status})`,
-      );
-    }
-
-    // Transacción atómica para retornar a PENDING y resetear asignaciones y escrow
-    const updatedRequest = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.collectionRequest.update({
-        where: { id },
-        data: {
-          status: RequestStatus.PENDING,
-          collectorId: null,
-          batchId: null,
-          escrowLocked: 0,
-        },
-        include: {
-          household: { select: { id: true, email: true, name: true } },
-          assignedCenter: { select: { id: true, name: true, email: true } },
-          bids: true,
-        },
-      });
-
-      return updated;
-    });
-
-    const contingencyMsg = reason
-      ? `El recolector reportó una contingencia (${reason}). Tu solicitud vuelve a estar disponible para que otro recolector la tome de inmediato.`
-      : 'El recolector asignado reportó una contingencia operativa. Tu solicitud vuelve a estar disponible para recolección.';
-
-    this.notificationsService
-      .sendPushNotification(
-        request.householdId,
-        'Solicitud de recolección reactivada',
-        contingencyMsg,
-        { requestId: id, ...(reason ? { reason } : {}) },
-      )
-      .catch(() => {});
-
-    this.websocketsService.emitCollectionCreated(this.stripPin(updatedRequest));
-    this.websocketsService.emitCollectionUpdated(this.stripPin(updatedRequest));
-
-    return this.stripPin(updatedRequest);
+    return this.lifecycle.abandonCollectionRequest(id, collectorId, reason);
   }
 
-  /**
-   * POST /collection-requests/:id/rate (Rol: HOGAR)
-   * Calificar servicio completado (1 a 5 estrellas + feedback opcional).
-   * Recalcula dinámicamente el promedio móvil continuo del recolector:
-   * nueva_reputacion = ((reputacion_actual * total_calificaciones) + nuevo_rating) / (total_calificaciones + 1)
-   * y genera alerta administrativa / QA si score < 3.0 con al menos 5 calificaciones.
-   */
   async rateCollectionRequest(
     householdUserId: string,
     id: string,
     dto: RateCollectionDto,
   ) {
-    const request = await this.prisma.collectionRequest.findUnique({
-      where: { id },
-    });
-
-    if (!request) {
-      throw new NotFoundException('Solicitud de recolección no encontrada');
-    }
-
-    if (request.householdId !== householdUserId) {
-      throw new ForbiddenException(
-        'Solo el hogar creador de la solicitud puede calificar este servicio',
-      );
-    }
-
-    if (request.status !== RequestStatus.COMPLETED) {
-      throw new BadRequestException(
-        `Solo se pueden calificar solicitudes en estado COMPLETED (Estado actual: ${request.status})`,
-      );
-    }
-
-    if (request.rating !== null && request.rating !== undefined) {
-      throw new ConflictException('Esta solicitud ya cuenta con una calificación registrada');
-    }
-
-    // Actualizar solicitud
-    const updated = await this.prisma.collectionRequest.update({
-      where: { id },
-      data: {
-        rating: dto.rating,
-        feedback: dto.feedback,
-      },
-    });
-
-    let newReputation = 5.0;
-    let requiresQa = false;
-
-    // Recalcular promedio continuo del recolector
-    if (request.collectorId) {
-      const collector = await this.prisma.user.findUnique({
-        where: { id: request.collectorId },
-        select: { id: true, reputationScore: true, totalRatings: true, requiresQaReview: true },
-      });
-
-      if (collector) {
-        const currentRep = collector.reputationScore ?? 5.0;
-        const currentTotal = collector.totalRatings ?? 0;
-        const newTotalRatings = currentTotal + 1;
-        newReputation = Number(
-          (((currentRep * currentTotal) + dto.rating) / newTotalRatings).toFixed(2),
-        );
-        requiresQa = newReputation < 3.0 && newTotalRatings >= 5;
-
-        await this.prisma.user.update({
-          where: { id: collector.id },
-          data: {
-            reputationScore: newReputation,
-            totalRatings: newTotalRatings,
-            requiresQaReview: requiresQa ? true : collector.requiresQaReview,
-          },
-        });
-
-        if (requiresQa) {
-          this.logger.warn(
-            `[QA_ALERT] El recolector ${collector.id} tiene reputación de ${newReputation} con ${newTotalRatings} calificaciones. Requiere revisión de QA.`,
-          );
-        }
-      }
-    }
-
-    return {
-      message: 'Calificación registrada exitosamente',
-      requestId: updated.id,
-      rating: updated.rating,
-      feedback: updated.feedback,
-      collectorReputationScore: newReputation,
-      requiresQaReview: requiresQa,
-    };
+    return this.lifecycle.rateCollectionRequest(householdUserId, id, dto);
   }
 
-  /**
-   * PATCH /collection-requests/:id (Rol: HOGAR)
-   * Edición parcial de materiales y descripción únicamente en estado PENDING.
-   * Lanza 409 Conflict si la orden ya fue aceptada por un recolector o no está en PENDING.
-   */
   async editCollectionRequest(
-    householdUserId: string,
     id: string,
+    userId: string,
     dto: EditCollectionRequestDto,
   ) {
-    const request = await this.prisma.collectionRequest.findUnique({
-      where: { id },
-    });
-
-    if (!request) {
-      throw new NotFoundException('Solicitud de recolección no encontrada');
-    }
-
-    if (request.householdId !== householdUserId) {
-      throw new ForbiddenException('No tienes permisos para modificar esta solicitud');
-    }
-
-    if (request.status !== RequestStatus.PENDING) {
-      throw new ConflictException('Tu solicitud ya está en curso y no puede ser modificada');
-    }
-
-    const itemsToUpdate = dto.itemsEstimated
-      ? JSON.stringify(dto.itemsEstimated)
-      : JSON.stringify(request.itemsEstimated);
-    const descToUpdate = dto.description !== undefined ? dto.description : request.description;
-
-    const rowsAffected = await this.prisma.$executeRaw`
-      UPDATE collection_requests
-      SET "itemsEstimated" = ${itemsToUpdate}::jsonb,
-          "description" = ${descToUpdate},
-          "updatedAt" = NOW()
-      WHERE id = ${id}::uuid 
-        AND status = 'PENDING'::"RequestStatus" 
-        AND "householdId" = ${householdUserId}::uuid
-    `;
-
-    if (rowsAffected === 0) {
-      throw new ConflictException('Tu solicitud ya está en curso y no puede ser modificada');
-    }
-
-    const updated = await this.prisma.collectionRequest.findUnique({
-      where: { id },
-      include: {
-        household: { select: { id: true, email: true, name: true, address: true } },
-        assignedCenter: { select: { id: true, name: true, email: true, address: true } },
-      },
-    });
-
-    if (updated) {
-      this.websocketsService.emitCollectionCreated(this.stripPin(updated));
-      this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
-    }
-
-    return updated;
+    return this.lifecycle.editCollectionRequest(id, userId, dto);
   }
 
-  /**
-   * POST /collection-requests/:id/start-route (Rol: RECOLECTOR)
-   * Inicia el trayecto vehicular hacia el domicilio del hogar (ACCEPTED -> EN_ROUTE).
-   */
-  async startRoute(id: string, collectorId: string) {
-    const request = await this.prisma.collectionRequest.findUnique({
-      where: { id },
-      include: {
-        household: { select: { id: true, email: true, name: true } },
-        collector: { select: { id: true, name: true, phone: true, profilePhotoUrl: true } },
-      },
-    });
-
-    if (!request) {
-      throw new NotFoundException('Solicitud de recolección no encontrada');
-    }
-
-    if (request.collectorId !== collectorId) {
-      throw new ForbiddenException('Solo el recolector asignado puede iniciar la ruta');
-    }
-
-    if (request.status === RequestStatus.EN_ROUTE) {
-      // Idempotente: la ruta ya fue iniciada previamente
-      return this.stripPin(request);
-    }
-
-    if (request.status !== RequestStatus.ACCEPTED) {
-      throw new BadRequestException(
-        `Solo solicitudes en estado ACCEPTED pueden iniciar ruta (Estado actual: ${request.status})`,
-      );
-    }
-
-    const updated = await this.prisma.collectionRequest.update({
-      where: { id },
-      data: {
-        status: RequestStatus.EN_ROUTE,
-        enRouteAt: new Date(),
-      },
-      include: {
-        household: { select: { id: true, email: true, name: true, address: true } },
-        collector: { select: { id: true, name: true, phone: true, profilePhotoUrl: true } },
-        assignedCenter: { select: { id: true, name: true, email: true, address: true } },
-      },
-    });
-
-    // Cachear metadatos en Redis para que los pings de telemetría tengan 0 costo en Postgres
-    if (this.redisService) {
-      const kyc = await this.prisma.kycApplication.findFirst({
-        where: { userId: updated.collectorId! },
-        select: { transportType: true },
-        orderBy: { createdAt: 'desc' },
-      });
-      const meta = {
-        id: updated.id,
-        collectorId: updated.collectorId,
-        householdId: updated.householdId,
-        latitude: updated.latitude,
-        longitude: updated.longitude,
-        transportType: kyc?.transportType || 'MOTO_CARGA',
-      };
-      await this.redisService
-        .set(`collection:active:${id}`, JSON.stringify(meta), 3600)
-        .catch(() => {});
-    }
-
-    this.notificationsService
-      .sendPushNotification(
-        request.householdId,
-        'Recolector en camino',
-        `${request.collector?.name || 'Tu recolector'} ha iniciado el viaje hacia tu dirección. Ten listos tus materiales reciclables.`,
-        { requestId: id, status: 'EN_ROUTE' },
-      )
-      .catch(() => {});
-
-    this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
-    return this.stripPin(updated);
-  }
-
-  /**
-   * POST /collection-requests/:id/reach-destination (Rol: RECOLECTOR)
-   * Marca llegada al domicilio e inicia ventana de espera de 10 min (EN_ROUTE -> ARRIVED).
-   */
-  async reachDestination(id: string, collectorId: string) {
-    const request = await this.prisma.collectionRequest.findUnique({
-      where: { id },
-      include: {
-        household: { select: { id: true, email: true, name: true } },
-        collector: { select: { id: true, name: true } },
-      },
-    });
-
-    if (!request) {
-      throw new NotFoundException('Solicitud de recolección no encontrada');
-    }
-
-    if (request.collectorId !== collectorId) {
-      throw new ForbiddenException('Solo el recolector asignado puede marcar su llegada');
-    }
-
-    if (request.status !== RequestStatus.EN_ROUTE) {
-      if (request.status === RequestStatus.ARRIVED) {
-        return this.stripPin(request);
-      }
-      throw new BadRequestException(
-        `Solo solicitudes en estado EN_ROUTE pueden marcar llegada (Estado actual: ${request.status})`,
-      );
-    }
-
-    const updated = await this.prisma.collectionRequest.update({
-      where: { id },
-      data: {
-        status: RequestStatus.ARRIVED,
-        arrivedAt: new Date(),
-      },
-      include: {
-        household: { select: { id: true, email: true, name: true, address: true } },
-        collector: { select: { id: true, name: true, phone: true, profilePhotoUrl: true } },
-        assignedCenter: { select: { id: true, name: true, email: true, address: true } },
-      },
-    });
-
-    this.notificationsService
-      .sendPushNotification(
-        request.householdId,
-        'Recolector en puerta',
-        'El recolector ha llegado a tu domicilio. Acércate con tus materiales y tu PIN de 4 dígitos.',
-        {
-          type: 'HOGAR_COLLECTOR_ARRIVED',
-          requestId: id,
-          status: 'ARRIVED',
-          channelId: 'livora_collections_urgent',
-          requiresInAppModal: 'true',
-        },
-      )
-      .catch(() => {});
-
-    // Invalida la telemetría y metadatos en caché para esta solicitud
-    if (this.redisService) {
-      await Promise.all([
-        this.redisService.del(`collection:active:${id}`).catch(() => {}),
-        this.redisService.del(`collector:loc:${id}`).catch(() => {}),
-        this.redisService.del(`route:collection:${id}`).catch(() => {}),
-      ]);
-    }
-
-    // Emite notificación directa en tiempo real al canal privado del Hogar
-    this.websocketsService.emitUserEvent(request.householdId, 'collector:arrived', {
-      requestId: id,
-      status: RequestStatus.ARRIVED,
-      timestamp: Date.now(),
-    });
-
-    this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
-    return this.stripPin(updated);
-  }
-
-  /**
-   * PATCH /collection-requests/:id/location (Rol: RECOLECTOR)
-   * Procesa la telemetría periódica GPS del recolector en ruta hacia el domicilio.
-   * Valida propiedad, estado EN_ROUTE, adopta métricas OSRM y retransmite vía WebSocket.
-   */
-  async updateCollectorLocation(
-    id: string,
-    collectorId: string,
-    dto: CollectorTelemetryDto,
-  ) {
-    let meta: {
-      id: string;
-      collectorId: string;
-      householdId: string;
-      latitude: number;
-      longitude: number;
-      transportType: string;
-    } | null = null;
-
-    if (this.redisService) {
-      const cached = await this.redisService
-        .get(`collection:active:${id}`)
-        .catch(() => null);
-      if (cached) {
-        try {
-          meta = JSON.parse(cached);
-        } catch (_) {
-          // Fallback a consulta en base de datos si el parseo de caché falla
-        }
-      }
-    }
-
-    if (!meta) {
-      const request = await this.prisma.collectionRequest.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          status: true,
-          collectorId: true,
-          householdId: true,
-          latitude: true,
-          longitude: true,
-        },
-      });
-
-      if (!request) {
-        throw new NotFoundException('Solicitud de recolección no encontrada');
-      }
-
-      if (request.collectorId !== collectorId) {
-        throw new ForbiddenException('Solo el recolector asignado puede emitir ubicación');
-      }
-
-      if (request.status !== RequestStatus.EN_ROUTE) {
-        throw new BadRequestException(
-          `Solo solicitudes en estado EN_ROUTE pueden emitir telemetría (Estado actual: ${request.status})`,
-        );
-      }
-
-      const kyc = await this.prisma.kycApplication.findFirst({
-        where: { userId: collectorId },
-        select: { transportType: true },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      meta = {
-        id: request.id,
-        collectorId: request.collectorId!,
-        householdId: request.householdId,
-        latitude: request.latitude,
-        longitude: request.longitude,
-        transportType: kyc?.transportType || 'MOTO_CARGA',
-      };
-
-      if (this.redisService) {
-        await this.redisService
-          .set(`collection:active:${id}`, JSON.stringify(meta), 3600)
-          .catch(() => {});
-      }
-    }
-
-    if (meta.collectorId !== collectorId) {
-      throw new ForbiddenException('Solo el recolector asignado puede emitir ubicación');
-    }
-
-    const { latitude, longitude, heading = 0, speed = 0 } = dto;
-    const distKm = this.calculateHaversineKm(
-      latitude,
-      longitude,
-      meta.latitude,
-      meta.longitude,
-    );
-    const fallbackDistMeters = Math.round(distKm * 1000);
-
-    const distanceRemainingMeters =
-      typeof dto.distanceRemainingMeters === 'number' && dto.distanceRemainingMeters >= 0
-        ? Math.round(dto.distanceRemainingMeters)
-        : fallbackDistMeters;
-
-    const transportType = dto.transportType || meta.transportType || 'MOTO_CARGA';
-    let defaultSpeed = 20;
-    switch (transportType) {
-      case 'A_PIE':
-        defaultSpeed = 4.2;
-        break;
-      case 'TRICICLO':
-        defaultSpeed = 11;
-        break;
-      case 'BICICLETA':
-        defaultSpeed = 15;
-        break;
-      case 'MOTO_CARGA':
-        defaultSpeed = 24;
-        break;
-      case 'CAMIONETA':
-        defaultSpeed = 30;
-        break;
-      default:
-        defaultSpeed = 20;
-    }
-
-    const effectiveSpeedKmh = speed > 3 ? Math.min(speed, defaultSpeed * 1.5) : defaultSpeed;
-    const fallbackEta = Math.max(
-      1,
-      Math.round(((distanceRemainingMeters / 1000) / effectiveSpeedKmh) * 60),
-    );
-
-    const etaMinutes =
-      typeof dto.etaMinutes === 'number' && dto.etaMinutes > 0
-        ? dto.etaMinutes
-        : fallbackEta;
-
-    const socketPayload = {
-      requestId: id,
-      collectorId,
-      transportType,
-      latitude,
-      longitude,
-      heading,
-      speed,
-      distanceRemainingMeters,
-      etaMinutes,
-      timestamp: dto.timestamp || Date.now(),
-    };
-
-    if (this.redisService) {
-      await this.redisService
-        .set(`collector:loc:${id}`, JSON.stringify(socketPayload), 1800)
-        .catch(() => {});
-    }
-
-    // Retransmisión cerrada y segura a la sala privada user:<householdId>
-    this.websocketsService.emitUserEvent(
-      meta.householdId,
-      'collector:location',
-      socketPayload,
-    );
-
-    return socketPayload;
-  }
-
-  private calculateHaversineKm(
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number,
-  ): number {
-    const toRad = (v: number) => (v * Math.PI) / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
-
-  /**
-   * POST /collection-requests/:id/no-show (Rol: RECOLECTOR)
-   * Reporta inasistencia del hogar tras 10 min de espera en puerta (ARRIVED -> UNATTENDED).
-   * Aplica micro-compensación de 2 ECO tokens del hogar al recolector y penaliza reputación (-0.5).
-   */
   async reportNoShow(id: string, collectorId: string) {
-    const request = await this.prisma.collectionRequest.findUnique({
-      where: { id },
-      include: {
-        household: true,
-        collector: true,
-      },
-    });
-
-    if (!request) {
-      throw new NotFoundException('Solicitud de recolección no encontrada');
-    }
-
-    if (request.collectorId !== collectorId) {
-      throw new ForbiddenException('Solo el recolector asignado puede reportar inasistencia');
-    }
-
-    if (request.status !== RequestStatus.ARRIVED) {
-      throw new BadRequestException(
-        `Solo solicitudes en estado ARRIVED pueden reportarse como desatendidas (Estado actual: ${request.status})`,
-      );
-    }
-
-    // Validar ventana de espera de 5 min (300,000 ms) excepto en tests
-    if (request.arrivedAt && process.env.NODE_ENV !== 'test') {
-      const elapsedMs = Date.now() - new Date(request.arrivedAt).getTime();
-      if (elapsedMs < 5 * 60 * 1000) {
-        const remainingMin = Math.ceil((5 * 60 * 1000 - elapsedMs) / 60000);
-        throw new BadRequestException(
-          `Debes esperar al menos 5 minutos desde tu llegada antes de reportar inasistencia. Faltan aprox. ${remainingMin} minuto(s).`,
-        );
-      }
-    }
-
-    // 1. Liberar escrow del recolector y actualizar estado a UNATTENDED
-    const updated = await this.prisma.collectionRequest.update({
-      where: { id },
-      data: {
-        status: RequestStatus.UNATTENDED,
-        escrowLocked: 0,
-        noShowFeePen: 2.0,
-      },
-      include: {
-        household: { select: { id: true, email: true, name: true } },
-        collector: { select: { id: true, name: true, email: true } },
-      },
-    });
-
-    // 2. Penalización de reputación al hogar (-0.5 estrellas)
-    if (request.household) {
-      const currentScore = request.household.reputationScore ?? 5.0;
-      const newScore = Math.max(1.0, Number((currentScore - 0.5).toFixed(2)));
-      await this.prisma.user.update({
-        where: { id: request.household.id },
-        data: { reputationScore: newScore },
-      });
-    }
-
-    // 3. Micro-compensación de 2 ECO Tokens transferida al recolector
-    const householdUser = request.household;
-    const collectorUser = request.collector;
-    const encryptionKey =
-      (this.configService &&
-        (this.configService.get<string>('WALLET_ENCRYPTION_KEY') ||
-          this.configService.get<string>('ENCRYPTION_KEY'))) ||
-      (process.env.NODE_ENV === 'test' ? 'test_isolated_wallet_encryption_key_32c' : '');
-
-    const householdVault = householdUser
-      ? await this.prisma.walletVault.findUnique({
-          where: { userId: householdUser.id },
-        })
-      : null;
-
-    if (
-      householdVault?.encryptedPrivateKey &&
-      collectorUser?.walletAddress &&
-      encryptionKey
-    ) {
-      try {
-        const privKey = CryptoUtil.decrypt(householdVault.encryptedPrivateKey, encryptionKey);
-        await this.blockchainService.executeSubsidizedTransfer(
-          privKey,
-          collectorUser.walletAddress,
-          2.0,
-        );
-      } catch (err: any) {
-        this.logger.warn(`Micro-compensación no-show falló on-chain: ${err.message}`);
-      }
-    }
-
-    this.notificationsService
-      .sendPushNotification(
-        request.householdId,
-        'Visita desatendida',
-        'El recolector esperó en tu puerta y no hubo respuesta. Se aplicó una compensación de 2 ECO Tokens por traslado y penalización de reputación.',
-        { requestId: id, status: 'UNATTENDED' },
-      )
-      .catch(() => {});
-
-    this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
-    return this.stripPin(updated);
+    return this.lifecycle.reportNoShow(id, collectorId);
   }
 
-  /**
-   * POST /collection-requests/:id/reject-on-site (Rol: RECOLECTOR)
-   * Rechaza material en puerta por contaminación, materiales prohibidos o condiciones inseguras (ARRIVED -> REJECTED_ON_SITE).
-   * Libera escrow del recolector y registra evidencia fotográfica.
-   */
   async rejectOnSite(
     id: string,
     collectorId: string,
     reason: string,
     photoUrls?: string[],
   ) {
-    const request = await this.prisma.collectionRequest.findUnique({
-      where: { id },
-      include: {
-        household: { select: { id: true, email: true, name: true } },
-        collector: { select: { id: true, name: true } },
-      },
-    });
-
-    if (!request) {
-      throw new NotFoundException('Solicitud de recolección no encontrada');
-    }
-
-    if (request.collectorId !== collectorId) {
-      throw new ForbiddenException('Solo el recolector asignado puede reportar rechazo en sitio');
-    }
-
-    if (request.status !== RequestStatus.ARRIVED) {
-      throw new BadRequestException(
-        `Solo solicitudes en estado ARRIVED pueden ser rechazadas en sitio (Estado actual: ${request.status})`,
-      );
-    }
-
-    if (!reason || reason.trim().length < 5) {
-      throw new BadRequestException('Debes indicar un motivo de rechazo de al menos 5 caracteres');
-    }
-
-    const updated = await this.prisma.collectionRequest.update({
-      where: { id },
-      data: {
-        status: RequestStatus.REJECTED_ON_SITE,
-        escrowLocked: 0,
-        rejectionReason: reason,
-        rejectionPhotos: photoUrls && photoUrls.length > 0 ? (photoUrls as any) : undefined,
-      },
-      include: {
-        household: { select: { id: true, email: true, name: true } },
-        collector: { select: { id: true, name: true } },
-      },
-    });
-
-    this.notificationsService
-      .sendPushNotification(
-        request.householdId,
-        'Recolección rechazada en sitio',
-        `El recolector no pudo recibir los materiales: ${reason}. La orden ha sido cancelada sin penalidad.`,
-        { requestId: id, status: 'REJECTED_ON_SITE', reason },
-      )
-      .catch(() => {});
-
-    this.websocketsService.emitCollectionUpdated(this.stripPin(updated));
-    return this.stripPin(updated);
+    return this.lifecycle.rejectOnSite(id, collectorId, reason, photoUrls);
   }
 
-  /**
-   * Fallback de Subastas Flash de 15 minutos:
-   * Convierte automáticamente solicitudes en AUCTION_ACTIVE expiradas a PENDING (Modo Automático).
-   */
   async checkAuctionFallbacks() {
-    return this.auctionService.checkAuctionFallbacks();
+    return this.lifecycle.checkAuctionFallbacks();
   }
 
-  /**
-   * Helper para subida de imágenes a Pinata IPFS
-   */
-  private async uploadPhoto(
-    file:
-      | { originalname: string; buffer: Buffer; mimetype: string }
-      | Express.Multer.File,
-    _userId: string,
-  ): Promise<string> {
-    try {
-      const cid = await this.ipfsService.uploadFile(file);
-      return cid;
-    } catch {
-      return 'QmDummyPhotoHash';
-    }
+  // ==========================================
+  // VERIFICACIÓN EN DOMICILIO (Verification Subsystem)
+  // ==========================================
+
+  async verifyPin(id: string, collectorId: string, dto: VerifyPinDto) {
+    return this.verification.verifyPin(id, collectorId, dto);
+  }
+
+  // ==========================================
+  // TELEMETRÍA Y SEGUIMIENTO (Tracking Subsystem)
+  // ==========================================
+
+  async startRoute(id: string, collectorId: string) {
+    return this.tracking.startRoute(id, collectorId);
+  }
+
+  async reachDestination(id: string, collectorId: string) {
+    return this.tracking.reachDestination(id, collectorId);
+  }
+
+  async updateCollectorLocation(
+    id: string,
+    collectorId: string,
+    dto: CollectorTelemetryDto,
+  ) {
+    return this.tracking.updateCollectorLocation(id, collectorId, dto);
+  }
+
+  // ==========================================
+  // SUBASTAS Y TARIFARIOS (Auction Subsystem)
+  // ==========================================
+
+  async submitBid(centerId: string, requestId: string, dto: SubmitBidDto) {
+    return this.auctionService.submitBid(centerId, requestId, dto);
+  }
+
+  async withdrawBid(centerId: string, requestId: string, bidId?: string) {
+    return this.auctionService.withdrawBid(centerId, requestId, bidId);
+  }
+
+  async selectBid(householdId: string, requestId: string, dto: SelectBidDto) {
+    return this.auctionService.selectBid(householdId, requestId, dto);
+  }
+
+  async claimAutomatic(centerId: string, requestId: string) {
+    return this.auctionService.claimAutomatic(centerId, requestId);
+  }
+
+  // ==========================================
+  // CONSULTAS Y REPOSITORIO (Repository Subsystem)
+  // ==========================================
+
+  async findAll(user: { id: string; role: Role }, query: FindCollectionsQueryDto) {
+    return this.repo.findAll(user, query);
+  }
+
+  async findAvailable(
+    collectorId: string,
+    query: AvailableCollectionsQueryDto,
+  ) {
+    return this.repo.findAvailable(collectorId, query);
+  }
+
+  async findOne(id: string, userId: string, role: string) {
+    return this.repo.findOne(id, userId, role);
   }
 }

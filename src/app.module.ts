@@ -32,6 +32,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { RedisModule } from './redis/redis.module';
 import { HealthModule } from './health/health.module';
+import { CommonModule } from './common/common.module';
 import { AuditLogBufferService } from './common/services/audit-log-buffer.service';
 
 @Module({
@@ -39,6 +40,7 @@ import { AuditLogBufferService } from './common/services/audit-log-buffer.servic
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    CommonModule,
     RedisModule,
     HealthModule,
     BullModule.forRootAsync({

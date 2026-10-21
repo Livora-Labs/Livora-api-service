@@ -8,8 +8,11 @@ import { BlockchainModule } from '../blockchain/blockchain.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WebsocketsModule } from '../websockets/websockets.module';
 import { BLOCKCHAIN_QUEUE } from '../blockchain/blockchain.constants';
-
 import { MailService } from '../common/services/mail.service';
+
+// Patrones de diseño de pagos (PUCP Disoft - GoF Adapter & Presentation Separation)
+import { IzipayPaymentAdapter } from './adapters/izipay-payment.adapter';
+import { CheckoutViewRenderer } from './renderers/checkout-view.renderer';
 
 @Module({
   imports: [
@@ -22,7 +25,19 @@ import { MailService } from '../common/services/mail.service';
     }),
   ],
   controllers: [PaymentsController],
-  providers: [PaymentsService, IzipayClient, MailService],
-  exports: [PaymentsService, IzipayClient, MailService],
+  providers: [
+    PaymentsService,
+    IzipayClient,
+    MailService,
+    IzipayPaymentAdapter,
+    CheckoutViewRenderer,
+  ],
+  exports: [
+    PaymentsService,
+    IzipayClient,
+    MailService,
+    IzipayPaymentAdapter,
+    CheckoutViewRenderer,
+  ],
 })
 export class PaymentsModule {}

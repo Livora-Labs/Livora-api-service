@@ -1,49 +1,27 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { ComplaintStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../common/services/mail.service';
 import { CreateComplaintDto } from './dto/create-complaint.dto';
 import { UpdateComplaintStatusDto } from './dto/update-complaint-status.dto';
 import { TrackComplaintDto } from './dto/track-complaint.dto';
-import PDFDocument from 'pdfkit';
+import { ComplaintPdfKitAdapter } from './adapters/complaint-pdfkit.adapter';
+import { ComplaintPdfData } from './adapters/complaint-pdf.adapter.interface';
 
-// Datos del proveedor (fuente única de verdad)
-const PROVIDER_INFO = {
-  businessName: 'LIVORA S.A.C.',
-  ruc: '20608912345',
-  address: 'Av. Javier Prado Este 4200, Surco, Lima, Perú',
-  web: 'https://livora.org',
-  email: 'privacidad@livora.pe',
-} as const;
-
-export interface ComplaintPdfData {
-  correlativeNumber: string;
-  fullName: string;
-  documentType: string;
-  documentNumber: string;
-  phone: string;
-  email: string;
-  address: string;
-  isMinor?: boolean | null;
-  representativeName?: string | null;
-  representativeDoc?: string | null;
-  goodType: string;
-  goodDescription: string;
-  amount?: number | any | null;
-  claimType: string;
-  claimDetail: string;
-  consumerRequest: string;
-  createdAt?: Date | string | null;
-}
+export { ComplaintPdfData };
 
 @Injectable()
 export class ComplaintsService {
   private readonly logger = new Logger(ComplaintsService.name);
+  private readonly adapter: ComplaintPdfKitAdapter;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
-  ) {}
+    @Optional() pdfAdapter?: ComplaintPdfKitAdapter,
+  ) {
+    this.adapter = pdfAdapter ?? new ComplaintPdfKitAdapter();
+  }
 
   /**
    * Genera el número correlativo anual único de forma atómica usando la tabla
@@ -144,174 +122,12 @@ export class ComplaintsService {
     return this.prisma.$transaction(async (tx) => executeIncrement(tx));
   }
 
-  /**
-   * Genera la Hoja de Reclamación en PDF en memoria según estándares de Indecopi.
+/**
+   * Genera la Hoja de Reclamación en PDF en memoria según estándares de Indecopi
+   * delegando en el adaptador desacoplado (GoF Adapter Pattern).
    */
   async generateComplaintPdf(complaint: ComplaintPdfData): Promise<Buffer> {
-    return new Promise<Buffer>((resolve, reject) => {
-      try {
-        const doc = new PDFDocument({ margin: 40, size: 'A4', compress: false });
-        const chunks: Buffer[] = [];
-
-        doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-        doc.on('end', () => resolve(Buffer.concat(chunks)));
-        doc.on('error', (err: Error) => reject(err));
-
-        // Encabezado institucional
-        doc
-          .fillColor('#2E7D32')
-          .fontSize(16)
-          .text('LIVORA - LIBRO DE RECLAMACIONES', { align: 'center' });
-        doc
-          .fontSize(12)
-          .fillColor('#333333')
-          .text('HOJA DE RECLAMACIÓN VIRTUAL', { align: 'center' });
-        doc.moveDown(0.6);
-
-        // Banner correlativo y fecha
-        const dateStr = complaint.createdAt
-          ? new Date(complaint.createdAt).toLocaleString('es-PE', {
-              timeZone: 'America/Lima',
-            })
-          : new Date().toLocaleString('es-PE', { timeZone: 'America/Lima' });
-
-        doc.rect(40, doc.y, 515, 24).fill('#E8F5E9');
-        doc
-          .fillColor('#1B5E20')
-          .fontSize(10)
-          .text(
-            `N° CORRELATIVO: ${complaint.correlativeNumber}   |   FECHA: ${dateStr}`,
-            50,
-            doc.y - 18,
-          );
-        doc.moveDown(1);
-
-        // 1. Identificación del Proveedor
-        doc
-          .fillColor('#2E7D32')
-          .fontSize(11)
-          .text('1. IDENTIFICACIÓN DEL PROVEEDOR RECLAMADO');
-        doc
-          .strokeColor('#CCCCCC')
-          .lineWidth(0.5)
-          .moveTo(40, doc.y)
-          .lineTo(555, doc.y)
-          .stroke();
-        doc.moveDown(0.4);
-        doc.fillColor('#333333').fontSize(9);
-        doc.text(
-          `Razón Social: ${PROVIDER_INFO.businessName}                     RUC: ${PROVIDER_INFO.ruc}`,
-        );
-        doc.text(`Dirección: ${PROVIDER_INFO.address}`);
-        doc.text(
-          `Portal Web: ${PROVIDER_INFO.web}                     Email: ${PROVIDER_INFO.email}`,
-        );
-        doc.moveDown(0.8);
-
-        // 2. Identificación del Consumidor Reclamante
-        doc
-          .fillColor('#2E7D32')
-          .fontSize(11)
-          .text('2. IDENTIFICACIÓN DEL CONSUMIDOR RECLAMANTE');
-        doc
-          .strokeColor('#CCCCCC')
-          .lineWidth(0.5)
-          .moveTo(40, doc.y)
-          .lineTo(555, doc.y)
-          .stroke();
-        doc.moveDown(0.4);
-        doc.fillColor('#333333').fontSize(9);
-        doc.text(`Nombre Completo / Razón Social: ${complaint.fullName}`);
-        doc.text(
-          `Documento de Identidad: ${complaint.documentType} ${complaint.documentNumber}          Teléfono: ${complaint.phone}`,
-        );
-        doc.text(`Email de Notificación: ${complaint.email}`);
-        doc.text(`Domicilio: ${complaint.address}`);
-        if (complaint.isMinor) {
-          const repInfo = complaint.representativeName || 'Padre/Madre/Tutor';
-          const repDoc = complaint.representativeDoc
-            ? ` — Doc. Identidad: ${complaint.representativeDoc}`
-            : '';
-          doc.text(
-            `Condición: Menor de edad          Representante Legal: ${repInfo}${repDoc}`,
-          );
-        }
-        doc.moveDown(0.8);
-
-        // 3. Identificación del Bien Contratado
-        doc
-          .fillColor('#2E7D32')
-          .fontSize(11)
-          .text('3. IDENTIFICACIÓN DEL BIEN CONTRATADO');
-        doc
-          .strokeColor('#CCCCCC')
-          .lineWidth(0.5)
-          .moveTo(40, doc.y)
-          .lineTo(555, doc.y)
-          .stroke();
-        doc.moveDown(0.4);
-        doc.fillColor('#333333').fontSize(9);
-        const amountDisplay =
-          complaint.amount !== null && complaint.amount !== undefined
-            ? `S/ ${Number(complaint.amount).toFixed(2)}`
-            : 'No especificado / Sin reclamo monetario';
-        doc.text(
-          `Tipo de Bien: ${complaint.goodType}          Monto Reclamado: ${amountDisplay}`,
-        );
-        doc.text(
-          `Descripción del Bien / Servicio: ${complaint.goodDescription}`,
-        );
-        doc.moveDown(0.8);
-
-        // 4. Detalle de la Reclamación y Pedido
-        doc
-          .fillColor('#2E7D32')
-          .fontSize(11)
-          .text(`4. DETALLE DE LA RECLAMACIÓN (${complaint.claimType})`);
-        doc
-          .strokeColor('#CCCCCC')
-          .lineWidth(0.5)
-          .moveTo(40, doc.y)
-          .lineTo(555, doc.y)
-          .stroke();
-        doc.moveDown(0.4);
-        doc.fillColor('#333333').fontSize(9);
-        doc.text(`Tipo de Disconformidad: ${complaint.claimType}`);
-        doc.moveDown(0.2);
-        doc.text('Detalle de los Hechos:', { underline: true });
-        doc.fillColor('#424242').text(complaint.claimDetail, { indent: 10 });
-        doc.moveDown(0.4);
-        doc
-          .fillColor('#333333')
-          .text('Pedido Concreto del Consumidor:', { underline: true });
-        doc
-          .fillColor('#424242')
-          .text(complaint.consumerRequest, { indent: 10 });
-        doc.moveDown(1);
-
-        // 5. Marco Legal y Advertencia Indecopi
-        doc.rect(40, doc.y, 515, 75).fill('#F5F5F5');
-        doc.fillColor('#37474F').fontSize(8);
-        doc.text(
-          '* RECLAMO: Disconformidad relacionada a los productos o servicios comercializados.',
-          45,
-          doc.y - 70,
-        );
-        doc.text(
-          '* QUEJA: Disconformidad no relacionada a los productos o servicios; o malestar o descontento respecto a la atención al público.',
-        );
-        doc.text(
-          '* PLAZO LEGAL DE RESPUESTA: Conforme a la Ley N° 29571 (Código de Protección y Defensa del Consumidor) y Ley N° 32495, el proveedor deberá dar respuesta al reclamo o queja en un plazo máximo de quince (15) días hábiles improrrogables.',
-        );
-        doc.text(
-          '* La formulación del reclamo no impide acudir a otras vías de solución de controversias ni es requisito previo para interponer una denuncia ante INDECOPI.',
-        );
-
-        doc.end();
-      } catch (err: unknown) {
-        reject(err instanceof Error ? err : new Error(String(err)));
-      }
-    });
+    return this.adapter.generatePdf(complaint);
   }
 
   /**

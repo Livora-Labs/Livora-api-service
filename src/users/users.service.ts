@@ -18,17 +18,25 @@ import * as bcrypt from 'bcryptjs';
 import { WalletsService } from '../wallets/wallets.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
+import { UserCacheProxy } from './proxies/user-cache.proxy';
+import { UsersRepository } from './repositories/users.repository';
 
 @Injectable()
 export class UsersService implements OnModuleInit {
   private readonly logger = new Logger(UsersService.name);
+  private readonly cacheProxy: UserCacheProxy;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     @Optional()
     private readonly walletsService?: WalletsService,
-  ) {}
+    @Optional()
+    userCacheProxy?: UserCacheProxy,
+  ) {
+    this.cacheProxy =
+      userCacheProxy ?? new UserCacheProxy(new UsersRepository(this.prisma));
+  }
 
   onModuleInit() {
     this.getMasterEncryptionKey();
@@ -70,32 +78,11 @@ export class UsersService implements OnModuleInit {
     });
   }
 
-  private userCache = new Map<string, { user: User; expires: number }>();
-
+  /**
+   * Consulta el usuario por ID delegando en el Proxy de Caché transparente (GoF Proxy Pattern)
+   */
   async findById(id: string): Promise<User | null> {
-    if (process.env.NODE_ENV !== 'test') {
-      const now = Date.now();
-      const cached = this.userCache.get(id);
-      if (cached && cached.expires > now) {
-        return cached.user;
-      }
-    }
-
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-    });
-
-    if (user && process.env.NODE_ENV !== 'test') {
-      const now = Date.now();
-      this.userCache.set(id, { user, expires: now + 10000 });
-      if (this.userCache.size > 2000) {
-        for (const [k, v] of this.userCache.entries()) {
-          if (v.expires <= now) this.userCache.delete(k);
-        }
-      }
-    }
-
-    return user;
+    return this.cacheProxy.findById(id);
   }
 
   async autoProvisionFromAuth(userOrId: string | any): Promise<User | null> {
@@ -174,10 +161,6 @@ export class UsersService implements OnModuleInit {
       return user;
     });
 
-    if (process.env.NODE_ENV !== 'test') {
-      this.userCache.set(createdUser.id, { user: createdUser, expires: Date.now() + 10000 });
-    }
-
     // Retornar usuario despojando campos sensibles
     const { encryptedPrivateKey: _, ...userWithoutSecrets } = createdUser;
     return userWithoutSecrets;
@@ -185,10 +168,12 @@ export class UsersService implements OnModuleInit {
 
   async updateFcmToken(id: string, fcmToken: string): Promise<User> {
     await this.registerDeviceToken(id, { token: fcmToken }).catch(() => {});
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: { fcmToken },
     });
+    this.cacheProxy.evictCache(id);
+    return updated;
   }
 
   async cancelAccountARCO(
@@ -274,6 +259,8 @@ export class UsersService implements OnModuleInit {
       });
     });
 
+    this.cacheProxy.evictCache(id);
+
     return {
       success: true,
       message:
@@ -335,7 +322,7 @@ export class UsersService implements OnModuleInit {
         .catch(() => {});
     }
 
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: {
         name: dto.name !== undefined ? dto.name : undefined,
@@ -346,6 +333,9 @@ export class UsersService implements OnModuleInit {
         marketingAccepted: dto.marketingAccepted !== undefined ? dto.marketingAccepted : undefined,
       },
     });
+
+    this.cacheProxy.evictCache(id);
+    return updated;
   }
 
   async changePassword(id: string, newPassword: string, currentPassword?: string) {

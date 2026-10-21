@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
@@ -14,6 +15,7 @@ import { MailService } from '../common/services/mail.service';
 import { PasswordService } from './services/password.service';
 import { TokenService } from './services/token.service';
 import { SessionService } from './services/session.service';
+import { OtpService } from './services/otp.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
@@ -23,10 +25,11 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import * as crypto from 'crypto';
-import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class AuthService {
+  private readonly otpService: OtpService;
+
   constructor(
     private readonly usersService: UsersService,
     private readonly redisService: RedisService,
@@ -35,7 +38,10 @@ export class AuthService {
     private readonly passwordService: PasswordService,
     private readonly tokenService: TokenService,
     private readonly sessionService: SessionService,
-  ) {}
+    @Optional() otpService?: OtpService,
+  ) {
+    this.otpService = otpService ?? new OtpService(this.redisService);
+  }
 
   async register(registerDto: RegisterDto) {
     // 0. Prohibir autoregistro público del rol ADMINISTRADOR
@@ -53,33 +59,10 @@ export class AuthService {
       );
     }
 
-    // 2. Generar código OTP criptográfico seguro de 6 dígitos
-    const code = crypto.randomInt(100000, 999999).toString();
-    const otpHash = await bcrypt.hash(code, 10);
+    // 2. Generar código OTP y persistir en Redis delegando en OtpService
+    const code = await this.otpService.generateAndStoreRegistrationOtp(registerDto);
 
-    const payloadKey = `auth:register:payload:${registerDto.email}`;
-    const codeKey = `auth:otp:code:${registerDto.email}`;
-    const cooldownKey = `auth:otp:cooldown:${registerDto.email}`;
-    const attemptsKey = `auth:otp:attempts:${registerDto.email}`;
-
-    // 3. Guardar en Redis en ambos esquemas de claves para compatibilidad total
-    const redisKey = `otp:register:${registerDto.email}`;
-    const shaHash = crypto.createHash('sha256').update(code).digest('hex');
-    const payload = {
-      registerDto,
-      otpHash: shaHash,
-      otpExpiresAt: Date.now() + 10 * 60 * 1000,
-    };
-    await this.redisService.set(redisKey, JSON.stringify(payload), 1800);
-    await this.redisService.del(`otp:attempts:${registerDto.email}`);
-    await this.redisService.set(`otp:cooldown:${registerDto.email}`, '1', 60);
-
-    await this.redisService.set(payloadKey, JSON.stringify(registerDto), 1800);
-    await this.redisService.set(codeKey, otpHash, 600);
-    await this.redisService.del(attemptsKey);
-    await this.redisService.set(cooldownKey, '1', 60);
-
-    // 4. Enviar correo electrónico
+    // 3. Enviar correo electrónico
     await this.mailService.sendOtpEmail(registerDto.email, code);
 
     return {
@@ -90,129 +73,23 @@ export class AuthService {
 
   async verifyEmail(verifyEmailDto: VerifyEmailDto) {
     const { email, code } = verifyEmailDto;
-    const payloadKey = `auth:register:payload:${email}`;
-    const codeKey = `auth:otp:code:${email}`;
-    const attemptsKeyLocal = `auth:otp:attempts:${email}`;
 
-    const redisKey = `otp:register:${email}`;
-    const attemptsKeyColleague = `otp:attempts:${email}`;
+    // 1. Validar OTP en Redis mediante OtpService
+    const { registerDto } = await this.otpService.verifyRegistrationOtp(
+      email,
+      code,
+    );
 
-    // 1. Obtener payload temporal de registro desde Redis
-    let rawPayload = await this.redisService.get(payloadKey);
-    let parsed: any = null;
-    let isColleagueKey = false;
-
-    if (rawPayload) {
-      parsed = JSON.parse(rawPayload);
-    } else {
-      rawPayload = await this.redisService.get(redisKey);
-      if (rawPayload) {
-        parsed = JSON.parse(rawPayload);
-        isColleagueKey = true;
-      }
-    }
-
-    const isReviewerBypass =
-      email.toLowerCase() === 'playstore.review@livora.pe' && code === '123456';
-
-    if (!rawPayload && !isReviewerBypass) {
-      throw new BadRequestException('El código OTP ha expirado o no existe');
-    }
-
-    const registerDto: RegisterDto = parsed
-      ? parsed.registerDto || parsed
-      : {
-          email: 'playstore.review@livora.pe',
-          password: 'LivoraReview2026!',
-          role: Role.HOGAR,
-          termsAccepted: true,
-          privacyAccepted: true,
-        };
-
-    // 2. Obtener hash del código OTP
-    let storedOtpHash = '';
-    let otpExpiresAt: number | undefined = undefined;
-
-    if (isColleagueKey) {
-      storedOtpHash = parsed.otpHash;
-      otpExpiresAt = parsed.otpExpiresAt;
-    } else if (rawPayload) {
-      storedOtpHash = (await this.redisService.get(codeKey)) || '';
-    }
-
-    if (!storedOtpHash && !isReviewerBypass) {
-      throw new BadRequestException('El código OTP ha expirado o no existe');
-    }
-
-    // 3. Validar límite de 5 intentos fallidos
-    const attemptsKey = isColleagueKey ? attemptsKeyColleague : attemptsKeyLocal;
-    const attemptsRaw = await this.redisService.get(attemptsKey);
-    const attempts = attemptsRaw ? parseInt(attemptsRaw, 10) : 0;
-    if (attempts >= 5 && !isReviewerBypass) {
-      if (isColleagueKey) {
-        await this.redisService.del(redisKey);
-        await this.redisService.del(attemptsKey);
-      } else {
-        await this.redisService.del(codeKey);
-      }
-      throw new BadRequestException(
-        'Demasiados intentos fallidos. El código OTP ha sido bloqueado.',
-      );
-    }
-
-    // 3.5 Expiración del código
-    if (isColleagueKey && otpExpiresAt && Date.now() > otpExpiresAt && !isReviewerBypass) {
-      throw new BadRequestException('El código ha expirado. Solicita un reenvío.');
-    }
-
-    // 4. Validar el OTP hasheado
-    let isValid = isReviewerBypass;
-    if (!isValid) {
-      try {
-        isValid = await bcrypt.compare(code, storedOtpHash);
-      } catch {
-        isValid = false;
-      }
-      const shaHash = crypto.createHash('sha256').update(code).digest('hex');
-      if (!isValid && storedOtpHash === shaHash) {
-        isValid = true;
-      }
-    }
-
-    if (!isValid) {
-      const newAttempts = await this.redisService.incr(attemptsKey);
-      if (isColleagueKey) {
-        await this.redisService.expire(attemptsKey, 1800);
-      } else {
-        const remainingTtl = await this.redisService.ttl(payloadKey);
-        if (remainingTtl > 0) {
-          await this.redisService.expire(attemptsKey, remainingTtl);
-        }
-      }
-
-      if (newAttempts >= 5) {
-        if (isColleagueKey) {
-          await this.redisService.del(redisKey);
-        } else {
-          await this.redisService.del(codeKey);
-        }
-        throw new BadRequestException(
-          'Demasiados intentos fallidos. El código OTP ha sido bloqueado.',
-        );
-      }
-      throw new BadRequestException('El código de verificación es incorrecto');
-    }
-
-    // 5. Generar UUID criptográfico para el usuario
+    // 2. Generar UUID criptográfico para el usuario
     const userId = crypto.randomUUID();
 
-    // 6. Hashear la contraseña con Bcrypt (12 rondas OWASP)
+    // 3. Hashear la contraseña con Bcrypt (12 rondas OWASP)
     const passwordHash = await this.passwordService.hash(registerDto.password);
 
-    // 7. Crear usuario y credenciales en PostgreSQL
+    // 4. Crear usuario y credenciales en PostgreSQL
     const user = await this.usersService.create(userId, registerDto, passwordHash);
 
-    // 8. Registrar auditoría de consentimiento legal (Ley 29733)
+    // 5. Registrar auditoría de consentimiento legal (Ley 29733)
     const termsVersion = registerDto.termsVersion || '1.0.0';
     const privacyVersion = registerDto.privacyVersion || '1.0.0';
     const marketingAccepted = registerDto.marketingAccepted ?? false;
@@ -238,7 +115,7 @@ export class AuthService {
       },
     });
 
-    // 9. Emitir JWT de acceso y Refresh Token rotativo en Redis
+    // 6. Emitir JWT de acceso y Refresh Token rotativo en Redis
     const accessToken = this.tokenService.generateAccessToken({
       sub: user.id,
       email: user.email,
@@ -250,15 +127,8 @@ export class AuthService {
       role: user.role,
     });
 
-    // 10. Limpiar claves asociadas en Redis
-    await this.redisService.del(payloadKey);
-    await this.redisService.del(codeKey);
-    await this.redisService.del(attemptsKeyLocal);
-    await this.redisService.del(`auth:otp:cooldown:${email}`);
-
-    await this.redisService.del(redisKey);
-    await this.redisService.del(attemptsKeyColleague);
-    await this.redisService.del(`otp:cooldown:${email}`);
+    // 7. Limpiar claves asociadas en Redis mediante OtpService
+    await this.otpService.clearRegistrationOtp(email);
 
     return {
       accessToken,
@@ -280,67 +150,11 @@ export class AuthService {
 
   async resendOtp(resendOtpDto: ResendOtpDto) {
     const { email } = resendOtpDto;
-    const payloadKeyLocal = `auth:register:payload:${email}`;
-    const payloadKeyColleague = `otp:register:${email}`;
 
-    // 1. Validar cooldown de 60s
-    const cooldownKeyLocal = `auth:otp:cooldown:${email}`;
-    const cooldownKeyColleague = `otp:cooldown:${email}`;
-    const hasCooldown =
-      (await this.redisService.get(cooldownKeyLocal)) ||
-      (await this.redisService.get(cooldownKeyColleague));
-    if (hasCooldown) {
-      throw new BadRequestException(
-        'Debes esperar 60 segundos antes de reenviar otro código',
-      );
-    }
+    // 1. Delegar validación de cooldown y regeneración en OtpService
+    const code = await this.otpService.resendRegistrationOtp(email);
 
-    // 2. Obtener registro temporal y validar TTL
-    let rawPayload = await this.redisService.get(payloadKeyLocal);
-    let parsed: any = null;
-    let isColleagueKey = false;
-    let remainingTtl = 0;
-
-    if (rawPayload) {
-      parsed = JSON.parse(rawPayload);
-      remainingTtl = await this.redisService.ttl(payloadKeyLocal);
-    } else {
-      rawPayload = await this.redisService.get(payloadKeyColleague);
-      if (rawPayload) {
-        parsed = JSON.parse(rawPayload);
-        isColleagueKey = true;
-        remainingTtl = await this.redisService.ttl(payloadKeyColleague);
-      }
-    }
-
-    if (!rawPayload || remainingTtl <= 0) {
-      throw new BadRequestException(
-        'El registro temporal no existe o ha expirado. Por favor regístrate de nuevo.',
-      );
-    }
-
-    const registerDto: RegisterDto = parsed.registerDto || parsed;
-
-    // 3. Generar nuevo OTP
-    const code = crypto.randomInt(100000, 999999).toString();
-    const bcryptOtpHash = await bcrypt.hash(code, 10);
-    const shaOtpHash = crypto.createHash('sha256').update(code).digest('hex');
-
-    // 4. Actualizar en Redis
-    await this.redisService.set(`auth:otp:code:${email}`, bcryptOtpHash, remainingTtl);
-    await this.redisService.del(`auth:otp:attempts:${email}`);
-    await this.redisService.set(cooldownKeyLocal, '1', 60);
-
-    const colleaguePayload = {
-      registerDto,
-      otpHash: shaOtpHash,
-      otpExpiresAt: Date.now() + 10 * 60 * 1000,
-    };
-    await this.redisService.set(payloadKeyColleague, JSON.stringify(colleaguePayload), 1800);
-    await this.redisService.del(`otp:attempts:${email}`);
-    await this.redisService.set(cooldownKeyColleague, '1', 60);
-
-    // 5. Enviar nuevo correo
+    // 2. Enviar nuevo correo
     await this.mailService.sendOtpEmail(email, code);
 
     return {

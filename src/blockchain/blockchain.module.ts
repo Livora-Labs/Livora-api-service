@@ -10,6 +10,7 @@ import { IpfsService } from './services/ipfs.service';
 import { BlockchainService } from './services/blockchain.service';
 import { StellarSequenceManager } from './services/stellar-sequence-manager.service';
 import { StellarRpcManagerService } from './services/stellar-rpc-manager.service';
+import { BlockchainFacade } from './facades/blockchain.facade';
 import { BLOCKCHAIN_QUEUE, BLOCKCHAIN_DLQ } from './blockchain.constants';
 
 @Module({
@@ -45,12 +46,14 @@ import { BLOCKCHAIN_QUEUE, BLOCKCHAIN_DLQ } from './blockchain.constants';
   providers: [
     IpfsService,
     BlockchainService,
+    BlockchainFacade,
     StellarSequenceManager,
     StellarRpcManagerService,
   ],
   exports: [
     IpfsService,
     BlockchainService,
+    BlockchainFacade,
     StellarSequenceManager,
     StellarRpcManagerService,
   ],
